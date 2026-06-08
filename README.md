@@ -39,4 +39,6 @@ Point an existing HTTP JSON client at `http://localhost:8787` and set `target.up
 
 ## Current Scope
 
-See `docs/current/mvp-0.1-implementation-scope.md`.
+0.1 quickstart scope is described in `docs/current/mvp-0.1-implementation-scope.md`.
+
+0.2 adds local TokenVault, signed policy bundle commands, plugin manifest validation, and an MCP stdio JSON-RPC line filter skeleton. See `docs/current/release-0.2-implementation-scope.md`.

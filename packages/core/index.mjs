@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 const NO_ENFORCE_MODES = new Set(["dry-run", "report-only"]);
 
-export function createAicel({ filterEngine, policyEngine, cryptoProvider, auditSink, mode = "dry-run" }) {
+export function createAicel({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run" }) {
   if (!filterEngine || !policyEngine || !cryptoProvider || !auditSink) {
     throw new Error("AICEL requires filterEngine, policyEngine, cryptoProvider, and auditSink");
   }
@@ -22,6 +22,7 @@ export function createAicel({ filterEngine, policyEngine, cryptoProvider, auditS
     const protectedPayload = blocked ? null : await transformPayload(payload, detections, decisions, {
       context,
       cryptoProvider,
+      tokenVault,
       enforced
     });
 
@@ -105,7 +106,7 @@ export function summarize(detections, decisions) {
   };
 }
 
-async function transformPayload(payload, detections, decisions, { context, cryptoProvider, enforced }) {
+async function transformPayload(payload, detections, decisions, { context, cryptoProvider, tokenVault, enforced }) {
   if (!enforced || detections.length === 0) {
     return structuredClone(payload);
   }
@@ -126,14 +127,14 @@ async function transformPayload(payload, detections, decisions, { context, crypt
     if (typeof original !== "string") {
       continue;
     }
-    const transformed = await transformString(original, items, { context, cryptoProvider });
+    const transformed = await transformString(original, items, { context, cryptoProvider, tokenVault });
     setByPath(output, path, transformed);
   }
 
   return output;
 }
 
-async function transformString(value, items, { context, cryptoProvider }) {
+async function transformString(value, items, { context, cryptoProvider, tokenVault }) {
   const sorted = items
     .filter(({ decision }) => decision.action !== "allow" && decision.action !== "block")
     .sort((left, right) => left.detection.start - right.detection.start);
@@ -148,7 +149,7 @@ async function transformString(value, items, { context, cryptoProvider }) {
 
     output += value.slice(cursor, detection.start);
     const segment = value.slice(detection.start, detection.end);
-    output += await replacementFor(segment, detection, decision, { context, cryptoProvider });
+    output += await replacementFor(segment, detection, decision, { context, cryptoProvider, tokenVault });
     cursor = detection.end;
   }
 
@@ -156,13 +157,25 @@ async function transformString(value, items, { context, cryptoProvider }) {
   return output;
 }
 
-async function replacementFor(segment, detection, decision, { context, cryptoProvider }) {
+async function replacementFor(segment, detection, decision, { context, cryptoProvider, tokenVault }) {
   switch (decision.action) {
     case "redact":
       return `[REDACTED:${detection.type}]`;
     case "mask":
       return maskSensitive(segment);
     case "tokenize":
+      if (tokenVault) {
+        const result = await tokenVault.tokenize({
+          plaintext: segment,
+          type: detection.type,
+          context,
+          metadata: {
+            path: detection.pathText,
+            ruleId: detection.ruleId
+          }
+        });
+        return `[TOKEN:${result.token}]`;
+      }
       return `[TOKEN:${detection.type}:${shortHash(segment)}]`;
     case "encrypt": {
       const envelope = await cryptoProvider.encrypt({

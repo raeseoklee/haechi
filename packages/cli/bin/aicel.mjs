@@ -2,6 +2,9 @@
 import { readFile } from "node:fs/promises";
 import { readAuditSummary } from "../../audit/index.mjs";
 import { createAicelProxy } from "../../proxy/index.mjs";
+import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
+import { validatePluginManifestFile } from "../../plugin/index.mjs";
+import { runMcpStdioFilter } from "../../mcp-stdio/index.mjs";
 import { DEFAULT_CONFIG_PATH, createRuntime, loadConfig, writeDefaultConfig } from "../runtime.mjs";
 
 const [command, ...argv] = process.argv.slice(2);
@@ -19,6 +22,24 @@ try {
       break;
     case "proxy":
       await proxyCommand(argv);
+      break;
+    case "policy-sign":
+      await policySignCommand(argv);
+      break;
+    case "policy-verify":
+      await policyVerifyCommand(argv);
+      break;
+    case "token-reveal":
+      await tokenRevealCommand(argv);
+      break;
+    case "token-purge":
+      await tokenPurgeCommand(argv);
+      break;
+    case "plugin-validate":
+      await pluginValidateCommand(argv);
+      break;
+    case "mcp-stdio":
+      await mcpStdioCommand(argv);
       break;
     case "help":
     case "--help":
@@ -109,6 +130,102 @@ async function proxyCommand(argv) {
   }
 }
 
+async function policySignCommand(argv) {
+  const [policyPath, ...rest] = argv;
+  if (!policyPath || policyPath.startsWith("--")) {
+    throw new Error("policy-sign requires a policy JSON file path");
+  }
+  const options = parseOptions(rest);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const outPath = options.out ?? "policy.bundle.json";
+  const bundle = await signPolicyBundleFile({
+    policyPath,
+    keyFile: config.keys.keyFile,
+    outPath
+  });
+  writeJson({
+    ok: true,
+    command: "policy-sign",
+    outPath,
+    kid: bundle.kid,
+    signedAt: bundle.signedAt
+  });
+}
+
+async function policyVerifyCommand(argv) {
+  const [bundlePath, ...rest] = argv;
+  if (!bundlePath || bundlePath.startsWith("--")) {
+    throw new Error("policy-verify requires a policy bundle JSON file path");
+  }
+  const options = parseOptions(rest);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  writeJson({
+    ok: true,
+    command: "policy-verify",
+    bundlePath,
+    result: await verifyPolicyBundleFile({
+      bundlePath,
+      keyFile: config.keys.keyFile
+    })
+  });
+}
+
+async function tokenRevealCommand(argv) {
+  const [token, ...rest] = argv;
+  if (!token || token.startsWith("--")) {
+    throw new Error("token-reveal requires a token");
+  }
+  const options = parseOptions(rest);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const runtime = createRuntime(config);
+  const result = await runtime.tokenVault.reveal({ token });
+  writeJson({
+    ok: true,
+    token: result.token,
+    type: result.type,
+    plaintext: result.plaintext
+  });
+}
+
+async function tokenPurgeCommand(argv) {
+  const [token, ...rest] = argv;
+  if (!token || token.startsWith("--")) {
+    throw new Error("token-purge requires a token");
+  }
+  const options = parseOptions(rest);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const runtime = createRuntime(config);
+  writeJson({
+    ok: true,
+    command: "token-purge",
+    result: await runtime.tokenVault.purge({ token })
+  });
+}
+
+async function pluginValidateCommand(argv) {
+  const [manifestPath] = argv;
+  if (!manifestPath || manifestPath.startsWith("--")) {
+    throw new Error("plugin-validate requires a plugin manifest JSON file path");
+  }
+  const result = await validatePluginManifestFile(manifestPath);
+  writeJson({
+    ok: result.valid,
+    command: "plugin-validate",
+    manifestPath,
+    result
+  });
+  if (!result.valid) {
+    process.exitCode = 2;
+  }
+}
+
+async function mcpStdioCommand(argv) {
+  const options = parseOptions(argv);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const runtime = createRuntime(config);
+  await runMcpStdioFilter({ runtime });
+}
+
 function parseOptions(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -140,6 +257,12 @@ Usage:
   aicel protect <input.json> [--config aicel.config.json]
   aicel report [--audit .aicel/audit.jsonl]
   aicel proxy [--config aicel.config.json] [--host 127.0.0.1] [--port 8787]
+  aicel policy-sign <policy.json> [--config aicel.config.json] [--out policy.bundle.json]
+  aicel policy-verify <policy.bundle.json> [--config aicel.config.json]
+  aicel token-reveal <token> [--config aicel.config.json]
+  aicel token-purge <token> [--config aicel.config.json]
+  aicel plugin-validate <plugin-manifest.json>
+  aicel mcp-stdio [--config aicel.config.json]
 
 The default policy mode is dry-run. Change policy.mode to enforce to mutate or block payloads.
 `);

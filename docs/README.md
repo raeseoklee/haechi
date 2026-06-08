@@ -9,6 +9,7 @@
 - `docs/current/expert-gap-review-ai-llm-mcp-encryption.md`: 전문가 병렬 검토 기반 누락 요구사항 및 보강 백로그
 - `docs/current/open-source-modular-architecture.md`: SaaS가 아닌 OSS/self-hosted 모듈형 아키텍처와 교체 가능한 provider/plugin 경계
 - `docs/current/mvp-0.1-implementation-scope.md`: MVP 0.1 구현 범위, 제외 범위, quickstart 완료 기준
+- `docs/current/release-0.2-implementation-scope.md`: 0.2 TokenVault, signed policy, plugin manifest, MCP stdio 구현 범위
 
 ## Archive
 

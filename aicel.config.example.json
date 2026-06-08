@@ -26,5 +26,9 @@
   "audit": {
     "sink": "jsonl",
     "path": ".aicel/audit.jsonl"
+  },
+  "tokenVault": {
+    "provider": "local",
+    "path": ".aicel/token-vault.json"
   }
 }

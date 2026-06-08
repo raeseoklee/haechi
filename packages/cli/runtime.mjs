@@ -5,6 +5,8 @@ import { createDefaultFilterEngine } from "../filter/index.mjs";
 import { buildPolicy, createPolicyEngine } from "../policy/index.mjs";
 import { createLocalCryptoProvider, initLocalKeyFile } from "../crypto/index.mjs";
 import { createJsonlAuditSink } from "../audit/index.mjs";
+import { createLocalTokenVault } from "../token-vault/index.mjs";
+import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 
 export const DEFAULT_CONFIG_PATH = "aicel.config.json";
 
@@ -33,6 +35,10 @@ export function defaultConfig() {
     audit: {
       sink: "jsonl",
       path: ".aicel/audit.jsonl"
+    },
+    tokenVault: {
+      provider: "local",
+      path: ".aicel/token-vault.json"
     }
   };
 }
@@ -65,18 +71,32 @@ export async function writeDefaultConfig(configPath = DEFAULT_CONFIG_PATH, { for
 export function createRuntime(config) {
   const normalized = normalizeConfig(config);
   const cryptoProvider = createLocalCryptoProvider({ keyFile: normalized.keys.keyFile });
+  const tokenVault = createLocalTokenVault({ path: normalized.tokenVault.path, cryptoProvider });
+  const policySource = normalized.policy.bundlePath
+    ? {
+      ...loadVerifiedPolicyBundleFileSync({
+        bundlePath: normalized.policy.bundlePath,
+        keyFile: normalized.keys.keyFile
+      }).policy,
+      mode: normalized.policy.mode ?? normalized.mode
+    }
+    : {
+      ...normalized.policy,
+      mode: normalized.policy.mode ?? normalized.mode
+    };
   const policy = buildPolicy({
-    ...normalized.policy,
-    mode: normalized.policy.mode ?? normalized.mode
+    ...policySource
   });
 
   return {
     config: normalized,
+    tokenVault,
     aicel: createAicel({
       mode: normalized.mode,
       filterEngine: createDefaultFilterEngine(normalized.filters),
       policyEngine: createPolicyEngine(policy),
       cryptoProvider,
+      tokenVault,
       auditSink: createJsonlAuditSink({ path: normalized.audit.path })
     })
   };
@@ -109,6 +129,10 @@ export function normalizeConfig(config) {
     audit: {
       ...defaultConfig().audit,
       ...(config.audit ?? {})
+    },
+    tokenVault: {
+      ...defaultConfig().tokenVault,
+      ...(config.tokenVault ?? {})
     }
   };
 
@@ -117,6 +141,9 @@ export function normalizeConfig(config) {
   }
   if (merged.audit.sink !== "jsonl") {
     throw new Error("Current implementation only supports jsonl audit sink");
+  }
+  if (merged.tokenVault.provider !== "local") {
+    throw new Error("0.2 only supports local token vault provider");
   }
   return merged;
 }
