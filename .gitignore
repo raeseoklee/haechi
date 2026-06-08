@@ -1,0 +1,7 @@
+.aicel/
+.codexus/
+AGENTS.md
+node_modules/
+coverage/
+*.log
+tmp/

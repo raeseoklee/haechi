@@ -1,0 +1,13 @@
+{
+  "model": "demo-model",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
+    {
+      "role": "user",
+      "content": "Please summarize this customer note. Email: minji.kim@example.com, phone: 010-1234-5678, token: sk_demo_1234567890abcdef1234567890abcdef."
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "mode": "dry-run",
+  "target": {
+    "type": "llm-http",
+    "upstream": "http://127.0.0.1:9999"
+  },
+  "policy": {
+    "mode": "dry-run",
+    "presets": [
+      "korean-pii",
+      "secrets-only",
+      "llm-redact"
+    ],
+    "defaultAction": "redact",
+    "actions": {
+      "card": "block"
+    }
+  },
+  "filters": {
+    "customRules": []
+  },
+  "keys": {
+    "provider": "local",
+    "keyFile": ".aicel/dev.keys.json"
+  },
+  "audit": {
+    "sink": "jsonl",
+    "path": ".aicel/audit.jsonl"
+  }
+}
