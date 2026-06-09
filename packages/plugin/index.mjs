@@ -26,11 +26,11 @@ export async function validatePluginManifestFile(path) {
 }
 
 export function validatePluginManifest(manifest) {
-  const plugin = manifest?.aicelPlugin;
+  const plugin = manifest?.haechiPlugin;
   const errors = [];
 
   if (!plugin) {
-    errors.push("missing aicelPlugin root");
+    errors.push("missing haechiPlugin root");
   } else {
     requireString(plugin, "id", errors);
     requireString(plugin, "version", errors);
@@ -42,8 +42,8 @@ export function validatePluginManifest(manifest) {
       errors.push(`invalid kind: ${plugin.kind}`);
     }
 
-    if (!plugin.compatibility?.aicelCore) {
-      errors.push("missing compatibility.aicelCore");
+    if (!plugin.compatibility?.haechiCore) {
+      errors.push("missing compatibility.haechiCore");
     }
 
     if (!plugin.capabilities || typeof plugin.capabilities !== "object") {

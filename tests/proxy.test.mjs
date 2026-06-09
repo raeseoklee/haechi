@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRuntime } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
-import { createAicelProxy } from "../packages/proxy/index.mjs";
+import { createHaechiProxy } from "../packages/proxy/index.mjs";
 
 test("proxy protects JSON payload before forwarding", async () => {
   const upstream = createServer(async (request, response) => {
@@ -16,9 +16,9 @@ test("proxy protects JSON payload before forwarding", async () => {
   });
   const upstreamAddress = await listen(upstream);
 
-  const dir = await mkdtemp(join(tmpdir(), "aicel-proxy-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
-  const auditPath = join(dir, ".aicel", "audit.jsonl");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
   await initLocalKeyFile(keyFile, { force: true });
   const runtime = createRuntime({
     mode: "enforce",
@@ -35,7 +35,7 @@ test("proxy protects JSON payload before forwarding", async () => {
     audit: { path: auditPath }
   });
 
-  const proxy = createAicelProxy({ runtime, port: 0 });
+  const proxy = createHaechiProxy({ runtime, port: 0 });
   const proxyAddress = await proxy.listen();
 
   try {

@@ -1,5 +1,6 @@
-.aicel/
+.haechi/
 .codexus/
+.DS_Store
 AGENTS.md
 node_modules/
 coverage/

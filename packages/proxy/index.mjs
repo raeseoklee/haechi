@@ -1,18 +1,18 @@
 import { createServer } from "node:http";
 
-export function createAicelProxy({ runtime, port = 8787, host = "127.0.0.1" }) {
-  const { aicel, config } = runtime;
+export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) {
+  const { haechi, config } = runtime;
 
   const server = createServer(async (request, response) => {
     try {
-      if (request.method === "GET" && request.url === "/__aicel/health") {
+      if (request.method === "GET" && request.url === "/__haechi/health") {
         writeJson(response, 200, { ok: true, mode: config.mode });
         return;
       }
 
       const body = await readBody(request);
       const json = body ? JSON.parse(body) : {};
-      const result = await aicel.protectJson(json, {
+      const result = await haechi.protectJson(json, {
         protocol: config.target.type,
         operation: `${request.method} ${request.url}`,
         mode: config.policy.mode ?? config.mode
@@ -20,7 +20,7 @@ export function createAicelProxy({ runtime, port = 8787, host = "127.0.0.1" }) {
 
       if (result.blocked) {
         writeJson(response, 403, {
-          error: "aicel_policy_block",
+          error: "haechi_policy_block",
           summary: result.summary,
           auditId: result.auditEvent.id
         });
@@ -37,7 +37,7 @@ export function createAicelProxy({ runtime, port = 8787, host = "127.0.0.1" }) {
       response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
     } catch (error) {
       writeJson(response, 500, {
-        error: "aicel_proxy_error",
+        error: "haechi_proxy_error",
         message: error.message
       });
     }

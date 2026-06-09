@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { createAicel } from "../core/index.mjs";
+import { createHaechi } from "../core/index.mjs";
 import { createDefaultFilterEngine } from "../filter/index.mjs";
 import { buildPolicy, createPolicyEngine } from "../policy/index.mjs";
 import { createLocalCryptoProvider, initLocalKeyFile } from "../crypto/index.mjs";
@@ -8,7 +8,7 @@ import { createJsonlAuditSink } from "../audit/index.mjs";
 import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 
-export const DEFAULT_CONFIG_PATH = "aicel.config.json";
+export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
 export function defaultConfig() {
   return {
@@ -30,15 +30,15 @@ export function defaultConfig() {
     },
     keys: {
       provider: "local",
-      keyFile: ".aicel/dev.keys.json"
+      keyFile: ".haechi/dev.keys.json"
     },
     audit: {
       sink: "jsonl",
-      path: ".aicel/audit.jsonl"
+      path: ".haechi/audit.jsonl"
     },
     tokenVault: {
       provider: "local",
-      path: ".aicel/token-vault.json"
+      path: ".haechi/token-vault.json"
     }
   };
 }
@@ -91,7 +91,7 @@ export function createRuntime(config) {
   return {
     config: normalized,
     tokenVault,
-    aicel: createAicel({
+    haechi: createHaechi({
       mode: normalized.mode,
       filterEngine: createDefaultFilterEngine(normalized.filters),
       policyEngine: createPolicyEngine(policy),

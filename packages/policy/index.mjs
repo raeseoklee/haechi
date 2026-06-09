@@ -67,7 +67,7 @@ export function createPolicyEngine(policy) {
   validatePolicy(policy);
 
   return {
-    id: "aicel.policy.reference",
+    id: "haechi.policy.reference",
     version: "0.1.0",
     capabilities: {
       readsPlaintext: false,

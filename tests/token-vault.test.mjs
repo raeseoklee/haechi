@@ -7,10 +7,10 @@ import { createRuntime } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
 
 test("tokenize action stores encrypted mapping in local token vault", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-token-vault-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
-  const auditPath = join(dir, ".aicel", "audit.jsonl");
-  const vaultPath = join(dir, ".aicel", "token-vault.json");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-token-vault-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  const vaultPath = join(dir, ".haechi", "token-vault.json");
   await initLocalKeyFile(keyFile, { force: true });
   const runtime = createRuntime({
     mode: "enforce",
@@ -27,7 +27,7 @@ test("tokenize action stores encrypted mapping in local token vault", async () =
     tokenVault: { path: vaultPath }
   });
 
-  const result = await runtime.aicel.protectJson({
+  const result = await runtime.haechi.protectJson({
     message: "contact minji.kim@example.com"
   }, { protocol: "llm-http", operation: "tokenize-test" });
 

@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { createLocalCryptoProvider, initLocalKeyFile } from "../packages/crypto/index.mjs";
 
 test("local crypto decrypts with the same AAD", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-crypto-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-crypto-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
   await initLocalKeyFile(keyFile, { force: true });
   const crypto = createLocalCryptoProvider({ keyFile });
 
@@ -19,8 +19,8 @@ test("local crypto decrypts with the same AAD", async () => {
 });
 
 test("local crypto rejects modified AAD", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-crypto-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-crypto-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
   await initLocalKeyFile(keyFile, { force: true });
   const crypto = createLocalCryptoProvider({ keyFile });
 

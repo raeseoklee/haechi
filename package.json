@@ -1,17 +1,17 @@
 {
-  "name": "aicel",
+  "name": "haechi",
   "version": "0.2.0",
   "private": true,
   "type": "module",
   "bin": {
-    "aicel": "packages/cli/bin/aicel.mjs"
+    "haechi": "packages/cli/bin/haechi.mjs"
   },
   "scripts": {
     "test": "node --test",
-    "aicel": "node packages/cli/bin/aicel.mjs",
-    "demo:init": "node packages/cli/bin/aicel.mjs init --force",
-    "demo:protect": "node packages/cli/bin/aicel.mjs protect examples/llm-prompt-filtering/input.json --config aicel.config.json",
-    "demo:report": "node packages/cli/bin/aicel.mjs report --audit .aicel/audit.jsonl"
+    "haechi": "node packages/cli/bin/haechi.mjs",
+    "demo:init": "node packages/cli/bin/haechi.mjs init --force",
+    "demo:protect": "node packages/cli/bin/haechi.mjs protect examples/llm-prompt-filtering/input.json --config haechi.config.json",
+    "demo:report": "node packages/cli/bin/haechi.mjs report --audit .haechi/audit.jsonl"
   },
   "engines": {
     "node": ">=22"

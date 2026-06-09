@@ -5,10 +5,10 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
-const CLI = resolve("packages/cli/bin/aicel.mjs");
+const CLI = resolve("packages/cli/bin/haechi.mjs");
 
 test("CLI init/protect/report quickstart works", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-cli-"));
+  const dir = await mkdtemp(join(tmpdir(), "haechi-cli-"));
   const inputPath = join(dir, "input.json");
   await writeFile(inputPath, JSON.stringify({
     messages: [
@@ -42,6 +42,6 @@ test("CLI init/protect/report quickstart works", async () => {
   assert.equal(summary.summary.events, 1);
   assert.equal(summary.summary.detections, 2);
 
-  const audit = await readFile(join(dir, ".aicel", "audit.jsonl"), "utf8");
+  const audit = await readFile(join(dir, ".haechi", "audit.jsonl"), "utf8");
   assert.doesNotMatch(audit, /minji\.kim@example\.com/);
 });

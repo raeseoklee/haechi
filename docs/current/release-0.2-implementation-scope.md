@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-09
-- 관련 제품: AI Context Encryption Layer, AICEL
+- 관련 제품: Haechi
 
 ## 1. 목표
 
@@ -19,12 +19,12 @@
 ## 2. CLI 추가
 
 ```bash
-node packages/cli/bin/aicel.mjs policy-sign policy.json --out policy.bundle.json
-node packages/cli/bin/aicel.mjs policy-verify policy.bundle.json
-node packages/cli/bin/aicel.mjs plugin-validate examples/plugins/custom-filter.plugin.json
-node packages/cli/bin/aicel.mjs token-reveal <token>
-node packages/cli/bin/aicel.mjs token-purge <token>
-node packages/cli/bin/aicel.mjs mcp-stdio --config aicel.config.json
+node packages/cli/bin/haechi.mjs policy-sign policy.json --out policy.bundle.json
+node packages/cli/bin/haechi.mjs policy-verify policy.bundle.json
+node packages/cli/bin/haechi.mjs plugin-validate examples/plugins/custom-filter.plugin.json
+node packages/cli/bin/haechi.mjs token-reveal <token>
+node packages/cli/bin/haechi.mjs token-purge <token>
+node packages/cli/bin/haechi.mjs mcp-stdio --config haechi.config.json
 ```
 
 ## 3. 제외 범위

@@ -7,9 +7,9 @@ import { createRuntime } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
 
 test("pipeline redacts and masks in enforce mode without audit plaintext", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-pipeline-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
-  const auditPath = join(dir, ".aicel", "audit.jsonl");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-pipeline-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
   await initLocalKeyFile(keyFile, { force: true });
   const runtime = createRuntime({
     mode: "enforce",
@@ -33,7 +33,7 @@ test("pipeline redacts and masks in enforce mode without audit plaintext", async
     ]
   };
 
-  const result = await runtime.aicel.protectJson(input, { protocol: "llm-http", operation: "test" });
+  const result = await runtime.haechi.protectJson(input, { protocol: "llm-http", operation: "test" });
   const content = result.payload.messages[0].content;
 
   assert.match(content, /\[REDACTED:email\]/);
@@ -46,9 +46,9 @@ test("pipeline redacts and masks in enforce mode without audit plaintext", async
 });
 
 test("pipeline blocks configured secrets in enforce mode", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-pipeline-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
-  const auditPath = join(dir, ".aicel", "audit.jsonl");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-pipeline-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
   await initLocalKeyFile(keyFile, { force: true });
   const runtime = createRuntime({
     mode: "enforce",
@@ -61,7 +61,7 @@ test("pipeline blocks configured secrets in enforce mode", async () => {
     audit: { path: auditPath }
   });
 
-  const result = await runtime.aicel.protectJson({
+  const result = await runtime.haechi.protectJson({
     prompt: "token sk_demo_1234567890abcdef1234567890abcdef"
   });
 

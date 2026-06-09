@@ -21,14 +21,14 @@
   },
   "keys": {
     "provider": "local",
-    "keyFile": ".aicel/dev.keys.json"
+    "keyFile": ".haechi/dev.keys.json"
   },
   "audit": {
     "sink": "jsonl",
-    "path": ".aicel/audit.jsonl"
+    "path": ".haechi/audit.jsonl"
   },
   "tokenVault": {
     "provider": "local",
-    "path": ".aicel/token-vault.json"
+    "path": ".haechi/token-vault.json"
   }
 }

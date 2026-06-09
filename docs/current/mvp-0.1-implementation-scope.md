@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-09
-- 관련 제품: AI Context Encryption Layer, AICEL
+- 관련 제품: Haechi
 
 ## 1. 결론
 
@@ -10,10 +10,10 @@ MVP 0.1은 넓은 protocol coverage보다 "쉽게 붙이고 바로 확인할 수
 
 0.1의 성공 기준은 다음이다.
 
-1. 사용자가 `aicel init`으로 local key, sample policy, audit path를 생성한다.
-2. 사용자가 `aicel protect`로 OpenAI-compatible JSON payload를 보호해 본다.
-3. 사용자가 `aicel proxy`로 기존 LLM HTTP 호출을 local proxy에 붙여 본다.
-4. 사용자가 `aicel report`로 평문 없는 audit summary를 확인한다.
+1. 사용자가 `haechi init`으로 local key, sample policy, audit path를 생성한다.
+2. 사용자가 `haechi protect`로 OpenAI-compatible JSON payload를 보호해 본다.
+3. 사용자가 `haechi proxy`로 기존 LLM HTTP 호출을 local proxy에 붙여 본다.
+4. 사용자가 `haechi report`로 평문 없는 audit summary를 확인한다.
 5. 테스트가 개인정보/secret 탐지, redaction, block, encryption, audit plaintext leak 방지를 검증한다.
 
 ## 2. 0.1 포함 범위
@@ -50,10 +50,10 @@ MVP 0.1은 넓은 protocol coverage보다 "쉽게 붙이고 바로 확인할 수
 
 ```bash
 npm test
-node packages/cli/bin/aicel.mjs init --force
-node packages/cli/bin/aicel.mjs protect examples/llm-prompt-filtering/input.json --config aicel.config.json
-node packages/cli/bin/aicel.mjs report --audit .aicel/audit.jsonl
-node packages/cli/bin/aicel.mjs proxy --config aicel.config.json --port 8787
+node packages/cli/bin/haechi.mjs init --force
+node packages/cli/bin/haechi.mjs protect examples/llm-prompt-filtering/input.json --config haechi.config.json
+node packages/cli/bin/haechi.mjs report --audit .haechi/audit.jsonl
+node packages/cli/bin/haechi.mjs proxy --config haechi.config.json --port 8787
 ```
 
 ## 5. 구현 원칙

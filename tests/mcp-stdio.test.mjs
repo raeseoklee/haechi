@@ -8,8 +8,8 @@ import { createRuntime } from "../packages/cli/runtime.mjs";
 import { protectMcpJsonRpcMessage } from "../packages/mcp-stdio/index.mjs";
 
 test("MCP stdio JSON-RPC params are protected", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-mcp-stdio-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-mcp-stdio-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
   await initLocalKeyFile(keyFile, { force: true });
   const runtime = createRuntime({
     mode: "enforce",
@@ -19,7 +19,7 @@ test("MCP stdio JSON-RPC params are protected", async () => {
       defaultAction: "redact"
     },
     keys: { keyFile },
-    audit: { path: join(dir, ".aicel", "audit.jsonl") }
+    audit: { path: join(dir, ".haechi", "audit.jsonl") }
   });
 
   const message = await protectMcpJsonRpcMessage({

@@ -11,7 +11,7 @@ export function createLocalTokenVault({ path, cryptoProvider }) {
   }
 
   return {
-    id: "aicel.token-vault.local",
+    id: "haechi.token-vault.local",
     version: "0.2.0",
     capabilities: {
       readsPlaintext: true,

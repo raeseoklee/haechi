@@ -11,7 +11,7 @@ export function createJsonlAuditSink({ path }) {
   }
 
   return {
-    id: "aicel.audit.jsonl",
+    id: "haechi.audit.jsonl",
     version: "0.1.0",
     capabilities: {
       writesAudit: true,

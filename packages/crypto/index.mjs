@@ -31,7 +31,7 @@ export function createLocalCryptoProvider({ keyFile }) {
   }
 
   return {
-    id: "aicel.crypto.local-aes-gcm",
+    id: "haechi.crypto.local-aes-gcm",
     version: "0.1.0",
     capabilities: {
       readsPlaintext: true,

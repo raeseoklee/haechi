@@ -8,8 +8,8 @@ import { signPolicyBundleFile, verifyPolicyBundleFile } from "../packages/policy
 import { createRuntime } from "../packages/cli/runtime.mjs";
 
 test("signed policy bundle verifies and can be loaded by runtime", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-policy-bundle-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-policy-bundle-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
   const policyPath = join(dir, "policy.json");
   const bundlePath = join(dir, "policy.bundle.json");
   await initLocalKeyFile(keyFile, { force: true });
@@ -33,15 +33,15 @@ test("signed policy bundle verifies and can be loaded by runtime", async () => {
       bundlePath
     },
     keys: { keyFile },
-    audit: { path: join(dir, ".aicel", "audit.jsonl") }
+    audit: { path: join(dir, ".haechi", "audit.jsonl") }
   });
-  const result = await runtime.aicel.protectJson({ message: "minji.kim@example.com" });
+  const result = await runtime.haechi.protectJson({ message: "minji.kim@example.com" });
   assert.equal(result.payload.message, "[REDACTED:email]");
 });
 
 test("signed policy bundle rejects tampering", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-policy-bundle-"));
-  const keyFile = join(dir, ".aicel", "dev.keys.json");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-policy-bundle-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
   const policyPath = join(dir, "policy.json");
   const bundlePath = join(dir, "policy.bundle.json");
   await initLocalKeyFile(keyFile, { force: true });

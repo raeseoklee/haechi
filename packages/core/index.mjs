@@ -2,9 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 
 const NO_ENFORCE_MODES = new Set(["dry-run", "report-only"]);
 
-export function createAicel({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run" }) {
+export function createHaechi({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run" }) {
   if (!filterEngine || !policyEngine || !cryptoProvider || !auditSink) {
-    throw new Error("AICEL requires filterEngine, policyEngine, cryptoProvider, and auditSink");
+    throw new Error("Haechi requires filterEngine, policyEngine, cryptoProvider, and auditSink");
   }
 
   async function protectJson(payload, context = {}) {
@@ -187,7 +187,7 @@ async function replacementFor(segment, detection, decision, { context, cryptoPro
           ruleId: detection.ruleId
         }
       });
-      return `[AICEL_ENC:${base64UrlEncode(JSON.stringify(envelope))}]`;
+      return `[HAECHI_ENC:${base64UrlEncode(JSON.stringify(envelope))}]`;
     }
     default:
       return segment;

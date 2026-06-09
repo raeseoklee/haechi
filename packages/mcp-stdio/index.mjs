@@ -8,7 +8,7 @@ export async function protectMcpJsonRpcMessage(message, runtime) {
   const next = structuredClone(message);
 
   if (Object.prototype.hasOwnProperty.call(next, "params")) {
-    const result = await runtime.aicel.protectJson(next.params, {
+    const result = await runtime.haechi.protectJson(next.params, {
       protocol: "mcp-stdio",
       operation: next.method ?? "params",
       mode: runtime.config.policy.mode ?? runtime.config.mode
@@ -20,7 +20,7 @@ export async function protectMcpJsonRpcMessage(message, runtime) {
   }
 
   if (Object.prototype.hasOwnProperty.call(next, "result")) {
-    const result = await runtime.aicel.protectJson(next.result, {
+    const result = await runtime.haechi.protectJson(next.result, {
       protocol: "mcp-stdio",
       operation: "result",
       mode: runtime.config.policy.mode ?? runtime.config.mode
@@ -50,7 +50,7 @@ export async function runMcpStdioFilter({ input = process.stdin, output = proces
         jsonrpc: "2.0",
         error: {
           code: -32000,
-          message: "aicel_mcp_stdio_error",
+          message: "haechi_mcp_stdio_error",
           data: {
             reason: error.message
           }
@@ -66,7 +66,7 @@ function blockedJsonRpc(id, result) {
     jsonrpc: "2.0",
     error: {
       code: -32001,
-      message: "aicel_policy_block",
+      message: "haechi_policy_block",
       data: {
         auditId: result.auditEvent.id,
         summary: result.summary

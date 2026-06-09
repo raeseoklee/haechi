@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-08
-- 관련 제품: AI Context Encryption Layer, AICEL
+- 관련 제품: Haechi
 - 검토 방식: 보안/암호, AI/MCP/A2A 아키텍처, 글로벌 컴플라이언스, 제품/사업, 테스트 전략 페르소나 병렬 검토
 
 ## 1. 결론
@@ -32,9 +32,9 @@
 | GAP-P0-008 | observability boundary | 로그뿐 아니라 trace baggage, headers, URL query, stack trace, crash dump, metric label, replay artifact에서 평문이 샌다. | 모든 telemetry sink에 sentinel PII/secret 원문이 남지 않고 hash/id/redaction metadata만 남는다. |
 | GAP-P0-009 | OSS/self-hosted deployment modes | library, CLI, local proxy, sidecar, self-hosted service는 키 위치, egress, update, telemetry, 장애 경계가 다르다. | mode별 key custody, network egress, telemetry path, upgrade/rollback, local-only 동작이 명시된다. |
 | GAP-P0-010 | open-source shared responsibility note | OSS 사용자는 법적 판단, transfer evidence, key custody, DSAR, incident response를 스스로 책임지는 범위를 알아야 한다. | README/SECURITY/docs에 maintainer responsibility, user responsibility, non-compliance disclaimer가 명시된다. |
-| GAP-P0-011 | EU AI Act / AI governance mapping | AICEL이 AI 시스템 또는 AI governance component로 쓰이면 투명성, role 판정, incident 관련 해석이 필요할 수 있다. | provider/deployer/GPAI role 판단표, transparency note, incident log, AI risk register template을 참고 자료로 제공한다. |
+| GAP-P0-011 | EU AI Act / AI governance mapping | Haechi가 AI 시스템 또는 AI governance component로 쓰이면 투명성, role 판정, incident 관련 해석이 필요할 수 있다. | provider/deployer/GPAI role 판단표, transparency note, incident log, AI risk register template을 참고 자료로 제공한다. |
 | GAP-P0-012 | build-blocking security tests | 현재 검증 기준은 선언형이다. 보안 제품은 어떤 실패가 빌드를 막는지 명확해야 한다. | plaintext leak, policy conflict, KMS fault, replay, global profile, hard-block bypass 실패가 CI gate가 된다. |
-| GAP-P0-013 | easy adoption path | 보안성이 높아도 적용이 어렵다면 OSS 확산과 실제 사용이 어렵다. | `aicel init`, dry-run/report-only, preset policy, local proxy, copy-paste middleware, 5분/30분/1일 적용 목표가 문서와 예제로 검증된다. |
+| GAP-P0-013 | easy adoption path | 보안성이 높아도 적용이 어렵다면 OSS 확산과 실제 사용이 어렵다. | `haechi init`, dry-run/report-only, preset policy, local proxy, copy-paste middleware, 5분/30분/1일 적용 목표가 문서와 예제로 검증된다. |
 
 ## 3. P1: OSS 확산과 실사용 전 보강
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { readAuditSummary } from "../../audit/index.mjs";
-import { createAicelProxy } from "../../proxy/index.mjs";
+import { createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
 import { runMcpStdioFilter } from "../../mcp-stdio/index.mjs";
@@ -51,7 +51,7 @@ try {
       throw new Error(`Unknown command: ${command}`);
   }
 } catch (error) {
-  console.error(`aicel: ${error.message}`);
+  console.error(`haechi: ${error.message}`);
   process.exitCode = process.exitCode || 1;
 }
 
@@ -80,7 +80,7 @@ async function protectCommand(argv) {
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
   const input = JSON.parse(await readFile(inputPath, "utf8"));
-  const result = await runtime.aicel.protectJson(input, {
+  const result = await runtime.haechi.protectJson(input, {
     protocol: config.target.type,
     operation: "cli protect",
     mode: config.policy.mode ?? config.mode
@@ -101,7 +101,7 @@ async function protectCommand(argv) {
 
 async function reportCommand(argv) {
   const options = parseOptions(argv);
-  const auditPath = options.audit ?? options.path ?? ".aicel/audit.jsonl";
+  const auditPath = options.audit ?? options.path ?? ".haechi/audit.jsonl";
   writeJson({
     ok: true,
     auditPath,
@@ -115,10 +115,10 @@ async function proxyCommand(argv) {
   const runtime = createRuntime(config);
   const port = Number(options.port ?? 8787);
   const host = options.host ?? "127.0.0.1";
-  const proxy = createAicelProxy({ runtime, port, host });
+  const proxy = createHaechiProxy({ runtime, port, host });
   const address = await proxy.listen();
 
-  console.log(`AICEL proxy listening on http://${address.host}:${address.port}`);
+  console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
   console.log(`Upstream: ${config.target.upstream}`);
   console.log(`Mode: ${config.policy.mode ?? config.mode}`);
 
@@ -250,19 +250,19 @@ function writeJson(value) {
 }
 
 function printHelp() {
-  console.log(`AICEL MVP CLI
+  console.log(`Haechi MVP CLI
 
 Usage:
-  aicel init [--config aicel.config.json] [--force]
-  aicel protect <input.json> [--config aicel.config.json]
-  aicel report [--audit .aicel/audit.jsonl]
-  aicel proxy [--config aicel.config.json] [--host 127.0.0.1] [--port 8787]
-  aicel policy-sign <policy.json> [--config aicel.config.json] [--out policy.bundle.json]
-  aicel policy-verify <policy.bundle.json> [--config aicel.config.json]
-  aicel token-reveal <token> [--config aicel.config.json]
-  aicel token-purge <token> [--config aicel.config.json]
-  aicel plugin-validate <plugin-manifest.json>
-  aicel mcp-stdio [--config aicel.config.json]
+  haechi init [--config haechi.config.json] [--force]
+  haechi protect <input.json> [--config haechi.config.json]
+  haechi report [--audit .haechi/audit.jsonl]
+  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port 8787]
+  haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
+  haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
+  haechi token-reveal <token> [--config haechi.config.json]
+  haechi token-purge <token> [--config haechi.config.json]
+  haechi plugin-validate <plugin-manifest.json>
+  haechi mcp-stdio [--config haechi.config.json]
 
 The default policy mode is dry-run. Change policy.mode to enforce to mutate or block payloads.
 `);

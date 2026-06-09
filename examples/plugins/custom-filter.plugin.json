@@ -1,12 +1,12 @@
 {
-  "aicelPlugin": {
+  "haechiPlugin": {
     "id": "example-custom-filter",
     "version": "0.1.0",
     "kind": "filter-engine",
     "runtime": "node",
     "entrypoint": "./dist/index.js",
     "compatibility": {
-      "aicelCore": ">=0.2.0 <0.3.0"
+      "haechiCore": ">=0.2.0 <0.3.0"
     },
     "capabilities": {
       "readsPlaintext": true,

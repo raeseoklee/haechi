@@ -55,7 +55,7 @@ export function createDefaultFilterEngine({ customRules = [] } = {}) {
   const rules = DEFAULT_RULES.concat(customRules.map(normalizeCustomRule));
 
   return {
-    id: "aicel.filter.default",
+    id: "haechi.filter.default",
     version: "0.1.0",
     capabilities: {
       readsPlaintext: true,

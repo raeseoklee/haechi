@@ -4,14 +4,14 @@ import { validatePluginManifest } from "../packages/plugin/index.mjs";
 
 test("plugin manifest validates required capability contract", () => {
   const result = validatePluginManifest({
-    aicelPlugin: {
+    haechiPlugin: {
       id: "example-filter",
       version: "0.1.0",
       kind: "filter-engine",
       runtime: "node",
       entrypoint: "./dist/index.js",
       compatibility: {
-        aicelCore: ">=0.2.0 <0.3.0"
+        haechiCore: ">=0.2.0 <0.3.0"
       },
       capabilities: {
         readsPlaintext: true,
@@ -33,14 +33,14 @@ test("plugin manifest validates required capability contract", () => {
 
 test("plugin manifest rejects raw payload logging", () => {
   const result = validatePluginManifest({
-    aicelPlugin: {
+    haechiPlugin: {
       id: "bad-filter",
       version: "0.1.0",
       kind: "filter-engine",
       runtime: "node",
       entrypoint: "./dist/index.js",
       compatibility: {
-        aicelCore: ">=0.2.0 <0.3.0"
+        haechiCore: ">=0.2.0 <0.3.0"
       },
       capabilities: {
         readsPlaintext: true,

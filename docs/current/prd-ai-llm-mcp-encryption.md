@@ -2,16 +2,16 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-08
-- 제품 가칭: AI Context Encryption Layer, AICEL
+- 제품명: Haechi
 - 기준: 초기 PRD/SRS/보안검토 아카이브를 AI/LLM/MCP 특화 방향으로 재정렬
 
 ## 1. 목적
 
-AICEL은 AI 애플리케이션, LLM gateway, MCP client/server, agent runtime, A2A agent network에서 오가는 prompt, context, tool-call, resource, retrieval snippet, artifact, streaming event를 보호하는 암호화 솔루션이다.
+Haechi는 AI 애플리케이션, LLM gateway, MCP client/server, agent runtime, A2A agent network에서 오가는 prompt, context, tool-call, resource, retrieval snippet, artifact, streaming event를 보호하는 암호화 솔루션이다.
 
 핵심 목적은 단순 전송구간 보호가 아니라, AI 워크플로우의 의미 단위인 `message`, `tool call`, `resource`, `task`, `context`, `artifact`, `agent identity`를 암호화 정책과 키 관리의 단위로 끌어올리는 것이다.
 
-초기 제품 형태는 SaaS가 아니라 오픈소스/self-hosted 보안 인프라다. 사용자는 AICEL을 라이브러리, CLI, sidecar proxy, MCP wrapper 형태로 자기 AI 애플리케이션에 붙이고, 암호화 방식, 정책 평가, 개인정보 필터링, 감사 저장소를 자기 환경에 맞게 갈아끼울 수 있어야 한다.
+초기 제품 형태는 SaaS가 아니라 오픈소스/self-hosted 보안 인프라다. 사용자는 Haechi를 라이브러리, CLI, sidecar proxy, MCP wrapper 형태로 자기 AI 애플리케이션에 붙이고, 암호화 방식, 정책 평가, 개인정보 필터링, 감사 저장소를 자기 환경에 맞게 갈아끼울 수 있어야 한다.
 
 ## 2. 배경
 
@@ -26,15 +26,15 @@ AICEL은 AI 애플리케이션, LLM gateway, MCP client/server, agent runtime, A
 - agent tool-call 로그, trace, replay record
 - model provider 전송 전후의 prompt/context 변환 지점
 
-AICEL은 이런 AI-native 데이터 단위를 정책 기반으로 암호화, 토큰화, redaction, 권한 평가, 감사하는 계층이다.
+Haechi는 이런 AI-native 데이터 단위를 정책 기반으로 암호화, 토큰화, redaction, 권한 평가, 감사하는 계층이다.
 
-개인정보 필터링은 AICEL의 핵심 기능이다. 암호화는 데이터를 보호하지만, 모델이나 tool에 평문으로 공개되는 순간에는 별도 통제가 필요하다. AICEL은 prompt, context, MCP tool input/output, resource, retrieval snippet, generated artifact에서 개인정보를 탐지하고 `allow`, `redact`, `mask`, `tokenize`, `encrypt`, `block`, `human-review` 중 하나로 처리한다.
+개인정보 필터링은 Haechi의 핵심 기능이다. 암호화는 데이터를 보호하지만, 모델이나 tool에 평문으로 공개되는 순간에는 별도 통제가 필요하다. Haechi는 prompt, context, MCP tool input/output, resource, retrieval snippet, generated artifact에서 개인정보를 탐지하고 `allow`, `redact`, `mask`, `tokenize`, `encrypt`, `block`, `human-review` 중 하나로 처리한다.
 
 ## 3. 제품 포지셔닝
 
-AICEL은 범용 보안솔루션, LLM gateway, MCP framework, agent framework를 대체하지 않는다. AI/LLM/MCP 대상 솔루션에 추가 장착되는 암호화 및 context protection module이다.
+Haechi는 범용 보안솔루션, LLM gateway, MCP framework, agent framework를 대체하지 않는다. AI/LLM/MCP 대상 솔루션에 추가 장착되는 암호화 및 context protection module이다.
 
-상용화나 SaaS control plane은 초기 목표가 아니다. 초기 포지셔닝은 "작지만 검증 가능한 OSS core + 교체 가능한 reference engine + 실사용 가능한 AI/MCP 예제"다. AICEL이 제공하는 기본 구현은 정답이 아니라 기준 구현이며, 사용자는 `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `KeyProvider`, `AuditSink` 같은 경계를 통해 자체 구현을 주입할 수 있어야 한다.
+상용화나 SaaS control plane은 초기 목표가 아니다. 초기 포지셔닝은 "작지만 검증 가능한 OSS core + 교체 가능한 reference engine + 실사용 가능한 AI/MCP 예제"다. Haechi가 제공하는 기본 구현은 정답이 아니라 기준 구현이며, 사용자는 `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `KeyProvider`, `AuditSink` 같은 경계를 통해 자체 구현을 주입할 수 있어야 한다.
 
 | 대상 솔루션 | 적용 방식 |
 |---|---|
@@ -162,7 +162,7 @@ AICEL은 범용 보안솔루션, LLM gateway, MCP framework, agent framework를 
 | PRD-AI-046 | 제품은 모든 provider/plugin에 대해 golden fixture, negative fixture, capability manifest, compatibility version test를 제공해야 한다. | Must |
 | PRD-AI-047 | 제품은 기존 코드를 거의 수정하지 않는 local proxy mode를 제공해야 한다. 사용자는 target base URL과 policy file만 지정해 LLM/MCP 요청을 우회시킬 수 있어야 한다. | Must |
 | PRD-AI-048 | 제품은 10줄 이내의 SDK wrapper/middleware 예제로 Node와 Python AI 앱에 적용할 수 있어야 한다. | Must |
-| PRD-AI-049 | 제품은 `aicel init` 또는 동등한 CLI로 sample policy, local key, audit path, MCP/LLM preset을 생성해야 한다. | Must |
+| PRD-AI-049 | 제품은 `haechi init` 또는 동등한 CLI로 sample policy, local key, audit path, MCP/LLM preset을 생성해야 한다. | Must |
 | PRD-AI-050 | 제품은 `dry-run` 또는 `report-only` mode를 제공해 실제 차단/암호화 전에 어떤 prompt/tool/resource가 탐지될지 확인할 수 있어야 한다. | Must |
 | PRD-AI-051 | 제품은 기본 preset을 제공해야 한다: `mcp-basic`, `llm-redact`, `korean-pii`, `secrets-only`, `local-only`, `strict-block`. | Must |
 | PRD-AI-052 | 제품은 사용자가 `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `AuditSink`를 코드 수정 없이 config에서 교체할 수 있는 경로를 제공해야 한다. | Should |
@@ -214,7 +214,7 @@ MVP에서 제외한다.
 
 - 모델이 처리해야 하는 값과 모델이 볼 필요가 없는 값을 분리한다.
 - 개인정보는 모델 공개 전에 먼저 분류하고, 공개 목적이 명확하지 않으면 기본 차단 또는 tokenization한다.
-- 모델 provider에 평문으로 공개한 데이터는 더 이상 AICEL만으로 비가시성을 보장할 수 없다고 명시한다.
+- 모델 provider에 평문으로 공개한 데이터는 더 이상 Haechi만으로 비가시성을 보장할 수 없다고 명시한다.
 - tool-call과 resource 결과는 기본적으로 민감정보로 취급한다.
 - agent/task/context 경계를 AAD와 복호화 권한에 포함한다.
 - observability pipeline은 제품의 1급 보안 경계로 취급한다.

@@ -2,13 +2,13 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-08
-- 관련 제품: AI Context Encryption Layer, AICEL
+- 관련 제품: Haechi
 
 ## 1. 목적
 
 본 문서는 AI/LLM/MCP 환경에서 개인정보와 고위험 민감 데이터를 모델, tool, agent, 로그, trace, replay artifact로 전달하기 전에 탐지하고 처리하는 정책 초안을 정의한다.
 
-개인정보 필터링은 암호화의 대체물이 아니다. 필터링은 평문 공개 여부를 결정하고, 암호화는 저장·전송·권한 경계를 보호한다. AICEL은 두 기능을 함께 적용한다.
+개인정보 필터링은 암호화의 대체물이 아니다. 필터링은 평문 공개 여부를 결정하고, 암호화는 저장·전송·권한 경계를 보호한다. Haechi는 두 기능을 함께 적용한다.
 
 ## 2. 필터링 지점
 
@@ -57,7 +57,7 @@
 |---|---|
 | data_subject_region | 정보주체의 추정 또는 명시 지역 |
 | controller_region | 고객/controller 지역 |
-| processor_region | AICEL/processor 처리 지역 |
+| processor_region | Haechi/processor 처리 지역 |
 | model_provider_region | LLM provider 처리 지역 |
 | transfer_mechanism | SCC, IDTA, adequacy, BCR, consent, local-only 등 |
 | sector_profile | healthcare, payment, finance, education, public sector 등 |
@@ -77,7 +77,7 @@
 
 ## 7. 커스텀 필터링
 
-기본 규제 프로파일은 고객 내부 데이터를 충분히 알 수 없다. AICEL은 tenant별 custom filter를 1급 기능으로 제공해야 한다.
+기본 규제 프로파일은 고객 내부 데이터를 충분히 알 수 없다. Haechi는 tenant별 custom filter를 1급 기능으로 제공해야 한다.
 
 ### 7.1 커스텀 탐지 대상
 

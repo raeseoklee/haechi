@@ -5,11 +5,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
-const CLI = resolve("packages/cli/bin/aicel.mjs");
+const CLI = resolve("packages/cli/bin/haechi.mjs");
 const PLUGIN_EXAMPLE = resolve("examples/plugins/custom-filter.plugin.json");
 
 test("0.2 CLI policy bundle, plugin validation, and token reveal work", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "aicel-cli-02-"));
+  const dir = await mkdtemp(join(tmpdir(), "haechi-cli-02-"));
   assert.equal(spawnSync(process.execPath, [CLI, "init", "--force"], { cwd: dir }).status, 0);
 
   const policyPath = join(dir, "policy.json");
@@ -41,13 +41,13 @@ test("0.2 CLI policy bundle, plugin validation, and token reveal work", async ()
   });
   assert.equal(plugin.status, 0, plugin.stderr);
 
-  const config = JSON.parse(await readFile(join(dir, "aicel.config.json"), "utf8"));
+  const config = JSON.parse(await readFile(join(dir, "haechi.config.json"), "utf8"));
   config.mode = "enforce";
   config.policy = {
     mode: "enforce",
     bundlePath
   };
-  await writeFile(join(dir, "aicel.config.json"), JSON.stringify(config), "utf8");
+  await writeFile(join(dir, "haechi.config.json"), JSON.stringify(config), "utf8");
 
   const inputPath = join(dir, "input.json");
   await writeFile(inputPath, JSON.stringify({
