@@ -4,6 +4,8 @@
 
 This repository is an early self-hosted security toolkit. It is not a compliance certification, legal opinion, or assurance report.
 
+Release risk tracking is maintained in `docs/current/risk-register-release-gate.md`. The current npm release gate is blocked until the P0 release risks in that document are closed.
+
 ## Supported Versions
 
 Only the current `0.3.x` development line is considered in scope.

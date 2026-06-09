@@ -11,6 +11,7 @@
 - `docs/current/mvp-0.1-implementation-scope.md`: MVP 0.1 구현 범위, 제외 범위, quickstart 완료 기준
 - `docs/current/release-0.2-implementation-scope.md`: 0.2 TokenVault, signed policy, plugin manifest, MCP stdio 구현 범위
 - `docs/current/release-0.3-implementation-scope.md`: 0.3 vLLM/Ollama/llama.cpp adapter, response protection, npm publish readiness 구현 범위
+- `docs/current/risk-register-release-gate.md`: 0.3 기준 배포 차단 리스크, 보안/운영 리스크, npm release gate
 
 ## Archive
 
