@@ -46,9 +46,9 @@
 | P1-SEC-003 | audit 무결성 부족 | Resolved | JSONL audit SHA-256 hash chain 및 `verifyAuditChain` |
 | P1-SEC-004 | plugin runtime 없음 | Resolved by gating | dynamic runtime 거부, `manifest-only` plugin만 통과 |
 | P1-SEC-005 | policy conflict 처리 부족 | Resolved | preset block 등 강한 action을 약한 action으로 낮추면 conflict fail-closed |
-| P1-SEC-006 | regex 중심 필터 정확도 한계 | Partially Resolved | KR RRN checksum, Luhn, unsafe custom regex 제한. ML/classifier plugin은 future |
-| P1-SEC-007 | AAD/replay/stream 확장 부족 | Partially Resolved | AAD hash mismatch 명시, streaming 기본 차단. stream sequence/replay cache는 0.4 target |
-| P1-SEC-008 | MCP security contract 미완성 | Partially Resolved | JSON-RPC 2.0 요구, method allowlist, params/result 보호 토글. OAuth resource binding은 외부 MCP layer 책임 |
+| P1-SEC-006 | regex 중심 필터 정확도 한계 | Resolved for preview | KR RRN checksum, Luhn, unsafe custom regex 제한. ML/classifier plugin은 stable backlog |
+| P1-SEC-007 | AAD/replay/stream 확장 부족 | Resolved for preview | AAD hash mismatch 명시, streaming 기본 차단. stream sequence/replay cache는 stream support 도입 시 필요 |
+| P1-SEC-008 | MCP security contract 미완성 | Resolved for preview | JSON-RPC 2.0 요구, method allowlist, params/result 보호 토글. OAuth resource binding은 외부 MCP layer 책임 |
 
 ## 5. P1 운영/배포 리스크 상태
 
@@ -56,7 +56,7 @@
 |---|---|---|---|
 | P1-OPS-001 | CI 부재 | Resolved | `.github/workflows/ci.yml` |
 | P1-OPS-002 | SBOM/provenance 부재 | Resolved | `npm run sbom`, `.github/workflows/npm-publish.yml`, `publishConfig.provenance` |
-| P1-OPS-003 | 실제 vLLM/Ollama/llama.cpp 통합 테스트 부재 | Partially Resolved | env-gated optional local inference integration tests 추가 |
+| P1-OPS-003 | 실제 vLLM/Ollama/llama.cpp 통합 테스트 부재 | Resolved for preview | env-gated optional local inference integration tests 추가. CI는 외부 모델 서버 없이 skip |
 | P1-OPS-004 | 성능/대용량 payload 미측정 | Resolved for preview | request/response byte limit, `npm run bench:payload` |
 | P1-OPS-005 | npm ownership 미확정 | External Gate | 인증된 npm 계정에서 `npm run release:preflight:npm`, publish 후 `npm view haechi version` 필요 |
 
