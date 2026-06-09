@@ -1,31 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRuntime } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
 import { createHaechiProxy } from "../packages/proxy/index.mjs";
 
-test("proxy protects JSON payload before forwarding", async () => {
+test("vLLM-compatible proxy protects request and JSON response", async () => {
   const upstream = createServer(async (request, response) => {
-    const body = await readBody(request);
+    const body = JSON.parse(await readBody(request));
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(body);
+    response.end(JSON.stringify({
+      id: "cmpl-test",
+      requestContent: body.messages[0].content,
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: "I found minji.kim@example.com in the result"
+          }
+        }
+      ]
+    }));
   });
   const upstreamAddress = await listen(upstream);
 
-  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-"));
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-03-"));
   const keyFile = join(dir, ".haechi", "dev.keys.json");
   const auditPath = join(dir, ".haechi", "audit.jsonl");
   await initLocalKeyFile(keyFile, { force: true });
   const runtime = createRuntime({
     mode: "enforce",
     target: {
-      type: "llm-http",
-      adapter: "openai-compatible",
+      type: "vllm-openai",
       upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    responseProtection: {
+      enabled: true,
+      mode: "enforce"
     },
     policy: {
       mode: "enforce",
@@ -44,6 +58,7 @@ test("proxy protects JSON payload before forwarding", async () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        model: "local-model",
         messages: [
           {
             role: "user",
@@ -52,11 +67,17 @@ test("proxy protects JSON payload before forwarding", async () => {
         ]
       })
     });
-    const echoed = await response.json();
+    const json = await response.json();
 
     assert.equal(response.status, 200);
-    assert.match(echoed.messages[0].content, /\[REDACTED:email\]/);
-    assert.doesNotMatch(echoed.messages[0].content, /minji\.kim@example\.com/);
+    assert.match(json.requestContent, /\[REDACTED:email\]/);
+    assert.match(json.choices[0].message.content, /\[REDACTED:email\]/);
+    assert.doesNotMatch(JSON.stringify(json), /minji\.kim@example\.com/);
+
+    const audit = await readFile(auditPath, "utf8");
+    assert.match(audit, /request:POST chat-completions/);
+    assert.match(audit, /response:POST chat-completions/);
+    assert.doesNotMatch(audit, /minji\.kim@example\.com/);
   } finally {
     await proxy.close();
     await close(upstream);

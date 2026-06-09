@@ -1,13 +1,58 @@
 {
   "name": "haechi",
-  "version": "0.2.0",
-  "private": true,
+  "version": "0.3.0",
+  "description": "Self-hosted AI context enforcement for LLM, MCP, vLLM, Ollama, and agent traffic.",
+  "license": "Apache-2.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raeseoklee/haechi.git"
+  },
+  "homepage": "https://github.com/raeseoklee/haechi#readme",
+  "bugs": {
+    "url": "https://github.com/raeseoklee/haechi/issues"
+  },
+  "keywords": [
+    "llm",
+    "mcp",
+    "ai-security",
+    "privacy",
+    "redaction",
+    "tokenization",
+    "ollama",
+    "vllm",
+    "llama-cpp"
+  ],
   "bin": {
     "haechi": "packages/cli/bin/haechi.mjs"
   },
+  "exports": {
+    ".": "./packages/core/index.mjs",
+    "./audit": "./packages/audit/index.mjs",
+    "./core": "./packages/core/index.mjs",
+    "./crypto": "./packages/crypto/index.mjs",
+    "./filter": "./packages/filter/index.mjs",
+    "./mcp-stdio": "./packages/mcp-stdio/index.mjs",
+    "./plugin": "./packages/plugin/index.mjs",
+    "./policy": "./packages/policy/index.mjs",
+    "./policy-bundle": "./packages/policy-bundle/index.mjs",
+    "./protocol-adapters": "./packages/protocol-adapters/index.mjs",
+    "./proxy": "./packages/proxy/index.mjs",
+    "./runtime": "./packages/cli/runtime.mjs",
+    "./token-vault": "./packages/token-vault/index.mjs"
+  },
+  "files": [
+    "README.md",
+    "SECURITY.md",
+    "LICENSE",
+    "haechi.config.example.json",
+    "packages/",
+    "examples/",
+    "docs/current/"
+  ],
   "scripts": {
     "test": "node --test",
+    "pack:dry": "npm pack --dry-run",
     "haechi": "node packages/cli/bin/haechi.mjs",
     "demo:init": "node packages/cli/bin/haechi.mjs init --force",
     "demo:protect": "node packages/cli/bin/haechi.mjs protect examples/llm-prompt-filtering/input.json --config haechi.config.json",

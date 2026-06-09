@@ -6,7 +6,7 @@ This repository is an early self-hosted security toolkit. It is not a compliance
 
 ## Supported Versions
 
-Only the current `0.1.x` development line is considered in scope.
+Only the current `0.3.x` development line is considered in scope.
 
 ## Reporting
 

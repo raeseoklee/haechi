@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) {
-  const { haechi, config } = runtime;
+  const { haechi, config, protocolAdapter } = runtime;
 
   const server = createServer(async (request, response) => {
     try {
@@ -10,13 +10,16 @@ export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) 
         return;
       }
 
+      const routeContext = protocolAdapter.classifyRequest(request);
       const body = await readBody(request);
       const json = body ? JSON.parse(body) : {};
-      const result = await haechi.protectJson(json, {
-        protocol: config.target.type,
-        operation: `${request.method} ${request.url}`,
-        mode: config.policy.mode ?? config.mode
-      });
+      const result = routeContext.protectRequest
+        ? await haechi.protectJson(json, {
+          ...routeContext,
+          operation: `request:${routeContext.operation}`,
+          mode: config.policy.mode ?? config.mode
+        })
+        : { payload: json, blocked: false };
 
       if (result.blocked) {
         writeJson(response, 403, {
@@ -33,8 +36,14 @@ export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) 
         body: JSON.stringify(result.payload)
       });
 
-      response.writeHead(upstreamResponse.status, Object.fromEntries(upstreamResponse.headers.entries()));
-      response.end(Buffer.from(await upstreamResponse.arrayBuffer()));
+      const forwarded = await maybeProtectResponse({
+        upstreamResponse,
+        routeContext,
+        runtime
+      });
+
+      response.writeHead(forwarded.status, forwarded.headers);
+      response.end(forwarded.body);
     } catch (error) {
       writeJson(response, 500, {
         error: "haechi_proxy_error",
@@ -58,6 +67,44 @@ export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) 
         server.close((error) => error ? reject(error) : resolve());
       });
     }
+  };
+}
+
+async function maybeProtectResponse({ upstreamResponse, routeContext, runtime }) {
+  const headers = Object.fromEntries(upstreamResponse.headers.entries());
+  const rawBody = Buffer.from(await upstreamResponse.arrayBuffer());
+
+  if (!runtime.config.responseProtection.enabled || !routeContext.protectResponse || !isJson(headers["content-type"])) {
+    return {
+      status: upstreamResponse.status,
+      headers,
+      body: rawBody
+    };
+  }
+
+  const json = JSON.parse(rawBody.toString("utf8"));
+  const result = await runtime.haechi.protectJson(json, {
+    ...routeContext,
+    operation: `response:${routeContext.operation}`,
+    mode: runtime.config.responseProtection.mode ?? runtime.config.policy.mode ?? runtime.config.mode
+  });
+
+  if (result.blocked) {
+    return {
+      status: 502,
+      headers: { "content-type": "application/json" },
+      body: Buffer.from(`${JSON.stringify({
+        error: "haechi_response_policy_block",
+        summary: result.summary,
+        auditId: result.auditEvent.id
+      }, null, 2)}\n`)
+    };
+  }
+
+  return {
+    status: upstreamResponse.status,
+    headers: transformedJsonHeaders(headers),
+    body: Buffer.from(`${JSON.stringify(result.payload)}\n`)
   };
 }
 
@@ -100,4 +147,14 @@ function readBody(request) {
 function writeJson(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(`${JSON.stringify(body, null, 2)}\n`);
+}
+
+function isJson(contentType = "") {
+  return contentType.toLowerCase().includes("application/json");
+}
+
+function transformedJsonHeaders(headers) {
+  const next = { ...headers, "content-type": "application/json" };
+  delete next["content-length"];
+  return next;
 }

@@ -7,6 +7,7 @@ import { createLocalCryptoProvider, initLocalKeyFile } from "../crypto/index.mjs
 import { createJsonlAuditSink } from "../audit/index.mjs";
 import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
+import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
@@ -15,7 +16,12 @@ export function defaultConfig() {
     mode: "dry-run",
     target: {
       type: "llm-http",
+      adapter: "openai-compatible",
       upstream: "http://127.0.0.1:9999"
+    },
+    responseProtection: {
+      enabled: false,
+      mode: "enforce"
     },
     policy: {
       mode: "dry-run",
@@ -91,6 +97,7 @@ export function createRuntime(config) {
   return {
     config: normalized,
     tokenVault,
+    protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
       filterEngine: createDefaultFilterEngine(normalized.filters),
@@ -109,6 +116,10 @@ export function normalizeConfig(config) {
     target: {
       ...defaultConfig().target,
       ...(config.target ?? {})
+    },
+    responseProtection: {
+      ...defaultConfig().responseProtection,
+      ...(config.responseProtection ?? {})
     },
     policy: {
       ...defaultConfig().policy,
@@ -145,5 +156,6 @@ export function normalizeConfig(config) {
   if (merged.tokenVault.provider !== "local") {
     throw new Error("0.2 only supports local token vault provider");
   }
+  createProtocolAdapter(merged.target);
   return merged;
 }

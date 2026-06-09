@@ -34,6 +34,16 @@ const PRESETS = {
       secret: "block",
       kr_rrn: "block"
     }
+  },
+  "local-inference": {
+    defaultAction: "redact",
+    actions: {
+      email: "tokenize",
+      phone: "mask",
+      api_key: "block",
+      secret: "block",
+      kr_rrn: "block"
+    }
   }
 };
 

@@ -1,4 +1,4 @@
-# p2p-encryption 문서 인덱스
+# Haechi 문서 인덱스
 
 ## Current
 
@@ -10,6 +10,7 @@
 - `docs/current/open-source-modular-architecture.md`: SaaS가 아닌 OSS/self-hosted 모듈형 아키텍처와 교체 가능한 provider/plugin 경계
 - `docs/current/mvp-0.1-implementation-scope.md`: MVP 0.1 구현 범위, 제외 범위, quickstart 완료 기준
 - `docs/current/release-0.2-implementation-scope.md`: 0.2 TokenVault, signed policy, plugin manifest, MCP stdio 구현 범위
+- `docs/current/release-0.3-implementation-scope.md`: 0.3 vLLM/Ollama/llama.cpp adapter, response protection, npm publish readiness 구현 범위
 
 ## Archive
 
