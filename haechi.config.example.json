@@ -7,7 +7,17 @@
   },
   "responseProtection": {
     "enabled": false,
-    "mode": "enforce"
+    "mode": "enforce",
+    "failureMode": "fail-closed",
+    "allowNonJson": false,
+    "allowCompressed": false,
+    "maxBytes": 1048576
+  },
+  "streaming": {
+    "requestMode": "block"
+  },
+  "limits": {
+    "maxRequestBytes": 1048576
   },
   "policy": {
     "mode": "dry-run",

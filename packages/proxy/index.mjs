@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 
-export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) {
+export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1", allowRemoteBind = false }) {
+  assertSafeProxyBind({ host, allowRemoteBind });
   const { haechi, config, protocolAdapter } = runtime;
 
   const server = createServer(async (request, response) => {
@@ -11,8 +12,31 @@ export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) 
       }
 
       const routeContext = protocolAdapter.classifyRequest(request);
-      const body = await readBody(request);
-      const json = body ? JSON.parse(body) : {};
+      const body = await readBody(request, {
+        maxBytes: config.limits.maxRequestBytes
+      });
+      const json = parseJsonBody(body);
+
+      if (isStreamingRequest(json)) {
+        if (config.streaming.requestMode === "pass-through") {
+          const upstreamResponse = await forward({
+            upstream: config.target.upstream,
+            request,
+            body
+          });
+          const rawBody = Buffer.from(await upstreamResponse.arrayBuffer());
+          response.writeHead(upstreamResponse.status, Object.fromEntries(upstreamResponse.headers.entries()));
+          response.end(rawBody);
+          return;
+        }
+
+        writeJson(response, 501, {
+          error: "haechi_streaming_unsupported",
+          message: "Streaming requests are blocked unless streaming.requestMode is explicitly set to pass-through"
+        });
+        return;
+      }
+
       const result = routeContext.protectRequest
         ? await haechi.protectJson(json, {
           ...routeContext,
@@ -45,8 +69,8 @@ export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1" }) 
       response.writeHead(forwarded.status, forwarded.headers);
       response.end(forwarded.body);
     } catch (error) {
-      writeJson(response, 500, {
-        error: "haechi_proxy_error",
+      writeJson(response, error.statusCode ?? 500, {
+        error: error.errorCode ?? "haechi_proxy_error",
         message: error.message
       });
     }
@@ -74,7 +98,7 @@ async function maybeProtectResponse({ upstreamResponse, routeContext, runtime })
   const headers = Object.fromEntries(upstreamResponse.headers.entries());
   const rawBody = Buffer.from(await upstreamResponse.arrayBuffer());
 
-  if (!runtime.config.responseProtection.enabled || !routeContext.protectResponse || !isJson(headers["content-type"])) {
+  if (!runtime.config.responseProtection.enabled || !routeContext.protectResponse) {
     return {
       status: upstreamResponse.status,
       headers,
@@ -82,7 +106,56 @@ async function maybeProtectResponse({ upstreamResponse, routeContext, runtime })
     };
   }
 
-  const json = JSON.parse(rawBody.toString("utf8"));
+  const responsePolicy = runtime.config.responseProtection;
+  const contentEncoding = headers["content-encoding"] ?? "";
+
+  if (rawBody.byteLength > responsePolicy.maxBytes) {
+    return unprotectedResponseDecision({
+      reason: "response_body_too_large",
+      detail: `Response body exceeds responseProtection.maxBytes (${responsePolicy.maxBytes})`,
+      upstreamResponse,
+      headers,
+      rawBody,
+      responsePolicy
+    });
+  }
+
+  if (contentEncoding && contentEncoding.toLowerCase() !== "identity" && !responsePolicy.allowCompressed) {
+    return unprotectedResponseDecision({
+      reason: "compressed_response",
+      detail: "Compressed responses cannot be inspected by responseProtection",
+      upstreamResponse,
+      headers,
+      rawBody,
+      responsePolicy
+    });
+  }
+
+  if (!isJson(headers["content-type"])) {
+    return unprotectedResponseDecision({
+      reason: "non_json_response",
+      detail: "Non-JSON responses cannot be inspected by responseProtection",
+      upstreamResponse,
+      headers,
+      rawBody,
+      responsePolicy
+    });
+  }
+
+  let json;
+  try {
+    json = JSON.parse(rawBody.toString("utf8"));
+  } catch (error) {
+    return unprotectedResponseDecision({
+      reason: "invalid_json_response",
+      detail: error.message,
+      upstreamResponse,
+      headers,
+      rawBody,
+      responsePolicy
+    });
+  }
+
   const result = await runtime.haechi.protectJson(json, {
     ...routeContext,
     operation: `response:${routeContext.operation}`,
@@ -135,13 +208,43 @@ function filteredHeaders(headers) {
   return next;
 }
 
-function readBody(request) {
+function readBody(request, { maxBytes }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
+    let received = 0;
+
+    request.on("data", (chunk) => {
+      received += chunk.byteLength;
+      if (received > maxBytes) {
+        reject(proxyError({
+          statusCode: 413,
+          errorCode: "haechi_request_body_too_large",
+          message: `Request body exceeds limits.maxRequestBytes (${maxBytes})`
+        }));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
     request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     request.on("error", reject);
   });
+}
+
+function parseJsonBody(body) {
+  if (!body) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch (error) {
+    throw proxyError({
+      statusCode: 400,
+      errorCode: "haechi_invalid_json_request",
+      message: error.message
+    });
+  }
 }
 
 function writeJson(response, status, body) {
@@ -156,5 +259,55 @@ function isJson(contentType = "") {
 function transformedJsonHeaders(headers) {
   const next = { ...headers, "content-type": "application/json" };
   delete next["content-length"];
+  delete next["content-encoding"];
   return next;
+}
+
+function unprotectedResponseDecision({ reason, detail, upstreamResponse, headers, rawBody, responsePolicy }) {
+  if (responsePolicy.failureMode === "allow") {
+    return {
+      status: upstreamResponse.status,
+      headers,
+      body: rawBody
+    };
+  }
+
+  return {
+    status: 502,
+    headers: { "content-type": "application/json" },
+    body: Buffer.from(`${JSON.stringify({
+      error: "haechi_response_unprotected",
+      reason,
+      message: detail
+    }, null, 2)}\n`)
+  };
+}
+
+function isStreamingRequest(value) {
+  return Boolean(value && typeof value === "object" && value.stream === true);
+}
+
+function proxyError({ statusCode, errorCode, message }) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.errorCode = errorCode;
+  return error;
+}
+
+export function assertSafeProxyBind({ host = "127.0.0.1", allowRemoteBind = false } = {}) {
+  if (allowRemoteBind || isLoopbackHost(host)) {
+    return;
+  }
+
+  throw new Error(`Refusing to bind Haechi proxy to non-loopback host ${host}. Use --allow-remote-bind only for explicitly secured environments.`);
+}
+
+function isLoopbackHost(host) {
+  const normalized = String(host).trim().toLowerCase();
+  return normalized === "localhost"
+    || normalized === "::1"
+    || normalized === "[::1]"
+    || normalized === "0:0:0:0:0:0:0:1"
+    || normalized === "127.0.0.1"
+    || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalized);
 }

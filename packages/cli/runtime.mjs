@@ -21,7 +21,17 @@ export function defaultConfig() {
     },
     responseProtection: {
       enabled: false,
-      mode: "enforce"
+      mode: "enforce",
+      failureMode: "fail-closed",
+      allowNonJson: false,
+      allowCompressed: false,
+      maxBytes: 1048576
+    },
+    streaming: {
+      requestMode: "block"
+    },
+    limits: {
+      maxRequestBytes: 1048576
     },
     policy: {
       mode: "dry-run",
@@ -121,6 +131,14 @@ export function normalizeConfig(config) {
       ...defaultConfig().responseProtection,
       ...(config.responseProtection ?? {})
     },
+    streaming: {
+      ...defaultConfig().streaming,
+      ...(config.streaming ?? {})
+    },
+    limits: {
+      ...defaultConfig().limits,
+      ...(config.limits ?? {})
+    },
     policy: {
       ...defaultConfig().policy,
       ...(config.policy ?? {}),
@@ -155,6 +173,18 @@ export function normalizeConfig(config) {
   }
   if (merged.tokenVault.provider !== "local") {
     throw new Error("0.2 only supports local token vault provider");
+  }
+  if (!["fail-closed", "allow"].includes(merged.responseProtection.failureMode)) {
+    throw new Error(`Invalid responseProtection.failureMode: ${merged.responseProtection.failureMode}`);
+  }
+  if (typeof merged.responseProtection.maxBytes !== "number" || merged.responseProtection.maxBytes < 1) {
+    throw new Error("responseProtection.maxBytes must be a positive number");
+  }
+  if (!["block", "pass-through"].includes(merged.streaming.requestMode)) {
+    throw new Error(`Invalid streaming.requestMode: ${merged.streaming.requestMode}`);
+  }
+  if (typeof merged.limits.maxRequestBytes !== "number" || merged.limits.maxRequestBytes < 1) {
+    throw new Error("limits.maxRequestBytes must be a positive number");
   }
   createProtocolAdapter(merged.target);
   return merged;

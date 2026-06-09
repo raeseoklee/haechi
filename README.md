@@ -1,10 +1,12 @@
 # Haechi
 
-Haechi is a self-hosted AI context enforcement layer for protecting LLM, MCP, vLLM, Ollama, and agent payloads before they reach models, tools, logs, or proxies.
+Haechi is an experimental developer preview of a self-hosted AI context enforcement layer for protecting LLM, MCP, vLLM, Ollama, and agent payloads before they reach models, tools, logs, or proxies.
 
 The name comes from Haechi, a Korean guardian figure associated with discernment and protection.
 
-The 0.1 MVP focuses on local adoption:
+This repository is intended for local development, security design review, and self-hosted integration experiments. It is not production-ready and is not a compliance guarantee.
+
+The current developer-preview scope focuses on local adoption:
 
 - `haechi init`: create a local key, sample config, and audit path
 - `haechi protect`: inspect and protect an OpenAI-compatible JSON payload
@@ -22,7 +24,7 @@ npm run demo:report
 
 The default config runs in `dry-run` mode. It detects sensitive values and writes audit metadata, but it does not modify outbound payloads until policy mode is changed.
 
-`npm run demo:init` writes `haechi.config.json` and `.haechi/dev.keys.json` locally. A non-secret template is available at `haechi.config.example.json`.
+`npm run demo:init` writes `haechi.config.json` and `.haechi/dev.keys.json` locally. The generated key file is for local development only. Haechi 0.3.x does not include a production KMS/HSM/Vault key provider. A non-secret template is available at `haechi.config.example.json`.
 
 ## Local Proxy
 
@@ -31,6 +33,10 @@ node packages/cli/bin/haechi.mjs proxy --config haechi.config.json --port 8787
 ```
 
 Point an existing HTTP JSON client at `http://localhost:8787` and set `target.upstream` in `haechi.config.json`.
+
+The proxy binds to loopback by default. Binding to `0.0.0.0`, `::`, or another non-loopback host fails unless `--allow-remote-bind` is provided. Use that flag only behind explicit network access controls.
+
+Streaming requests with `stream: true` are blocked by default. Haechi 0.3.x does not inspect SSE or NDJSON streams. Set `streaming.requestMode` to `pass-through` only when the caller explicitly accepts that streaming payloads are not protected by Haechi.
 
 ## Local Inference Servers
 
@@ -48,7 +54,8 @@ Haechi 0.3 includes protocol adapter presets for OpenAI-compatible servers, vLLM
   },
   "responseProtection": {
     "enabled": true,
-    "mode": "enforce"
+    "mode": "enforce",
+    "failureMode": "fail-closed"
   }
 }
 ```
@@ -61,6 +68,8 @@ Then point an OpenAI-compatible client at `http://127.0.0.1:8787/v1`. For Ollama
 - The 0.1 crypto provider uses Node `crypto` with AES-256-GCM and local software keys.
 - Audit events must not contain raw prompt, tool result, secret, or PII values.
 - Unknown or invalid policy/config errors should fail closed in enforcement paths.
+- Response protection fails closed for non-JSON, invalid JSON, compressed, or oversized responses unless an explicit allow policy is configured.
+- The package is a developer preview. Do not expose it as an internet-facing production LLM gateway.
 
 ## Current Scope
 

@@ -66,7 +66,11 @@ async function initCommand(argv) {
     created: result.created,
     keyFile: result.config.keys.keyFile,
     auditPath: result.config.audit.path,
-    mode: result.config.mode
+    mode: result.config.mode,
+    warnings: [
+      "The generated .haechi/dev.keys.json file is for local development only.",
+      "Haechi 0.3.x does not include a production KMS/HSM/Vault key provider."
+    ]
   });
 }
 
@@ -115,12 +119,16 @@ async function proxyCommand(argv) {
   const runtime = createRuntime(config);
   const port = Number(options.port ?? 8787);
   const host = options.host ?? "127.0.0.1";
-  const proxy = createHaechiProxy({ runtime, port, host });
+  const allowRemoteBind = Boolean(options["allow-remote-bind"]);
+  const proxy = createHaechiProxy({ runtime, port, host, allowRemoteBind });
   const address = await proxy.listen();
 
   console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
   console.log(`Upstream: ${config.target.upstream}`);
   console.log(`Mode: ${config.policy.mode ?? config.mode}`);
+  if (allowRemoteBind) {
+    console.error("warning: --allow-remote-bind exposes the proxy beyond loopback. Put Haechi behind explicit network access controls.");
+  }
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.once(signal, async () => {
@@ -256,7 +264,7 @@ Usage:
   haechi init [--config haechi.config.json] [--force]
   haechi protect <input.json> [--config haechi.config.json]
   haechi report [--audit .haechi/audit.jsonl]
-  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port 8787]
+  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port 8787] [--allow-remote-bind]
   haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
   haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
   haechi token-reveal <token> [--config haechi.config.json]

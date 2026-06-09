@@ -2,9 +2,9 @@
 
 ## Scope
 
-This repository is an early self-hosted security toolkit. It is not a compliance certification, legal opinion, or assurance report.
+This repository is an experimental self-hosted security toolkit. It is not production-ready and is not a compliance certification, legal opinion, or assurance report.
 
-Release risk tracking is maintained in `docs/current/risk-register-release-gate.md`. The current npm release gate is blocked until the P0 release risks in that document are closed.
+Release risk tracking is maintained in `docs/current/risk-register-release-gate.md`. npm release checks must pass `npm run release:preflight`; actual npm publication additionally requires `npm run release:preflight:npm` from an authenticated npm account.
 
 ## Supported Versions
 
@@ -19,4 +19,10 @@ Report suspected vulnerabilities privately to the repository maintainer. Do not 
 - Audit output must not contain raw sensitive payload values.
 - Encryption must bind ciphertext to canonical AAD.
 - Policy enforcement must prefer blocking over leaking plaintext when configuration is invalid.
-- Plugin/provider implementations that read plaintext or use network egress must declare that capability in future plugin manifests.
+- Proxy listeners must stay loopback-only unless remote binding is explicitly enabled and the deployment supplies network access controls.
+- Streaming payloads are not inspected in 0.3.x and must fail closed unless the operator explicitly selects pass-through.
+- Plugin/provider implementations that read plaintext or use network egress must declare that capability in plugin manifests.
+
+## Local Development Keys
+
+`haechi init` creates `.haechi/dev.keys.json` for local development. Treat this file as a disposable development secret. Do not reuse it for production data, shared environments, compliance evidence, or internet-facing gateways.
