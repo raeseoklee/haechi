@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRuntime } from "../packages/cli/runtime.mjs";
+import { verifyAuditChain } from "../packages/audit/index.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
+import { buildPolicy } from "../packages/policy/index.mjs";
 
 test("pipeline redacts and masks in enforce mode without audit plaintext", async () => {
   const dir = await mkdtemp(join(tmpdir(), "haechi-pipeline-"));
@@ -43,6 +45,7 @@ test("pipeline redacts and masks in enforce mode without audit plaintext", async
   const audit = await readFile(auditPath, "utf8");
   assert.doesNotMatch(audit, /minji\.kim@example\.com/);
   assert.doesNotMatch(audit, /010-1234-5678/);
+  assert.equal((await verifyAuditChain(auditPath)).valid, true);
 });
 
 test("pipeline blocks configured secrets in enforce mode", async () => {
@@ -71,4 +74,45 @@ test("pipeline blocks configured secrets in enforce mode", async () => {
 
   const audit = await readFile(auditPath, "utf8");
   assert.doesNotMatch(audit, /sk_demo_/);
+});
+
+test("policy rejects unsafe action downgrades by default", () => {
+  assert.throws(
+    () => buildPolicy({
+      presets: ["secrets-only"],
+      actions: {
+        api_key: "allow"
+      }
+    }),
+    /Policy action conflict/
+  );
+});
+
+test("audit hash chain detects tampering", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-audit-chain-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  await runtime.haechi.protectJson({ message: "minji.kim@example.com" });
+  await runtime.haechi.protectJson({ message: "seoul@example.com" });
+  assert.deepEqual(await verifyAuditChain(auditPath), { valid: true, records: 2 });
+
+  const lines = (await readFile(auditPath, "utf8")).trim().split("\n");
+  const first = JSON.parse(lines[0]);
+  first.summary.detectionCount = 99;
+  await writeFile(auditPath, `${JSON.stringify(first)}\n${lines[1]}\n`, "utf8");
+
+  const verification = await verifyAuditChain(auditPath);
+  assert.equal(verification.valid, false);
+  assert.equal(verification.reason, "event hash mismatch");
 });

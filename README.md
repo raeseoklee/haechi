@@ -62,6 +62,16 @@ Haechi 0.3 includes protocol adapter presets for OpenAI-compatible servers, vLLM
 
 Then point an OpenAI-compatible client at `http://127.0.0.1:8787/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy.
 
+## Privacy Profiles
+
+Haechi includes baseline regional privacy profiles for local policy bootstrapping:
+
+- `kr-pipa`
+- `eu-gdpr`
+- `us-general`
+
+Set `privacy.profile` in `haechi.config.json` to apply the profile's default actions before enforcement. These profiles are engineering defaults, not legal advice.
+
 ## Security Notes
 
 - This project is not a compliance guarantee.
@@ -78,3 +88,5 @@ Then point an OpenAI-compatible client at `http://127.0.0.1:8787/v1`. For Ollama
 0.2 adds local TokenVault, signed policy bundle commands, plugin manifest validation, and an MCP stdio JSON-RPC line filter skeleton. See `docs/current/release-0.2-implementation-scope.md`.
 
 0.3 adds local inference protocol adapters, optional JSON response protection, npm package metadata, and publish-ready exports. See `docs/current/release-0.3-implementation-scope.md`.
+
+0.3.1 adds release safety gates, response fail-closed behavior, audit hash chaining, token reveal governance, provider injection, privacy profiles, CI/SBOM/provenance workflow scaffolding, and dedicated threat/shared-responsibility/API-stability docs.

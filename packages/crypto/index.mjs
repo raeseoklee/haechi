@@ -57,8 +57,14 @@ export function createLocalCryptoProvider({ keyFile }) {
     },
     async decrypt({ envelope, aad }) {
       const { key } = await loadKey();
-      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
+      if (envelope.alg && envelope.alg !== ALG) {
+        throw new Error(`Unsupported local crypto algorithm: ${envelope.alg}`);
+      }
       const aadBytes = Buffer.from(canonicalize(aad), "utf8");
+      if (envelope.aadHash && envelope.aadHash !== sha256(aadBytes)) {
+        throw new Error("AAD hash mismatch");
+      }
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
       decipher.setAAD(aadBytes);
       decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
       const plaintext = Buffer.concat([

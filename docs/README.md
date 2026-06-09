@@ -12,6 +12,10 @@
 - `docs/current/release-0.2-implementation-scope.md`: 0.2 TokenVault, signed policy, plugin manifest, MCP stdio 구현 범위
 - `docs/current/release-0.3-implementation-scope.md`: 0.3 vLLM/Ollama/llama.cpp adapter, response protection, npm publish readiness 구현 범위
 - `docs/current/risk-register-release-gate.md`: 0.3 기준 배포 차단 리스크, 보안/운영 리스크, npm release gate
+- `docs/current/threat-model.md`: Haechi 0.3.1 신뢰 경계, 보호 자산, 주요 위협과 통제
+- `docs/current/shared-responsibility.md`: self-hosted 운영에서 Haechi와 사용자/운영자의 책임 분리
+- `docs/current/api-stability.md`: developer preview API 안정성 및 migration note 기준
+- `docs/current/release-process.md`: release preflight, SBOM, npm provenance publish 절차
 
 ## Archive
 

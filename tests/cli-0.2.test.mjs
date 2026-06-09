@@ -62,10 +62,25 @@ test("0.2 CLI policy bundle, plugin validation, and token reveal work", async ()
   const protectedOutput = JSON.parse(protect.stdout);
   const token = protectedOutput.payload.message.match(/\[TOKEN:(tok_email_[a-f0-9]+)\]/)[1];
 
-  const reveal = spawnSync(process.execPath, [CLI, "token-reveal", token], {
+  const deniedReveal = spawnSync(process.execPath, [CLI, "token-reveal", token], {
+    cwd: dir,
+    encoding: "utf8"
+  });
+  assert.notEqual(deniedReveal.status, 0);
+  assert.match(deniedReveal.stderr, /Token reveal is disabled/);
+
+  const reveal = spawnSync(process.execPath, [CLI, "token-reveal", token, "--allow-dev-reveal"], {
     cwd: dir,
     encoding: "utf8"
   });
   assert.equal(reveal.status, 0, reveal.stderr);
   assert.equal(JSON.parse(reveal.stdout).plaintext, "minji.kim@example.com");
+
+  const exported = spawnSync(process.execPath, [CLI, "token-export", "--type", "email"], {
+    cwd: dir,
+    encoding: "utf8"
+  });
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.equal(JSON.parse(exported.stdout).tokens[0].token, token);
+  assert.doesNotMatch(exported.stdout, /minji\.kim@example\.com/);
 });

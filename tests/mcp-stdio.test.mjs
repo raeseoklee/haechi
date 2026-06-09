@@ -33,3 +33,30 @@ test("MCP stdio JSON-RPC params are protected", async () => {
 
   assert.equal(message.params.email, "[REDACTED:email]");
 });
+
+test("MCP stdio rejects methods outside allowlist", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-mcp-stdio-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: join(dir, ".haechi", "audit.jsonl") },
+    mcp: {
+      allowedMethods: ["tools/call"]
+    }
+  });
+
+  const message = await protectMcpJsonRpcMessage({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "roots/list",
+    params: {}
+  }, runtime);
+
+  assert.equal(message.error.message, "haechi_mcp_method_not_allowed");
+});

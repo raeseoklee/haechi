@@ -212,22 +212,34 @@ function readBody(request, { maxBytes }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let received = 0;
+    let rejected = false;
 
     request.on("data", (chunk) => {
+      if (rejected) {
+        return;
+      }
       received += chunk.byteLength;
       if (received > maxBytes) {
+        rejected = true;
         reject(proxyError({
           statusCode: 413,
           errorCode: "haechi_request_body_too_large",
           message: `Request body exceeds limits.maxRequestBytes (${maxBytes})`
         }));
-        request.destroy();
         return;
       }
       chunks.push(chunk);
     });
-    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    request.on("error", reject);
+    request.on("end", () => {
+      if (!rejected) {
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      }
+    });
+    request.on("error", (error) => {
+      if (!rejected) {
+        reject(error);
+      }
+    });
   });
 }
 

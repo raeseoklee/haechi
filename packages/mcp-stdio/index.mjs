@@ -4,10 +4,21 @@ export async function protectMcpJsonRpcMessage(message, runtime) {
   if (!message || typeof message !== "object") {
     throw new Error("MCP message must be a JSON object");
   }
+  const policy = runtime.config.mcp;
+  if (policy.requireJsonRpc && message.jsonrpc !== "2.0") {
+    return errorJsonRpc(message.id, -32002, "haechi_mcp_invalid_jsonrpc", {
+      reason: "MCP messages must use JSON-RPC 2.0"
+    });
+  }
+  if (message.method && !methodAllowed(message.method, policy.allowedMethods)) {
+    return errorJsonRpc(message.id, -32003, "haechi_mcp_method_not_allowed", {
+      method: message.method
+    });
+  }
 
   const next = structuredClone(message);
 
-  if (Object.prototype.hasOwnProperty.call(next, "params")) {
+  if (policy.protectParams && Object.prototype.hasOwnProperty.call(next, "params")) {
     const result = await runtime.haechi.protectJson(next.params, {
       protocol: "mcp-stdio",
       operation: next.method ?? "params",
@@ -19,7 +30,7 @@ export async function protectMcpJsonRpcMessage(message, runtime) {
     next.params = result.payload;
   }
 
-  if (Object.prototype.hasOwnProperty.call(next, "result")) {
+  if (policy.protectResults && Object.prototype.hasOwnProperty.call(next, "result")) {
     const result = await runtime.haechi.protectJson(next.result, {
       protocol: "mcp-stdio",
       operation: "result",
@@ -62,16 +73,24 @@ export async function runMcpStdioFilter({ input = process.stdin, output = proces
 }
 
 function blockedJsonRpc(id, result) {
+  return errorJsonRpc(id, -32001, "haechi_policy_block", {
+    auditId: result.auditEvent.id,
+    summary: result.summary
+  });
+}
+
+function errorJsonRpc(id, code, message, data) {
   return {
     jsonrpc: "2.0",
     error: {
-      code: -32001,
-      message: "haechi_policy_block",
-      data: {
-        auditId: result.auditEvent.id,
-        summary: result.summary
-      }
+      code,
+      message,
+      data
     },
     id: id ?? null
   };
+}
+
+function methodAllowed(method, allowedMethods) {
+  return allowedMethods.includes("*") || allowedMethods.includes(method);
 }

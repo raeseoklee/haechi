@@ -35,6 +35,9 @@ try {
     case "token-purge":
       await tokenPurgeCommand(argv);
       break;
+    case "token-export":
+      await tokenExportCommand(argv);
+      break;
     case "plugin-validate":
       await pluginValidateCommand(argv);
       break;
@@ -185,6 +188,9 @@ async function tokenRevealCommand(argv) {
   }
   const options = parseOptions(rest);
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  if (options["allow-dev-reveal"]) {
+    config.tokenVault.revealPolicy = "local-dev";
+  }
   const runtime = createRuntime(config);
   const result = await runtime.tokenVault.reveal({ token });
   writeJson({
@@ -207,6 +213,19 @@ async function tokenPurgeCommand(argv) {
     ok: true,
     command: "token-purge",
     result: await runtime.tokenVault.purge({ token })
+  });
+}
+
+async function tokenExportCommand(argv) {
+  const options = parseOptions(argv);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const runtime = createRuntime(config);
+  writeJson({
+    ok: true,
+    command: "token-export",
+    tokens: await runtime.tokenVault.exportMetadata({
+      type: typeof options.type === "string" ? options.type : null
+    })
   });
 }
 
@@ -267,8 +286,9 @@ Usage:
   haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port 8787] [--allow-remote-bind]
   haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
   haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
-  haechi token-reveal <token> [--config haechi.config.json]
+  haechi token-reveal <token> [--config haechi.config.json] [--allow-dev-reveal]
   haechi token-purge <token> [--config haechi.config.json]
+  haechi token-export [--config haechi.config.json] [--type email]
   haechi plugin-validate <plugin-manifest.json>
   haechi mcp-stdio [--config haechi.config.json]
 

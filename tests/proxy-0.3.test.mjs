@@ -193,6 +193,58 @@ test("responseProtection fails closed for uninspectable responses", async () => 
   }
 });
 
+test("proxy rejects request bodies over configured limit", async () => {
+  let upstreamHit = false;
+  const upstream = createServer(async (_request, response) => {
+    upstreamHit = true;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-limit-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    limits: {
+      maxRequestBytes: 64
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "a".repeat(128) }]
+      })
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 413);
+    assert.equal(json.error, "haechi_request_body_too_large");
+    assert.equal(upstreamHit, false);
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
 function listen(server) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server.address()));

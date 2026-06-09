@@ -19,6 +19,7 @@ const CAPABILITY_KEYS = [
   "auditWrite",
   "externalSecrets"
 ];
+const VALID_RUNTIMES = new Set(["manifest-only"]);
 
 export async function validatePluginManifestFile(path) {
   const manifest = JSON.parse(await readFile(path, "utf8"));
@@ -40,6 +41,10 @@ export function validatePluginManifest(manifest) {
 
     if (plugin.kind && !VALID_KINDS.has(plugin.kind)) {
       errors.push(`invalid kind: ${plugin.kind}`);
+    }
+
+    if (plugin.runtime && !VALID_RUNTIMES.has(plugin.runtime)) {
+      errors.push("dynamic plugin execution is not supported; set runtime to manifest-only");
     }
 
     if (!plugin.compatibility?.haechiCore) {

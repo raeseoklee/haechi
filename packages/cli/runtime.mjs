@@ -8,6 +8,7 @@ import { createJsonlAuditSink } from "../audit/index.mjs";
 import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
+import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
@@ -54,7 +55,18 @@ export function defaultConfig() {
     },
     tokenVault: {
       provider: "local",
-      path: ".haechi/token-vault.json"
+      path: ".haechi/token-vault.json",
+      revealPolicy: "disabled",
+      retentionDays: 30
+    },
+    privacy: {
+      profile: null
+    },
+    mcp: {
+      allowedMethods: ["initialize", "tools/call", "resources/read", "prompts/get"],
+      protectParams: true,
+      protectResults: true,
+      requireJsonRpc: true
     }
   };
 }
@@ -84,10 +96,17 @@ export async function writeDefaultConfig(configPath = DEFAULT_CONFIG_PATH, { for
   return { created: true, configPath, config };
 }
 
-export function createRuntime(config) {
+export function createRuntime(config, providers = {}) {
   const normalized = normalizeConfig(config);
-  const cryptoProvider = createLocalCryptoProvider({ keyFile: normalized.keys.keyFile });
-  const tokenVault = createLocalTokenVault({ path: normalized.tokenVault.path, cryptoProvider });
+  const cryptoProvider = providers.cryptoProvider ?? createConfiguredCryptoProvider(normalized);
+  assertProvider("cryptoProvider", cryptoProvider, ["encrypt", "decrypt"]);
+  const tokenVault = providers.tokenVault ?? createLocalTokenVault({
+    path: normalized.tokenVault.path,
+    cryptoProvider,
+    revealPolicy: normalized.tokenVault.revealPolicy,
+    retentionDays: normalized.tokenVault.retentionDays
+  });
+  assertProvider("tokenVault", tokenVault, ["tokenize", "reveal", "purge"]);
   const policySource = normalized.policy.bundlePath
     ? {
       ...loadVerifiedPolicyBundleFileSync({
@@ -100,9 +119,16 @@ export function createRuntime(config) {
       ...normalized.policy,
       mode: normalized.policy.mode ?? normalized.mode
     };
-  const policy = buildPolicy({
-    ...policySource
-  });
+  const policy = buildPolicy(normalized.privacy.profile
+    ? applyPrivacyProfile(policySource, normalized.privacy.profile)
+    : policySource);
+
+  const filterEngine = providers.filterEngine ?? createDefaultFilterEngine(normalized.filters);
+  assertProvider("filterEngine", filterEngine, ["detect"]);
+  const policyEngine = providers.policyEngine ?? createPolicyEngine(policy);
+  assertProvider("policyEngine", policyEngine, ["decide"]);
+  const auditSink = providers.auditSink ?? createJsonlAuditSink({ path: normalized.audit.path });
+  assertProvider("auditSink", auditSink, ["record"]);
 
   return {
     config: normalized,
@@ -110,11 +136,11 @@ export function createRuntime(config) {
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
-      filterEngine: createDefaultFilterEngine(normalized.filters),
-      policyEngine: createPolicyEngine(policy),
+      filterEngine,
+      policyEngine,
       cryptoProvider,
       tokenVault,
-      auditSink: createJsonlAuditSink({ path: normalized.audit.path })
+      auditSink
     })
   };
 }
@@ -162,17 +188,44 @@ export function normalizeConfig(config) {
     tokenVault: {
       ...defaultConfig().tokenVault,
       ...(config.tokenVault ?? {})
+    },
+    privacy: {
+      ...defaultConfig().privacy,
+      ...(config.privacy ?? {})
+    },
+    mcp: {
+      ...defaultConfig().mcp,
+      ...(config.mcp ?? {}),
+      allowedMethods: config.mcp?.allowedMethods ?? defaultConfig().mcp.allowedMethods
     }
   };
 
-  if (merged.keys.provider !== "local") {
-    throw new Error("Current implementation only supports local key provider");
+  if (!["local", "external"].includes(merged.keys.provider)) {
+    throw new Error(`Unsupported key provider: ${merged.keys.provider}`);
   }
   if (merged.audit.sink !== "jsonl") {
     throw new Error("Current implementation only supports jsonl audit sink");
   }
   if (merged.tokenVault.provider !== "local") {
     throw new Error("0.2 only supports local token vault provider");
+  }
+  if (!["disabled", "local-dev"].includes(merged.tokenVault.revealPolicy)) {
+    throw new Error(`Invalid tokenVault.revealPolicy: ${merged.tokenVault.revealPolicy}`);
+  }
+  if (typeof merged.tokenVault.retentionDays !== "number" || merged.tokenVault.retentionDays < 1) {
+    throw new Error("tokenVault.retentionDays must be a positive number");
+  }
+  if (!Array.isArray(merged.mcp.allowedMethods) || merged.mcp.allowedMethods.length === 0) {
+    throw new Error("mcp.allowedMethods must be a non-empty array");
+  }
+  if (typeof merged.mcp.protectParams !== "boolean" || typeof merged.mcp.protectResults !== "boolean") {
+    throw new Error("mcp.protectParams and mcp.protectResults must be boolean");
+  }
+  if (typeof merged.mcp.requireJsonRpc !== "boolean") {
+    throw new Error("mcp.requireJsonRpc must be boolean");
+  }
+  if (merged.privacy.profile) {
+    getPrivacyProfile(merged.privacy.profile);
   }
   if (!["fail-closed", "allow"].includes(merged.responseProtection.failureMode)) {
     throw new Error(`Invalid responseProtection.failureMode: ${merged.responseProtection.failureMode}`);
@@ -188,4 +241,19 @@ export function normalizeConfig(config) {
   }
   createProtocolAdapter(merged.target);
   return merged;
+}
+
+function createConfiguredCryptoProvider(config) {
+  if (config.keys.provider === "external") {
+    throw new Error("keys.provider external requires createRuntime(config, { cryptoProvider })");
+  }
+  return createLocalCryptoProvider({ keyFile: config.keys.keyFile });
+}
+
+function assertProvider(name, provider, methods) {
+  for (const method of methods) {
+    if (typeof provider?.[method] !== "function") {
+      throw new Error(`${name} provider must implement ${method}()`);
+    }
+  }
 }

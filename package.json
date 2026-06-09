@@ -12,6 +12,10 @@
   "bugs": {
     "url": "https://github.com/raeseoklee/haechi/issues"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "keywords": [
     "llm",
     "mcp",
@@ -36,6 +40,7 @@
     "./plugin": "./packages/plugin/index.mjs",
     "./policy": "./packages/policy/index.mjs",
     "./policy-bundle": "./packages/policy-bundle/index.mjs",
+    "./privacy-profiles": "./packages/privacy-profiles/index.mjs",
     "./protocol-adapters": "./packages/protocol-adapters/index.mjs",
     "./proxy": "./packages/proxy/index.mjs",
     "./runtime": "./packages/cli/runtime.mjs",
@@ -54,6 +59,8 @@
     "test": "node --test",
     "pack:dry": "npm pack --dry-run",
     "scan:stale-names": "node scripts/stale-name-scan.mjs",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "bench:payload": "node scripts/bench-payload.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:preflight:npm": "node scripts/release-preflight.mjs --require-npm-auth",
     "haechi": "node packages/cli/bin/haechi.mjs",

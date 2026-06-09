@@ -34,3 +34,31 @@ test("custom filter rule can be added without changing core", async () => {
 
   assert.equal(detections[0].type, "contract_id");
 });
+
+test("KR RRN detector requires checksum-valid synthetic values", async () => {
+  const filter = createDefaultFilterEngine();
+  const detections = await filter.detect({
+    entries: collectStringEntries({
+      valid: "synthetic 900101-1234568",
+      invalid: "synthetic 900101-1234567"
+    }),
+    context: {}
+  });
+
+  assert.equal(detections.filter((detection) => detection.type === "kr_rrn").length, 1);
+});
+
+test("custom filter rejects unsafe regex shapes", () => {
+  assert.throws(
+    () => createDefaultFilterEngine({
+      customRules: [
+        {
+          id: "unsafe",
+          type: "unsafe",
+          pattern: "(a+)+"
+        }
+      ]
+    }),
+    /nested quantifiers/
+  );
+});

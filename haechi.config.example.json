@@ -44,6 +44,22 @@
   },
   "tokenVault": {
     "provider": "local",
-    "path": ".haechi/token-vault.json"
+    "path": ".haechi/token-vault.json",
+    "revealPolicy": "disabled",
+    "retentionDays": 30
+  },
+  "privacy": {
+    "profile": null
+  },
+  "mcp": {
+    "allowedMethods": [
+      "initialize",
+      "tools/call",
+      "resources/read",
+      "prompts/get"
+    ],
+    "protectParams": true,
+    "protectResults": true,
+    "requireJsonRpc": true
   }
 }

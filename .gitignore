@@ -4,5 +4,6 @@
 AGENTS.md
 node_modules/
 coverage/
+sbom.cdx.json
 *.log
 tmp/

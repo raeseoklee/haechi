@@ -48,13 +48,29 @@ const PRESETS = {
 };
 
 const VALID_ACTIONS = new Set(["allow", "redact", "mask", "tokenize", "encrypt", "block"]);
+const ACTION_STRENGTH = {
+  allow: 0,
+  redact: 1,
+  mask: 1,
+  tokenize: 2,
+  encrypt: 2,
+  block: 3
+};
 
-export function buildPolicy({ presets = [], mode = "dry-run", defaultAction = "redact", actions = {}, customRules = [] } = {}) {
+export function buildPolicy({
+  presets = [],
+  mode = "dry-run",
+  defaultAction = "redact",
+  actions = {},
+  customRules = [],
+  allowUnsafeOverrides = false
+} = {}) {
   const merged = {
     mode,
     defaultAction,
     actions: {},
-    customRules
+    customRules,
+    allowUnsafeOverrides
   };
 
   for (const presetName of presets) {
@@ -65,10 +81,20 @@ export function buildPolicy({ presets = [], mode = "dry-run", defaultAction = "r
     if (preset.defaultAction) {
       merged.defaultAction = preset.defaultAction;
     }
-    Object.assign(merged.actions, preset.actions ?? {});
+    for (const [type, action] of Object.entries(preset.actions ?? {})) {
+      mergeAction(merged.actions, type, action, {
+        source: `preset:${presetName}`,
+        allowUnsafeOverrides
+      });
+    }
   }
 
-  Object.assign(merged.actions, actions);
+  for (const [type, action] of Object.entries(actions)) {
+    mergeAction(merged.actions, type, action, {
+      source: "policy.actions",
+      allowUnsafeOverrides
+    });
+  }
   validatePolicy(merged);
   return merged;
 }
@@ -112,5 +138,28 @@ export function validatePolicy(policy) {
   }
   if (policy.mode && !["dry-run", "report-only", "enforce"].includes(policy.mode)) {
     throw new Error(`Invalid policy mode: ${policy.mode}`);
+  }
+  if (policy.allowUnsafeOverrides !== undefined && typeof policy.allowUnsafeOverrides !== "boolean") {
+    throw new Error("allowUnsafeOverrides must be boolean");
+  }
+}
+
+function mergeAction(target, type, action, { source, allowUnsafeOverrides }) {
+  if (!VALID_ACTIONS.has(action)) {
+    throw new Error(`Invalid action for ${type}: ${action}`);
+  }
+
+  const existing = target[type];
+  if (!existing) {
+    target[type] = action;
+    return;
+  }
+
+  if (ACTION_STRENGTH[action] < ACTION_STRENGTH[existing] && !allowUnsafeOverrides) {
+    throw new Error(`Policy action conflict for ${type}: ${source} cannot weaken ${existing} to ${action}`);
+  }
+
+  if (ACTION_STRENGTH[action] >= ACTION_STRENGTH[existing]) {
+    target[type] = action;
   }
 }
