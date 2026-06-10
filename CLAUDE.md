@@ -18,13 +18,18 @@ npm run demo:protect                  # protect a sample payload
 npm run demo:report                   # summarize audit events
 
 npm run haechi -- <cmd>               # run the CLI (e.g. npm run haechi -- proxy)
-npm run release:preflight             # pre-release gate checks
+npm run check:types                   # tsc --noEmit over jsconfig.json (LSP/type sanity)
+npm run release:preflight             # pre-release gate checks (tests + types + stale-names + pack)
 npm run scan:stale-names              # guard against stale naming in publishable files
-npm run sbom                          # regenerate sbom.cdx.json
+npm run sbom                          # regenerate sbom.cdx.json (omits dev deps)
 npm run pack:dry                      # npm pack --dry-run (verify published file set)
 ```
 
-There is **no build step and no lint step** — this is plain ESM (`"type": "module"`) targeting Node `>=22` with **zero runtime dependencies** (only `node:` builtins). The `node:test` runner is the only test framework.
+There is **no build step and no lint step** — this is plain ESM (`"type": "module"`) targeting Node `>=22` with **zero runtime dependencies** (only `node:` builtins; `typescript`/`@types/node` are dev-only for LSP and `check:types`). The `node:test` runner is the only test framework. Editor LSP is configured by `jsconfig.json`; `checkJs` is off — opt files in with `// @ts-check`.
+
+## Git workflow
+
+Follow `CONTRIBUTING.md`: branch off `main` with a type prefix (`feature/`, `fix/`, `docs/`, `chore/`, `release/`, `hotfix/`) — never personal-name prefixes. Commits use one-line imperative English subjects; non-trivial changes include Lore-style decision trailers when useful. Do not add attribution or generated-by footers (no `Co-Authored-By`). PRs target `main`, English body with Summary/Verification sections, no generated-with footers. Documentation is English-main with Korean `*.ko.md` siblings — update both.
 
 ## Architecture
 
