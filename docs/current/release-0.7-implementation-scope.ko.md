@@ -1,9 +1,10 @@
 # Haechi 0.7 Implementation Scope
 
-- 문서 상태: Draft 0.1 (설계 — 미구현)
+- 문서 상태: Final
 - 작성일: 2026-06-10
 - 기준 버전: 0.7.0 (0.6.0 이후)
 - 성격: ops hardening
+- 구현 완료: 2026-06-10 — PR #22 (audit anchoring), #23 (cryptoProvider 계약 + reference KMS), #24 (signed release artifacts)
 
 ## 1. 릴리스 목표
 

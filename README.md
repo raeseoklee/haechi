@@ -243,6 +243,9 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 - `haechi init --force` rotates the local key: prior keys are kept as `retired` so existing envelopes and token vault records stay decryptable by `kid`.
 - Privacy profiles can strengthen but never weaken an explicitly stricter user action.
 - Detection scans string values, JSON numbers (e.g. card numbers), and object key names. Base64/URL-encoded values and URL query strings are NOT inspected.
+- Audit tail truncation: set `audit.anchor.mode: file` (on append-only/separate media) so `haechi audit-verify --anchor` detects deletion of trailing records back to the last anchor. On the same writable filesystem an attacker can truncate both files together.
+- Key custody: `keys.provider: external` accepts an injected `cryptoProvider`; validate adapters with `assertCryptoProviderConformance`. See `examples/crypto-kms-reference/` for an envelope-encryption KMS adapter.
+- Release integrity: published tarballs carry an npm provenance attestation; GitHub release assets add a sigstore attestation and `SHA256SUMS` (verify with `gh attestation verify` and `node scripts/release-checksums.mjs --check`).
 - The package is a developer preview. Do not expose it as an internet-facing production LLM gateway.
 
 ## Current Scope
@@ -262,3 +265,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.5.0 adds SSE/NDJSON streaming response inspection: `streaming.requestMode: "inspect"` stream-filters responses with a bounded sliding buffer that catches PII split across frames (`streaming.maxMatchBytes`). See `docs/current/release-0.5-implementation-scope.md`.
 
 0.6.0 adds authentication and per-client controls: built-in bearer auth with a hashed token store and `haechi auth` CLI, named policy profiles bound by identity scope/label, model allowlisting, and per-identity rate limiting — with PII-safe identity in the audit log. See `docs/current/release-0.6-implementation-scope.md`.
+
+0.7.0 is operational hardening: audit head-hash anchoring (`audit.anchor`) that detects tail truncation, a hardened external `cryptoProvider` contract with `assertCryptoProviderConformance` and a reference KMS adapter, and signed/checksummed GitHub release artifacts. See `docs/current/release-0.7-implementation-scope.md`.

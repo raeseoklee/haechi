@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.6.0
+- 기준 버전: 0.7.0
 
 ## 1. 버전 해석
 
@@ -44,6 +44,9 @@
 - `haechi/stream-filter` (`inspectResponseStream`, path helpers) 및 `createStreamProtector` (스트리밍 검사 내부 구현)
 - `haechi/auth` (`createBearerAuthProvider`, token store, `buildIdentity`) 및 `authProvider` 계약
 - `policy.profiles`/`policy.profileBinding`/`modelAllowlist`/`rate` 및 `identity`/`profile` audit 필드
+- `assertCryptoProviderConformance` 및 강화된 cryptoProvider 계약 (envelope base shape + provider 확장)
+- `audit.anchor` 설정 및 `verifyAuditChain(path, { anchorPath })`
+- `scripts/release-checksums.mjs` (SHA256SUMS 생성/검증)
 
 ## 4. Migration note 기준
 

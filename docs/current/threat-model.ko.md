@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.6.0
+- 기준 버전: 0.7.0
 
 ## 1. 보호 대상
 
@@ -48,6 +48,9 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | signing/encryption 키 혼용 | key separation 위반 | policy bundle 서명 키를 domain-separated 파생 키로 분리 |
 | JSON number/object key 은닉 | 카드번호 등 비문자열 leaf 미탐지 | number leaf와 object key도 detection/transform 대상 |
 | 인증 없는 멀티 클라이언트 접근 | 로컬 프로세스가 upstream / token round-trip 경로를 무단 사용 | 선택적 bearer auth (`auth.provider: bearer`); 없거나 잘못된 경우 → 바디 읽기 전 401; identity별 rate limit 및 model allowlist |
+| Audit tail truncation | 꼬리 audit 레코드의 무음 삭제 | 추가 전용/별도 미디어의 `audit.anchor` head-hash anchoring으로 마지막 anchor까지의 절단 탐지 (0.7) |
+| Local dev key in production | 소프트웨어 키의 운영 custody 오용 | `assertCryptoProviderConformance`를 통한 외부 `cryptoProvider` 주입; reference KMS adapter (envelope 암호화) |
+| Tampered release artifact | 변조된 tarball 설치 | npm provenance + GitHub release tarball의 sigstore attestation + `SHA256SUMS` (0.7) |
 | audit에 원시 credentials/identity 노출 | audit 로그를 통한 token 또는 subject 유출 | Token은 keyed-HMAC 해시로만 저장; identity subject/issuer는 keyed HMAC 처리; `auth_denied` 레코드에 token 미포함 |
 | token round-trip의 타 토큰 복원 | 클라이언트/요청 간 평문 복구 | detokenization은 opt-in(`detokenizeResponses`)이며 요청 스코프: 같은 요청을 보호하며 발급된 토큰만 복원 |
 | tool result/응답 내 간접 prompt injection | 심어진 지시문에 의한 agent 조작 | 응답 방향 휴리스틱, 기본 report-only(`injection` action `allow`), 격상은 명시적 정책 선택. 완전 방어 아님 |
@@ -66,7 +69,7 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 - 외부 MCP server의 OAuth/resource binding 검증
 - base64/URL-encoded 값, 유니코드 난독화 값의 디코딩 후 검사
 - URL query string 내 민감값 검사 (JSON body만 검사)
-- audit hash chain의 tail truncation(꼬리 절단) 탐지 — 체인은 변조/재정렬은 탐지하지만 마지막 N개 레코드 삭제는 외부 보존 사본 없이는 탐지 불가
+- 마지막 anchor 이후의 audit tail truncation — `audit.anchor`(0.7)는 anchor가 추가 전용/별도 미디어에 있을 때 마지막 anchor까지의 레코드 삭제를 탐지한다; 마지막 anchor 이후 기록된 레코드와 동일 파일시스템 anchor는 대상에서 제외된다
 - JSON-RPC batch 메시지 처리 (MCP stdio filter는 batch를 fail-closed로 거부)
 
 ## 5. 남은 운영 전제

@@ -2,7 +2,7 @@
 
 - Status: Draft 0.1
 - Date: 2026-06-10
-- Target version: 0.6.0
+- Target version: 0.7.0
 
 ## 1. Assets Under Protection
 
@@ -48,6 +48,9 @@ The primary assets Haechi protects are:
 | Signing/encryption key conflation | Key separation violation | Policy bundle signing key isolated as a domain-separated derived key |
 | JSON number / object key concealment | Undetected non-string leaves such as card numbers | Number leaves and object keys included in detection/transform scope |
 | Unauthenticated multi-client access | Any local process uses the upstream / token round-trip | Optional bearer auth (`auth.provider: bearer`); missing/invalid → 401 before body read; per-identity rate limit and model allowlist |
+| Audit tail truncation | Silent deletion of trailing audit records | `audit.anchor` head-hash anchoring on append-only/separate media detects truncation back to the last anchor (0.7) |
+| Local dev key in production | Software key misused as production custody | External `cryptoProvider` injection with `assertCryptoProviderConformance`; reference KMS adapter (envelope encryption) |
+| Tampered release artifact | Modified tarball installed | npm provenance + sigstore attestation of the GitHub release tarball + `SHA256SUMS` (0.7) |
 | Raw credentials/identity in audit | Token or subject leak through the audit log | Tokens stored only as keyed-HMAC hashes; identity subject/issuer are keyed HMAC; `auth_denied` records no token |
 | Token round-trip restoring foreign tokens | Cross-client/request plaintext recovery | Detokenization is opt-in (`detokenizeResponses`) and request-scoped: only tokens issued while protecting the same request are restored |
 | Indirect prompt injection in tool results/responses | Agent manipulation via planted instructions | Response-direction heuristics, report-only by default (`injection` action `allow`); escalation is an explicit policy choice. Not a complete defense |
@@ -66,7 +69,7 @@ The primary assets Haechi protects are:
 - OAuth/resource binding validation for external MCP servers
 - Inspection of base64/URL-encoded values or unicode-obfuscated values after decoding
 - Detection of sensitive values in URL query strings (JSON body only)
-- Audit hash chain tail truncation detection — the chain detects tampering and reordering, but deletion of the last N records cannot be detected without an externally preserved copy
+- Audit tail truncation beyond the last anchor — `audit.anchor` (0.7) detects deletion of records back to the last anchor when the anchor is on append-only/separate media; records written after the last anchor, and same-filesystem anchors, are not covered
 - JSON-RPC batch message processing (the MCP stdio filter rejects batches fail-closed)
 
 ## 5. Remaining Operational Assumptions

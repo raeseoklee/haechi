@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.3
 - 작성일: 2026-06-10
-- 기준 버전: 0.6.0
+- 기준 버전: 0.7.0
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -129,7 +129,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 | 0.4.0 ✅ | token round-trip and adoption | 2026-06-10 구현 완료: 요청 스코프 response detokenization, deterministic tokenization(파생 키), `haechi mcp-wrap`, `haechi audit-verify`/`haechi status`, injection detection type(기본 allow), `identity`/`authProvider` 계약 예약. `docs/current/release-0.4-implementation-scope.md` 참조 |
 | 0.5.0 ✅ | streaming hardening | 2026-06-10 출시: bounded cross-frame 버퍼를 사용한 SSE/NDJSON 스트리밍 응답 검사(`streaming.requestMode: inspect`). stream sequence AAD, replay cache, 강화된 원격 배포 가이드는 0.6+으로 이월. `docs/current/release-0.5-implementation-scope.md` 참조 |
 | 0.6.0 ✅ | Shipped 2026-06-10 (PRs #17–#19): built-in bearer auth, named policy profiles, model allowlist, request rate limit, PII-safe identity in audit. `docs/current/release-0.6-implementation-scope.md` 참조 |
-| 0.7.0 | observability | npm workspaces 전환, `@haechi/dashboard` read-only audit viewer (hash chain 무결성 표시, 요약/검색/타임라인) |
+| 0.7.0 ✅ | Shipped 2026-06-10 (PRs #22–#24): audit head-hash anchoring + external sink contract, cryptoProvider contract hardening + `assertCryptoProviderConformance` + reference KMS adapter, 서명/체크섬된 release artifact. `docs/current/release-0.7-implementation-scope.md` 참조 |
 | 1.0.0 | stable API contract | migration policy, long-term audit schema, plugin sandbox/runtime conformance 및 allowlist/manifest 통과 외부 auth/classifier package 동적 로딩 |
 
 동적 npm package 로딩은 1.0 plugin sandbox 이전까지 금지한다. 0.4~0.7의 외부 provider는 `createRuntime(config, providers)` 프로그래매틱 주입만 지원한다.
