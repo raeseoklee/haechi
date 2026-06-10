@@ -21,3 +21,11 @@ Maintainer linked the npm Trusted Publisher for `raeseoklee/haechi` + `npm-publi
 ## [2026-06-10] ingest | 0.4.0 shipped
 
 All four 0.4.0 features landed (PRs #7–#10) and the release branch cut: deterministic tokenization + request-scoped detokenization ([[token-vault]]), `audit-verify`/`status`, `mcp-wrap` (bidirectional, server-initiated requests exempt from the client allowlist), report-only injection heuristics (direction-scoped rules), and `identity: null` reserved across all audit event kinds. README gained a full configuration reference including remote-bind/container guidance. The 0.4.0 GitHub release will be the first OIDC trusted-publishing publish — verify `dist.attestations` after.
+
+## [2026-06-10] ingest | First attested publish verified
+
+`haechi@0.4.0` published through the OIDC trusted-publishing workflow; `dist.attestations` (SLSA provenance v1) confirmed on the registry. The provenance gap is closed for all future releases — only 0.3.2 remains unattested. Updated `[[packaging-and-distribution]]` and `release-process.md` runbook step 3.
+
+## [2026-06-10] ingest | Configuration reference and CLI help
+
+Added `docs/current/configuration.md` (+`.ko.md`): full per-key reference, presets, action strength, validation cheatsheet, common setups, and remote-bind guidance. Restructured `haechi help` (command list + `help <command>`) and added `haechi config` (condensed guide). Four-place config coupling is now five: defaultConfig, normalizeConfig, example json, configuration.md, and `haechi config`/COMMAND_HELP.

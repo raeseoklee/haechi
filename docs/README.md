@@ -15,6 +15,7 @@ English is the primary documentation language. Korean translations are maintaine
 - `docs/current/release-0.3-implementation-scope.md`: 0.3 vLLM/Ollama/llama.cpp adapters, response protection, npm publish readiness scope
 - `docs/current/release-0.3.2-hardening-scope.md`: 0.3.2 security hardening release; first npm developer preview target
 - `docs/current/release-0.4-implementation-scope.md`: 0.4 token round-trip, mcp-wrap, audit-verify/status, identity/authProvider contract reservation
+- `docs/current/configuration.md`: full configuration reference (every key, defaults, validation, presets, common setups)
 - `docs/current/risk-register-release-gate.md`: release-blocking risks, security/operational risk status, npm release gates (0.3.2 baseline)
 - `docs/current/threat-model.md`: Haechi 0.3.2 trust boundaries, protected assets, key threats and controls
 - `docs/current/shared-responsibility.md`: responsibility split between Haechi and users/operators in self-hosted deployments

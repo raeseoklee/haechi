@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG_PATH, createRuntime, isValidPort, loadConfig, writeDefau
 
 const [command, ...argv] = process.argv.slice(2);
 
+async function main(command, argv) {
 try {
   switch (command) {
     case "init":
@@ -54,18 +55,22 @@ try {
     case "mcp-wrap":
       await mcpWrapCommand(argv);
       break;
+    case "config":
+      printConfigGuide();
+      break;
     case "help":
     case "--help":
     case "-h":
     case undefined:
-      printHelp();
+      printHelp(argv[0]);
       break;
     default:
-      throw new Error(`Unknown command: ${command}`);
+      throw new Error(`Unknown command: ${command}. Run 'haechi help' for usage.`);
   }
 } catch (error) {
   console.error(`haechi: ${error.message}`);
   process.exitCode = process.exitCode || 1;
+}
 }
 
 async function initCommand(argv) {
@@ -464,26 +469,159 @@ function parsePort(value) {
   return port;
 }
 
-function printHelp() {
-  console.log(`Haechi MVP CLI
+const COMMAND_HELP = {
+  init: {
+    usage: "haechi init [--config haechi.config.json] [--force]",
+    summary: "Create a local key, sample config, and audit path.",
+    detail: "Writes haechi.config.json and .haechi/dev.keys.json (0600). --force rotates the key (prior keys are retired, not deleted) and overwrites the config."
+  },
+  protect: {
+    usage: "haechi protect <input.json> [--config haechi.config.json]",
+    summary: "Inspect and protect a JSON payload, printing the result.",
+    detail: "Reads input.json, applies the policy, and prints the protected payload, audit id, and warnings. Exit 3 if the payload is blocked."
+  },
+  report: {
+    usage: "haechi report [--audit .haechi/audit.jsonl]",
+    summary: "Summarize audit events without raw payloads."
+  },
+  "audit-verify": {
+    usage: "haechi audit-verify [--audit .haechi/audit.jsonl] [--config haechi.config.json]",
+    summary: "Verify the audit hash chain; print validity, record count, and head hash.",
+    detail: "Exit 4 on a broken chain. The head hash is the value to anchor externally against tail truncation."
+  },
+  status: {
+    usage: "haechi status [--config haechi.config.json]",
+    summary: "Show what is and is not protected under the current config.",
+    detail: "Prints effective policy mode, response/streaming protection, target, token vault governance, key file permissions, audit chain status, and a consolidated warnings list."
+  },
+  proxy: {
+    usage: `haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]`,
+    summary: "Run the local HTTP JSON proxy in front of an upstream LLM.",
+    detail: "Binds loopback by default; --allow-remote-bind is required (and must be a CLI flag, not config) to bind non-loopback hosts. There is no client auth yet — see 'haechi config'."
+  },
+  "policy-sign": {
+    usage: "haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]",
+    summary: "Sign a policy file into a verifiable bundle."
+  },
+  "policy-verify": {
+    usage: "haechi policy-verify <policy.bundle.json> [--config haechi.config.json]",
+    summary: "Verify a signed policy bundle against the configured key."
+  },
+  "token-reveal": {
+    usage: "haechi token-reveal <token> [--config haechi.config.json] [--allow-dev-reveal]",
+    summary: "Reveal a tokenized value (governed by tokenVault.revealPolicy; audited).",
+    detail: "Fails unless revealPolicy is local-dev or --allow-dev-reveal is passed."
+  },
+  "token-purge": {
+    usage: "haechi token-purge <token> [--config haechi.config.json]\n  haechi token-purge --expired [--config haechi.config.json]",
+    summary: "Purge a specific token, or all expired tokens with --expired."
+  },
+  "token-export": {
+    usage: "haechi token-export [--config haechi.config.json] [--type email]",
+    summary: "Export token metadata (never plaintext), optionally filtered by type."
+  },
+  "plugin-validate": {
+    usage: "haechi plugin-validate <plugin-manifest.json>",
+    summary: "Validate a plugin manifest (manifest-only; dynamic runtime is rejected)."
+  },
+  "mcp-stdio": {
+    usage: "haechi mcp-stdio [--config haechi.config.json]",
+    summary: "Filter MCP JSON-RPC traffic on stdin/stdout (one direction)."
+  },
+  "mcp-wrap": {
+    usage: "haechi mcp-wrap [--config haechi.config.json] -- <command> [args...]",
+    summary: "Wrap an MCP server with bidirectional stdio protection.",
+    detail: "Spawns <command>, applies the method allowlist + params protection client→server, and result protection + injection heuristics server→client. Drop-in for MCP client configs."
+  },
+  config: {
+    usage: "haechi config",
+    summary: "Print the configuration guide (keys, defaults, common setups)."
+  }
+};
+
+function printHelp(topic) {
+  if (topic && COMMAND_HELP[topic]) {
+    const entry = COMMAND_HELP[topic];
+    console.log(`haechi ${topic} — ${entry.summary}\n\nUsage:\n  ${entry.usage}${entry.detail ? `\n\n${entry.detail}` : ""}`);
+    return;
+  }
+
+  const order = [
+    "init", "protect", "report", "status", "audit-verify", "proxy",
+    "policy-sign", "policy-verify",
+    "token-reveal", "token-purge", "token-export",
+    "plugin-validate", "mcp-stdio", "mcp-wrap", "config"
+  ];
+  const lines = order.map((name) => `  ${name.padEnd(16)}${COMMAND_HELP[name].summary}`);
+  console.log(`Haechi — self-hosted AI context enforcement (developer preview)
 
 Usage:
-  haechi init [--config haechi.config.json] [--force]
-  haechi protect <input.json> [--config haechi.config.json]
-  haechi report [--audit .haechi/audit.jsonl]
-  haechi audit-verify [--audit .haechi/audit.jsonl] [--config haechi.config.json]
-  haechi status [--config haechi.config.json]
-  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]
-  haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
-  haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
-  haechi token-reveal <token> [--config haechi.config.json] [--allow-dev-reveal]
-  haechi token-purge <token> [--config haechi.config.json]
-  haechi token-purge --expired [--config haechi.config.json]
-  haechi token-export [--config haechi.config.json] [--type email]
-  haechi plugin-validate <plugin-manifest.json>
-  haechi mcp-stdio [--config haechi.config.json]
-  haechi mcp-wrap [--config haechi.config.json] -- <command> [args...]
+  haechi <command> [options]
+  haechi help <command>     show usage for one command
 
-The default policy mode is dry-run. Change policy.mode to enforce to mutate or block payloads.
+Commands:
+${lines.join("\n")}
+
+Getting started:
+  haechi init               write config + local key
+  haechi status             see what is protected
+  haechi config             configuration guide
+
+The default policy mode is dry-run (detect + audit only). Set policy.mode to
+"enforce" to transform or block. Run 'haechi config' for all settings.
 `);
 }
+
+function printConfigGuide() {
+  console.log(`Haechi configuration guide
+
+Config file: haechi.config.json (override with --config <path>); template at
+haechi.config.example.json. All values are validated fail-closed — unknown or
+malformed settings refuse to start. 'haechi status' prints the EFFECTIVE state.
+
+Enforcement
+  mode / policy.mode        dry-run | report-only | enforce   (default dry-run)
+                            dry-run/report-only detect + audit only.
+                            policy.mode overrides mode.
+
+Upstream + proxy
+  target.type               llm-http | openai-compatible | vllm-openai |
+                            ollama | llama-cpp                 (unknown = fail)
+  target.upstream           the only upstream the proxy forwards to
+  proxy.host / proxy.port   127.0.0.1 / ${DEFAULT_PROXY_PORT}
+                            non-loopback host needs --allow-remote-bind (CLI flag)
+
+Response + streaming
+  responseProtection.enabled  inspect upstream responses        (default false)
+  responseProtection.failureMode  fail-closed | allow           (default fail-closed)
+  streaming.requestMode     block | pass-through                (default block)
+  limits.upstreamTimeoutMs  upstream timeout in ms              (default 120000)
+
+Detection policy
+  policy.presets            korean-pii, secrets-only, llm-redact,
+                            strict-block, mcp-basic, local-inference, local-only
+  policy.defaultAction      allow | redact | mask | tokenize | encrypt | block
+  policy.actions            per-type overrides; merges may strengthen, not weaken
+  filters.customRules       extra regex rules (ReDoS-screened)
+
+Tokenization (model sees token, caller sees plaintext)
+  tokenVault.revealPolicy   disabled | local-dev               (manual reveal gate)
+  tokenVault.deterministic  same value -> same token           (default false)
+  tokenVault.detokenizeResponses  restore request-issued tokens in the response
+                            (needs responseProtection.enabled)
+
+Privacy + MCP
+  privacy.profile           kr-pipa | eu-gdpr | us-general | null
+  mcp.allowedMethods        client-callable method allowlist
+
+Binding beyond loopback (0.0.0.0):
+  haechi proxy --host 0.0.0.0 --allow-remote-bind
+  There is NO client auth yet (planned 0.6). Use only behind network controls:
+  bind 0.0.0.0 in a container and map -p 127.0.0.1:${DEFAULT_PROXY_PORT}:${DEFAULT_PROXY_PORT}, or front
+  it with a firewall/VPN/authenticating reverse proxy.
+
+Full reference: docs/current/configuration.md
+`);
+}
+
+await main(command, argv);

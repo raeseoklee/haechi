@@ -161,10 +161,13 @@ These heuristics are not a complete defense against prompt injection; see `docs/
 | `privacy.profile` | `null` | `kr-pipa`, `eu-gdpr`, `us-general` baseline actions (strengthen-only) |
 | `mcp.allowedMethods` | `initialize`, `tools/call`, `resources/read`, `prompts/get` | Client-callable method allowlist for `mcp-stdio`/`mcp-wrap` |
 
-Check the effective state at any time:
+The table above is a quick reference. The full per-key reference — types, validation rules, presets, action strength, and common setups — is in [`docs/current/configuration.md`](docs/current/configuration.md), and the CLI prints a condensed version:
 
 ```bash
-haechi status
+haechi config        # configuration guide
+haechi help          # all commands
+haechi help proxy    # one command
+haechi status        # effective state of the current config
 ```
 
 ### Binding beyond loopback (0.0.0.0)

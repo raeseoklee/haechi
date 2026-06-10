@@ -82,7 +82,7 @@ Everything funnels through `createHaechi(...).protectJson(payload, context)` in 
 
 ### CLI surface
 
-`packages/cli/bin/haechi.mjs` dispatches: `init`, `protect`, `report`, `status`, `audit-verify`, `proxy`, `policy-sign`, `policy-verify`, `token-reveal`, `token-purge`, `token-export`, `plugin-validate`, `mcp-stdio`, `mcp-wrap`.
+`packages/cli/bin/haechi.mjs` dispatches: `init`, `protect`, `report`, `status`, `audit-verify`, `proxy`, `policy-sign`, `policy-verify`, `token-reveal`, `token-purge`, `token-export`, `plugin-validate`, `mcp-stdio`, `mcp-wrap`, `config`. `help [command]`/`config` print usage; per-command metadata lives in `COMMAND_HELP`. The full config reference is `docs/current/configuration.md` (keep in sync with the `normalizeConfig` schema and `haechi config` output).
 
 ## Security invariants (do not regress these)
 
