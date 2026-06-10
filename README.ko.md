@@ -137,6 +137,38 @@ stdio MCP 서버를 래핑하여 양방향 트래픽을 필터링한다 — MCP 
 
 이 휴리스틱은 prompt injection에 대한 완전한 방어책이 아니다. `docs/current/threat-model.md`를 참고하라.
 
+## 인증 및 클라이언트별 통제
+
+하나의 host 앞에 여러 클라이언트/에이전트를 두는 경우, bearer auth를 활성화하고 각 클라이언트를 policy profile에 바인딩한다. Token은 별도의 `.haechi/auth.json`(0600)에 keyed-HMAC 해시로만 저장된다:
+
+```bash
+haechi auth add --type service --scope team:eng --label env=prod   # 토큰을 한 번만 출력
+haechi auth list                                                   # 토큰을 표시하지 않음
+haechi auth revoke <id>
+```
+
+```json
+{
+  "auth": { "provider": "bearer" },
+  "policy": {
+    "mode": "enforce", "presets": ["llm-redact"],
+    "profiles": {
+      "strict":   { "presets": ["strict-block"] },
+      "internal": { "presets": ["llm-redact"], "modelAllowlist": ["llama3"], "rate": { "requestsPerMinute": 120 } }
+    },
+    "profileBinding": { "byScope": { "team:eng": "internal" }, "default": "strict" }
+  }
+}
+```
+
+- **Bearer auth** (`auth.provider: bearer`): 클라이언트는 `Authorization: Bearer <token>`을 전송한다. 없거나 잘못되었거나 revoke된 경우 → `401` (바디는 읽지 않으며 upstream에 도달하지 않는다). `provider: none`(기본값)은 동작을 그대로 유지하며, `external`은 주입된 `authProvider`가 필요하다.
+- **Named profiles**: 인증된 identity는 **scope → label → 필수 `default`** 순으로 profile로 resolve된다(매칭되지 않거나 익명인 경우 `default`로 fail-closed). Profile은 기본 policy를 재정의하며 자체 `modelAllowlist`와 `rate`를 가질 수 있다.
+- **Model allowlist**: 허용되지 않은 `model`을 가진 요청 → `403`.
+- **Rate limit**: identity별 분당 요청 수 → `429` (인메모리, 프로세스별).
+- Audit 이벤트는 **PII-safe** `identity`(keyed-HMAC subject/issuer, 원시 값 아님)와 resolve된 `profile`을 포함하며, `auth_denied` / `model_not_allowed` / `rate_limited` 결정에는 credentials가 포함되지 않는다. `/__haechi/health`는 인증 없이 접근 가능하다.
+
+OIDC/JWT provider와 KMS 기반 key custody는 0.7+ 위성 패키지이다.
+
 ## 설정
 
 `haechi init`은 `haechi.config.json`을 생성하며, 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에 있다. 모든 키는 fail-closed 방식으로 검증된다 — 알 수 없거나 잘못된 형식의 값은 시작을 거부한다.
@@ -164,6 +196,9 @@ stdio MCP 서버를 래핑하여 양방향 트래픽을 필터링한다 — MCP 
 | `tokenVault.deterministic` / `deterministicTypes` / `detokenizeResponses` | `false` / `null` / `false` | 토큰 왕복 (위 참고) |
 | `privacy.profile` | `null` | `kr-pipa`, `eu-gdpr`, `us-general` 기준 action (강화 전용) |
 | `mcp.allowedMethods` | `initialize`, `tools/call`, `resources/read`, `prompts/get` | `mcp-stdio`/`mcp-wrap`에서 클라이언트가 호출할 수 있는 method allowlist |
+| `auth.provider` / `auth.store` | `none` / `.haechi/auth.json` | `none`/`bearer`/`external`. Bearer token은 keyed-HMAC 해시로 저장 (0600) |
+| `policy.profiles` / `policy.profileBinding` | — | 클라이언트별 named policy profile; scope → label → 필수 `default` 순으로 바인딩 |
+| `policy.modelAllowlist` / `policy.rate` | — | 허용된 모델 이름 (그 외 403); identity별 분당 요청 수 rate limit (429) — profile별로도 설정 가능 |
 
 위 표는 빠른 참고용이다. 키별 전체 레퍼런스 — 타입, 검증 규칙, 프리셋, action 강도, 일반적인 설정 — 는 [`docs/current/configuration.md`](docs/current/configuration.md)에 있으며, CLI에서 축약 버전을 출력한다:
 
@@ -225,3 +260,5 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 0.4.0은 token round-trip(deterministic tokenization + 요청 스코프 응답 detokenization), `mcp-wrap` 양방향 MCP 필터, `status` 및 `audit-verify` 커맨드, report-only injection detection 휴리스틱을 추가하고, 0.6 인증을 위한 PII-safe `identity`/`authProvider` 계약을 예약한다. `docs/current/release-0.4-implementation-scope.md` 참고.
 
 0.5.0은 SSE/NDJSON 스트리밍 응답 검사를 추가한다: `streaming.requestMode: "inspect"`가 bounded sliding buffer로 응답을 stream-filter하여 프레임에 걸쳐 쪼개진 PII도 잡는다(`streaming.maxMatchBytes`). `docs/current/release-0.5-implementation-scope.md` 참고.
+
+0.6.0은 인증과 클라이언트별 통제를 추가한다: 해시 기반 token 저장소와 `haechi auth` CLI를 갖춘 내장 bearer auth, identity scope/label로 바인딩되는 named policy profile, model allowlisting, 그리고 identity별 rate limiting — audit 로그에는 PII-safe identity가 기록된다. `docs/current/release-0.6-implementation-scope.md` 참고.

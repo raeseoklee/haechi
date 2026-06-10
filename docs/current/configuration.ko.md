@@ -1,7 +1,7 @@
 # Haechi 설정 레퍼런스
 
 - 문서 상태: Living document
-- 기준 버전: 0.5.0
+- 기준 버전: 0.6.0
 
 `haechi init`은 `haechi.config.json`을 생성하며, 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에 있다. 모든 커맨드는 `--config <path>`로 설정 파일을 읽는다(기본값: `haechi.config.json`). 설정은 **fail-closed 방식으로 검증**된다: 알 수 없는 provider, 범위를 벗어난 숫자, 잘못된 형식의 값은 자동으로 무시되지 않고 로드 시점에 오류를 발생시킨다. `haechi config`는 이 레퍼런스를 출력하며, `haechi status`는 특정 설정 파일의 *실제 적용* 상태를 출력한다.
 
@@ -136,6 +136,29 @@ upstream JSON 응답을 검사한다(기본적으로 꺼져 있음 — 모델로
 | `mcp.protectResults` | boolean | `true` | 응답 `result`를 보호한다(injection 휴리스틱도 실행). |
 | `mcp.requireJsonRpc` | boolean | `true` | `jsonrpc: "2.0"`을 요구하며, 규격에 맞지 않는 메시지는 거부된다. |
 
+## `auth`
+
+| 키 | 타입 / 값 | 기본값 | 설명 |
+|---|---|---|---|
+| `auth.provider` | `none` \| `bearer` \| `external` | `none` | `none` = 인증 없음(identity null). `bearer` = 내장 token auth. `external`은 `createRuntime(config, { authProvider })`를 통해 `authProvider`를 주입해야 한다. |
+| `auth.store` | 경로 | `.haechi/auth.json` | Bearer token 저장소(모드 `0600`). Token은 keyed-HMAC 해시로만 보관되며, 평문은 `haechi auth add` 실행 시 한 번만 표시된다. |
+| `auth.allowedLabelKeys` | 문자열 배열 | `["team", "env", "tier", "role"]` | Token이 가질 수 있는 label 키; 값은 길이가 제한되며 PII를 포함하면 안 된다. |
+
+## `policy` profiles & limits
+
+기본 `policy` 위에 클라이언트별 통제를 레이어로 추가한다. [Named profiles](#named-profiles) 참고.
+
+| 키 | 타입 / 값 | 기본값 | 설명 |
+|---|---|---|---|
+| `policy.profiles` | `{ <name>: { presets?, actions?, modelAllowlist?, rate? } }` | `{}` | Named profile; 각각 기본 policy를 재정의한다. |
+| `policy.profileBinding` | `{ byScope?, byLabel?, default }` | 미설정 | identity scope/label(`"k=v"` 형태)을 profile 이름으로 매핑한다. `profiles`가 설정된 경우 `default`는 **필수**이며 가장 엄격한 profile이어야 한다(fail-closed). |
+| `policy.modelAllowlist` | 문자열 배열 | 미설정 | 허용된 `model` 값(기본 레벨; profile별로도 설정 가능). 허용되지 않은 모델 → `403`. 비어 있거나 없으면 모두 허용. |
+| `policy.rate` | `{ requestsPerMinute }` | 미설정 | identity별 요청 rate limit(기본 레벨 또는 profile별). 초과 시 → `429`. 인메모리, 프로세스별. |
+
+### Named profiles
+
+identity가 인증되면 **scope → label → `default`** 순으로 profile이 resolve된다; scope가 label보다 우선하며 첫 번째 매칭이 적용된다. `profiles`가 없거나 `auth.provider: none`인 경우 기본 policy가 적용된다. Resolve된 profile의 policy 엔진, `modelAllowlist`, `rate`가 해당 요청을 처리한다.
+
 ## Detection type과 action
 
 내장 탐지 `type` 값: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, `injection`(응답 방향 휴리스틱, 기본 report-only). 커스텀 규칙으로 새로운 type을 추가할 수 있다.
@@ -207,4 +230,4 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## 검증 요약
 
-다음은 로드 시 오류(fail-closed)를 발생시킨다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도.
+다음은 로드 시 오류(fail-closed)를 발생시킨다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도.

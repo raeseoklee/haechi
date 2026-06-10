@@ -1,7 +1,7 @@
 # Haechi Configuration Reference
 
 - Status: Living document
-- Target version: 0.5.0
+- Target version: 0.6.0
 
 `haechi init` writes `haechi.config.json`; a non-secret template is at `haechi.config.example.json`. Every command reads it with `--config <path>` (default `haechi.config.json`). Configuration is **validated fail-closed**: unknown providers, out-of-range numbers, and malformed values throw at load time rather than degrading silently. `haechi config` prints this reference; `haechi status` prints the *effective* state of a given config.
 
@@ -136,6 +136,29 @@ Applies to `mcp-stdio` and `mcp-wrap`.
 | `mcp.protectResults` | boolean | `true` | Protect response `result` (and run injection heuristics on it). |
 | `mcp.requireJsonRpc` | boolean | `true` | Require `jsonrpc: "2.0"`; non-conforming messages are rejected. |
 
+## `auth`
+
+| Key | Type / values | Default | Notes |
+|---|---|---|---|
+| `auth.provider` | `none` \| `bearer` \| `external` | `none` | `none` = no auth (identity null). `bearer` = built-in token auth. `external` requires injecting an `authProvider` via `createRuntime(config, { authProvider })`. |
+| `auth.store` | path | `.haechi/auth.json` | Bearer token store (mode `0600`). Tokens are kept only as keyed-HMAC hashes; the plaintext is shown once by `haechi auth add`. |
+| `auth.allowedLabelKeys` | string array | `["team", "env", "tier", "role"]` | Label keys a token may carry; values are length-limited and must not contain PII. |
+
+## `policy` profiles & limits
+
+Per-client controls layered on top of the base `policy`. See [Named profiles](#named-profiles).
+
+| Key | Type / values | Default | Notes |
+|---|---|---|---|
+| `policy.profiles` | `{ <name>: { presets?, actions?, modelAllowlist?, rate? } }` | `{}` | Named profiles; each overrides the base policy. |
+| `policy.profileBinding` | `{ byScope?, byLabel?, default }` | unset | Maps identity scopes/labels (`"k=v"` for labels) to profile names. `default` is **required** when `profiles` is set and should be the strictest profile (fail-closed). |
+| `policy.modelAllowlist` | string array | unset | Allowed `model` values (base level; also settable per profile). A disallowed model → `403`. Empty/absent = allow all. |
+| `policy.rate` | `{ requestsPerMinute }` | unset | Per-identity request rate limit (base level or per profile). Over the limit → `429`. In-memory, per-process. |
+
+### Named profiles
+
+When an identity authenticates, its profile resolves in order **scope → label → `default`**; scope precedes label and the first match wins. Without `profiles`, or under `auth.provider: none`, the base policy applies. The resolved profile's policy engine, `modelAllowlist`, and `rate` govern that request.
+
 ## Detection types & actions
 
 Built-in detection `type` values: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, and `injection` (response-direction heuristic, report-only by default). Custom rules may introduce new types.
@@ -207,4 +230,4 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## Validation cheatsheet
 
-These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`.
+These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`.

@@ -16,7 +16,7 @@ English is the primary documentation language. Korean translations are maintaine
 - `docs/current/release-0.3.2-hardening-scope.md`: 0.3.2 security hardening release; first npm developer preview target
 - `docs/current/release-0.4-implementation-scope.md`: 0.4 token round-trip, mcp-wrap, audit-verify/status, identity/authProvider contract reservation
 - `docs/current/release-0.5-implementation-scope.md`: 0.5 SSE/NDJSON streaming response inspection with bounded cross-frame buffer
-- `docs/current/release-0.6-implementation-scope.md`: 0.6 design — bearer auth, named policy profiles, model allowlist, rate limiting
+- `docs/current/release-0.6-implementation-scope.md`: 0.6 bearer auth, named policy profiles, model allowlist, rate limiting
 - `docs/current/configuration.md`: full configuration reference (every key, defaults, validation, presets, common setups)
 - `docs/current/risk-register-release-gate.md`: release-blocking risks, security/operational risk status, npm release gates (0.3.2 baseline)
 - `docs/current/threat-model.md`: Haechi 0.3.2 trust boundaries, protected assets, key threats and controls

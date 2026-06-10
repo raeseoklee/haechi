@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Haechi is an experimental developer-preview **AI context enforcement layer**: it inspects and protects OpenAI-compatible / MCP / vLLM / Ollama / llama.cpp JSON payloads (detecting PII and secrets, then redacting/masking/tokenizing/encrypting/blocking them) before they reach models, tools, or logs. It is not production-ready and is not a compliance guarantee. Package name `haechi`, current version `0.5.0`.
+Haechi is an experimental developer-preview **AI context enforcement layer**: it inspects and protects OpenAI-compatible / MCP / vLLM / Ollama / llama.cpp JSON payloads (detecting PII and secrets, then redacting/masking/tokenizing/encrypting/blocking them) before they reach models, tools, or logs. It is not production-ready and is not a compliance guarantee. Package name `haechi`, current version `0.6.0`.
 
 ## Commands
 
@@ -76,6 +76,7 @@ Everything funnels through `createHaechi(...).protectJson(payload, context)` in 
 - `proxy` — local HTTP JSON proxy fronting an upstream LLM endpoint.
 - `protocol-adapters` — request classification per `target.type` (`openai-compatible`, `vllm-openai`, `ollama`, llama.cpp); a specific type wins over a default-merged `adapter`. Streaming routes carry `{ format, deltaPath }`.
 - `stream-filter` — SSE/NDJSON frame parsing + bounded sliding-buffer inspection of streaming responses (`createStreamProtector` lives in `core`).
+- `auth` — `authProvider` contract + built-in bearer provider + token store (keyed-HMAC hashes) + PII-safe `buildIdentity`.
 - `mcp-stdio` — JSON-RPC 2.0 line filter for MCP stdio traffic (method allowlist + param/result protection).
 - `policy-bundle` — sign/verify signed policy bundles.
 - `plugin` — plugin manifest validation.
@@ -83,7 +84,7 @@ Everything funnels through `createHaechi(...).protectJson(payload, context)` in 
 
 ### CLI surface
 
-`packages/cli/bin/haechi.mjs` dispatches: `init`, `protect`, `report`, `status`, `audit-verify`, `proxy`, `policy-sign`, `policy-verify`, `token-reveal`, `token-purge`, `token-export`, `plugin-validate`, `mcp-stdio`, `mcp-wrap`, `config`. `help [command]`/`config` print usage; per-command metadata lives in `COMMAND_HELP`. The full config reference is `docs/current/configuration.md` (keep in sync with the `normalizeConfig` schema and `haechi config` output).
+`packages/cli/bin/haechi.mjs` dispatches: `init`, `protect`, `report`, `status`, `audit-verify`, `proxy`, `policy-sign`, `policy-verify`, `token-reveal`, `token-purge`, `token-export`, `plugin-validate`, `mcp-stdio`, `mcp-wrap`, `auth`, `config`. `help [command]`/`config` print usage; per-command metadata lives in `COMMAND_HELP`. The full config reference is `docs/current/configuration.md` (keep in sync with the `normalizeConfig` schema and `haechi config` output).
 
 ## Security invariants (do not regress these)
 
@@ -97,6 +98,7 @@ These are load-bearing behaviors enforced by tests and documented in `docs/curre
 - **Policies only get stronger.** Preset/action merges reject weakening (`ACTION_STRENGTH`), and privacy profiles may strengthen but never weaken an explicit user action.
 - **Key rotation preserves old keys.** `initLocalKeyFile --force` retires (not deletes) prior keys; `decrypt` selects keys by envelope `kid`. Policy-bundle signing uses a domain-separated key derived from the stored key, never the raw AES key.
 - **Detection covers values, JSON numbers, and object keys.** Base64/encoded values and URL query strings are documented exclusions (see threat model).
+- **Auth gates before the body is read.** When `auth.provider` is bearer/external the proxy authenticates, resolves a named policy profile (scope→label→fail-closed default), and rate-limits before reading the body; `none` keeps identity null. Tokens are stored only as keyed-HMAC hashes; identity subject/issuer are keyed HMAC — never raw values in the audit log. The per-request `policyEngine` is a control object and must never enter the protect *context* (it pollutes tokenize AAD).
 - **Streaming inspection is bounded and opt-in.** `streaming.requestMode: "inspect"` stream-filters SSE/NDJSON with a sliding buffer; cross-frame matches are caught up to `streaming.maxMatchBytes`. Bytes already emitted before a `block` cannot be retracted. New adapter streaming routes must declare `{ format, deltaPath }`.
 - **Detokenization is request-scoped and opt-in.** `detokenizeResponses` restores only tokens issued while protecting the same request; it is independent of `revealPolicy` and audited by count. Deterministic tokens use the `haechi:token-vault:deterministic:v1` derived key.
 - **Injection detection is report-only by default.** The `injection` type runs only on the response/tool-result direction and pins action `allow` unless explicitly escalated — never make it block by default.

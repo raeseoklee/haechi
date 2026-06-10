@@ -2,7 +2,7 @@
 
 - Status: Draft 0.3
 - Date: 2026-06-10
-- Target version: 0.5.0
+- Target version: 0.6.0
 - Branch: `main`
 
 ## 1. Current Assessment
@@ -128,7 +128,7 @@ All checklist items below were completed for 0.3.2 on 2026-06-10 except the prov
 |---|---|---|
 | 0.4.0 ✅ | Token round-trip and adoption | Shipped 2026-06-10: request-scoped response detokenization, deterministic tokenization (derived key), `haechi mcp-wrap`, `haechi audit-verify`/`haechi status`, injection detection type (default allow), `identity`/`authProvider` contracts reserved. See `docs/current/release-0.4-implementation-scope.md` |
 | 0.5.0 ✅ | Streaming hardening | Shipped 2026-06-10: SSE/NDJSON streaming response inspection with bounded cross-frame buffer (`streaming.requestMode: inspect`). Stream sequence AAD, replay cache, stronger remote deployment guide deferred to 0.6+. See `docs/current/release-0.5-implementation-scope.md` |
-| 0.6.0 | Auth and per-client controls | Built-in bearer auth, named policy profiles, model allowlist, request rate limit. See `docs/current/release-0.6-implementation-scope.md` |
+| 0.6.0 ✅ | Auth and per-client controls | Shipped 2026-06-10 (PRs #17–#19): built-in bearer auth, named policy profiles, model allowlist, request rate limit, PII-safe identity in audit. See `docs/current/release-0.6-implementation-scope.md` |
 | 0.7.0 | Ops hardening and ecosystem | Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, npm org (`@haechi/*`), OIDC satellite, `@haechi/dashboard` |
 | 0.7.0 | Observability | npm workspaces migration, `@haechi/dashboard` read-only audit viewer (hash chain integrity display, summary/search/timeline) |
 | 1.0.0 | Stable API contract | Migration policy, long-term audit schema, plugin sandbox/runtime conformance, and dynamic loading of external auth/classifier packages that pass allowlist/manifest |

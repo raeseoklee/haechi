@@ -5,7 +5,7 @@ tags: [decision, security, auth]
 
 # Identity and Auth
 
-Contracts reserved in 0.4 (`release-0.4-implementation-scope.md` §2.7–2.8); **0.6 design finalized** in `release-0.6-implementation-scope.md` ([[release-roadmap]]). Core owns the contract; OIDC/JWT implementations are 0.7+ satellites ([[packaging-and-distribution]]).
+Contracts reserved in 0.4 (§2.7–2.8), designed and **shipped in 0.6** (`release-0.6-implementation-scope.md`, PRs #17–#19) ([[release-roadmap]]). Core owns the contract; OIDC/JWT implementations are 0.7+ satellites ([[packaging-and-distribution]]).
 
 ## Identity schema (PII-safe by construction)
 

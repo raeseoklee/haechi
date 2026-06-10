@@ -2,7 +2,7 @@
 
 - Status: Draft 0.1
 - Date: 2026-06-10
-- Target version: 0.4.0
+- Target version: 0.6.0
 
 ## 1. Version Interpretation
 
@@ -42,6 +42,8 @@ The following exports are treated as preview in 0.4.0.
 - `identity` audit field and the `authProvider` contract (reserved in 0.4, implemented in 0.6 — shape may change until then)
 - `status` / `audit-verify` CLI output shapes
 - `haechi/stream-filter` (`inspectResponseStream`, path helpers) and `createStreamProtector` (streaming inspection internals)
+- `haechi/auth` (`createBearerAuthProvider`, token store, `buildIdentity`) and the `authProvider` contract
+- `policy.profiles`/`policy.profileBinding`/`modelAllowlist`/`rate` and the `identity`/`profile` audit fields
 
 ## 4. Migration note criteria
 

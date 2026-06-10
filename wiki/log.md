@@ -37,3 +37,7 @@ PR #14 added SSE/NDJSON streaming response inspection (`streaming.requestMode: "
 ## [2026-06-10] design | 0.6 auth design finalized
 
 Detailed-design pass for 0.6 (no code). Decisions: auth-core-focused scope (KMS/audit-sink/signed-artifacts/npm-org -> 0.7), named policy profiles for per-client policy (byScope->byLabel->default, fail-closed), bearer tokens in a separate `.haechi/auth.json` + `haechi auth` CLI with keyed-HMAC hashes. Wrote `release-0.6-implementation-scope.md` (+KO), updated `[[identity-and-auth]]`, split the roadmap into 0.6 (auth core) and a new 0.7 (ops hardening + ecosystem).
+
+## [2026-06-10] ingest | 0.6.0 auth shipped
+
+PRs #17–#19 implemented the 0.6 design: `packages/auth` (authProvider contract, bearer provider, keyed-HMAC token store, PII-safe buildIdentity), `haechi auth` CLI, `createPolicyProfiles` (scope→label→default resolution) with a per-request policyEngine threaded through `protectJson`/`createStreamProtector`, and proxy enforcement (authenticate→profile→rate→body→model-allowlist→protect) with `auth_denied`/`model_not_allowed`/`rate_limited` audit decisions and identity+profile on every event. Evaluation caught a real regression: the per-request policyEngine in the protect context polluted the tokenize AAD (functions dropped on JSON store → AAD mismatch → silent detokenize failure); fixed by stripping the control object from the data context. Updated `[[identity-and-auth]]` and `[[release-roadmap]]` to shipped.

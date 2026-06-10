@@ -1,9 +1,10 @@
 # Haechi 0.6 Implementation Scope
 
-- Status: Draft 0.1 (design — not yet implemented)
+- Status: Final
 - Date: 2026-06-10
 - Target version: 0.6.0 (after 0.5.0)
 - Type: auth and per-client controls
+- Shipped: 2026-06-10 — PRs #17 (contract + bearer store + CLI), #18 (named profiles), #19 (proxy enforcement)
 
 ## 1. Release Goal
 
