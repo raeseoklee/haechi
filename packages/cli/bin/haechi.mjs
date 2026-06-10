@@ -147,19 +147,27 @@ async function reportCommand(argv) {
 async function auditVerifyCommand(argv) {
   const options = parseOptions(argv);
   let auditPath = options.audit ?? options.path;
-  if (!auditPath) {
+  let anchorPath = typeof options.anchor === "string" ? options.anchor : null;
+  if (!auditPath || (options.anchor === true && !anchorPath)) {
     try {
-      auditPath = (await loadConfig(options.config ?? DEFAULT_CONFIG_PATH)).audit.path;
+      const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+      auditPath = auditPath ?? config.audit.path;
+      // --anchor with no value (or no flag at all) falls back to the configured
+      // anchor path when anchoring is enabled.
+      if (!anchorPath && config.audit.anchor.mode === "file") {
+        anchorPath = config.audit.anchor.path;
+      }
     } catch {
-      auditPath = ".haechi/audit.jsonl";
+      auditPath = auditPath ?? ".haechi/audit.jsonl";
     }
   }
 
-  const result = await verifyAuditChain(auditPath);
+  const result = await verifyAuditChain(auditPath, { anchorPath });
   writeJson({
     ok: result.valid,
     command: "audit-verify",
     auditPath,
+    anchorPath,
     result
   });
   if (!result.valid) {
@@ -208,16 +216,29 @@ async function statusCommand(argv) {
     warnings.push(`key file ${config.keys.keyFile} does not exist; run haechi init`);
   }
 
-  const audit = { path: config.audit.path, exists: false, chain: null };
+  const anchorEnabled = config.audit.anchor.mode === "file";
+  const audit = {
+    path: config.audit.path,
+    exists: false,
+    chain: null,
+    anchor: { mode: config.audit.anchor.mode, path: anchorEnabled ? config.audit.anchor.path : null }
+  };
   try {
     await stat(config.audit.path);
     audit.exists = true;
-    audit.chain = await verifyAuditChain(config.audit.path);
+    audit.chain = await verifyAuditChain(config.audit.path, {
+      anchorPath: anchorEnabled ? config.audit.anchor.path : null
+    });
     if (!audit.chain.valid) {
       warnings.push(`audit chain verification failed: ${audit.chain.reason}`);
     }
   } catch {
     // No audit file yet is a normal pre-first-run state, not a warning.
+  }
+  if (config.audit.anchor.mode === "none") {
+    warnings.push("audit.anchor.mode is none: tail truncation of the audit log cannot be detected");
+  } else if (config.audit.anchor.mode === "file") {
+    warnings.push("audit.anchor: real tail-truncation defense requires the anchor on append-only or separate media; on the same writable filesystem an attacker can truncate both files together");
   }
 
   writeJson({
@@ -566,9 +587,9 @@ const COMMAND_HELP = {
     summary: "Summarize audit events without raw payloads."
   },
   "audit-verify": {
-    usage: "haechi audit-verify [--audit .haechi/audit.jsonl] [--config haechi.config.json]",
+    usage: "haechi audit-verify [--audit .haechi/audit.jsonl] [--anchor [path]] [--config haechi.config.json]",
     summary: "Verify the audit hash chain; print validity, record count, and head hash.",
-    detail: "Exit 4 on a broken chain. The head hash is the value to anchor externally against tail truncation."
+    detail: "Exit 4 on a broken chain. With --anchor (or audit.anchor.mode: file in config) it cross-checks the anchor stream and detects tail truncation back to the last anchor. The anchor only adds real defense when kept on append-only or separate media — on the same writable filesystem an attacker can truncate both files together."
   },
   status: {
     usage: "haechi status [--config haechi.config.json]",
@@ -697,6 +718,17 @@ Tokenization (model sees token, caller sees plaintext)
   tokenVault.deterministic  same value -> same token           (default false)
   tokenVault.detokenizeResponses  restore request-issued tokens in the response
                             (needs responseProtection.enabled)
+
+Audit integrity
+  audit.anchor.mode         none | file | stdout                (default none)
+                            file/stdout anchor the chain head so tail
+                            truncation is detected (haechi audit-verify --anchor).
+                            Real defense needs the anchor on append-only or
+                            separate media; same-filesystem anchors can be
+                            truncated together. stdout mode is for long-running
+                            commands (proxy), not JSON-emitting ones.
+  audit.anchor.path         .haechi/audit.anchor.jsonl          (mode: file)
+  audit.anchor.everyRecords anchor cadence                      (default 1)
 
 Privacy + MCP
   privacy.profile           kr-pipa | eu-gdpr | us-general | null

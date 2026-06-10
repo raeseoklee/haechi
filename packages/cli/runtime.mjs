@@ -60,7 +60,12 @@ export function defaultConfig() {
     },
     audit: {
       sink: "jsonl",
-      path: ".haechi/audit.jsonl"
+      path: ".haechi/audit.jsonl",
+      anchor: {
+        mode: "none",
+        path: ".haechi/audit.anchor.jsonl",
+        everyRecords: 1
+      }
     },
     tokenVault: {
       provider: "local",
@@ -117,7 +122,10 @@ export function createRuntime(config, providers = {}) {
   const normalized = normalizeConfig(config);
   const cryptoProvider = providers.cryptoProvider ?? createConfiguredCryptoProvider(normalized);
   assertProvider("cryptoProvider", cryptoProvider, ["encrypt", "decrypt"]);
-  const auditSink = providers.auditSink ?? createJsonlAuditSink({ path: normalized.audit.path });
+  const auditSink = providers.auditSink ?? createJsonlAuditSink({
+    path: normalized.audit.path,
+    anchor: normalized.audit.anchor
+  });
   assertProvider("auditSink", auditSink, ["record"]);
   const tokenVault = providers.tokenVault ?? createLocalTokenVault({
     path: normalized.tokenVault.path,
@@ -214,7 +222,11 @@ export function normalizeConfig(config) {
     },
     audit: {
       ...defaultConfig().audit,
-      ...(config.audit ?? {})
+      ...(config.audit ?? {}),
+      anchor: {
+        ...defaultConfig().audit.anchor,
+        ...(config.audit?.anchor ?? {})
+      }
     },
     tokenVault: {
       ...defaultConfig().tokenVault,
@@ -247,6 +259,16 @@ export function normalizeConfig(config) {
   }
   if (merged.audit.sink !== "jsonl") {
     throw new Error("Current implementation only supports jsonl audit sink");
+  }
+  if (!["none", "file", "stdout"].includes(merged.audit.anchor.mode)) {
+    throw new Error(`Invalid audit.anchor.mode: ${merged.audit.anchor.mode}`);
+  }
+  if (merged.audit.anchor.mode === "file"
+    && (typeof merged.audit.anchor.path !== "string" || !merged.audit.anchor.path.trim())) {
+    throw new Error("audit.anchor.mode 'file' requires audit.anchor.path");
+  }
+  if (!Number.isInteger(merged.audit.anchor.everyRecords) || merged.audit.anchor.everyRecords < 1) {
+    throw new Error("audit.anchor.everyRecords must be a positive integer");
   }
   if (merged.tokenVault.provider !== "local") {
     throw new Error("0.2 only supports local token vault provider");
