@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.2
+- 기준 버전: 0.4.0
 
 ## 1. 버전 해석
 
@@ -11,8 +11,9 @@
 | 버전 범위 | 의미 |
 |---|---|
 | `0.3.x` | local inference/proxy safety patch line |
-| `0.4.x` | streaming/deployment hardening target |
-| `0.5.x` | key custody/audit hardening target |
+| `0.4.x` | token round-trip and adoption line |
+| `0.5.x` | streaming hardening target |
+| `0.6.x` | auth 및 운영 통제 target |
 | `1.0.0` | API compatibility contract를 선언할 수 있는 첫 stable 후보 |
 
 ## 2. 변경 정책
@@ -28,13 +29,18 @@
 
 ## 3. Experimental exports
 
-다음 export는 0.3.2에서 preview로 취급한다.
+다음 export는 0.4.0에서 preview로 취급한다.
 
 - `haechi/runtime`
 - `haechi/proxy`
 - `haechi/protocol-adapters`
 - `haechi/privacy-profiles`
 - `haechi/plugin`
+- `haechi/mcp-stdio` `wrapMcpChild`
+- `haechi/token-vault` `detokenize`, deterministic tokenization 옵션
+- `injection` detection type과 휴리스틱 룰
+- `identity` audit 필드와 `authProvider` 계약 (0.4 예약, 0.6 구현 — 그 전까지 형태 변경 가능)
+- `status` / `audit-verify` CLI 출력 형태
 
 ## 4. Migration note 기준
 

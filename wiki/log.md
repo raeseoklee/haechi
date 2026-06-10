@@ -17,3 +17,7 @@ Fixed `[[release-roadmap]]` ("validate provenance publish" → local passkey, `-
 ## [2026-06-10] ingest | Trusted publishing configured
 
 Maintainer linked the npm Trusted Publisher for `raeseoklee/haechi` + `npm-publish.yml`; the workflow now authenticates via OIDC (no `NODE_AUTH_TOKEN`, no `registry-url` npmrc placeholder, npm CLI `>= 11.5.1` in the runner). Runbook steps 1–2 complete; step 3 (attestation verification) waits for the next release. Updated `[[release-roadmap]]` and `release-process.md` §2 accordingly.
+
+## [2026-06-10] ingest | 0.4.0 shipped
+
+All four 0.4.0 features landed (PRs #7–#10) and the release branch cut: deterministic tokenization + request-scoped detokenization ([[token-vault]]), `audit-verify`/`status`, `mcp-wrap` (bidirectional, server-initiated requests exempt from the client allowlist), report-only injection heuristics (direction-scoped rules), and `identity: null` reserved across all audit event kinds. README gained a full configuration reference including remote-bind/container guidance. The 0.4.0 GitHub release will be the first OIDC trusted-publishing publish — verify `dist.attestations` after.
