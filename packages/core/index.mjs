@@ -15,6 +15,10 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     const effectiveMode = context.mode ?? mode;
     const engine = contextEngine ?? policyEngine;
     const entries = collectStringEntries(payload);
+    // `context` is threaded into detection as-is and is LOAD-BEARING: e.g.
+    // `context.direction` ("request" | "response") gates direction-scoped rules
+    // (injection) and the response-only marker exclusion in the filter engine.
+    // The proxy sets it per direction; do not drop it here.
     const detections = await filterEngine.detect({ entries, context });
     const decisions = [];
 

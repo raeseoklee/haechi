@@ -53,7 +53,7 @@ Inspects upstream JSON responses (off by default — turn on to protect what com
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
 | `responseProtection.enabled` | boolean | `false` | Master switch. Required for `detokenizeResponses` to do anything. |
-| `responseProtection.mode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | Enforcement mode for the response direction. |
+| `responseProtection.mode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | Enforcement mode for the response direction. **For real LLM upstreams, prefer `report-only`:** envelope metadata (ids, a unix-timestamp `created`, long numeric fields) can look PII/secret-shaped, and `enforce` would 502 a legitimate completion. `report-only` still detects, audits, and runs `detokenizeResponses`. (Haechi already skips its own `[TOKEN:…]`/`[HAECHI_ENC:…]` markers on the response, and the phone rule ignores bare timestamps — but a Luhn-passing long number can still match `card`.) |
 | `responseProtection.failureMode` | `fail-closed` \| `allow` | `fail-closed` | What to do with an *uninspectable* response (non-JSON, invalid JSON, compressed). `fail-closed` returns 502; `allow` passes it through (audited). |
 | `responseProtection.allowNonJson` | boolean | `false` | Permit non-JSON responses through without inspection. |
 | `responseProtection.allowCompressed` | boolean | `false` | Permit compressed responses through without inspection. |
