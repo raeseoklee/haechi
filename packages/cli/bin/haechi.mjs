@@ -5,6 +5,8 @@ import { DEFAULT_PROXY_PORT, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
 import { runMcpStdioFilter, wrapMcpChild } from "../../mcp-stdio/index.mjs";
+import { addToken, listTokens, revokeToken } from "../../auth/index.mjs";
+import { createLocalCryptoProvider } from "../../crypto/index.mjs";
 import { spawn } from "node:child_process";
 import { DEFAULT_CONFIG_PATH, createRuntime, isValidPort, loadConfig, writeDefaultConfig } from "../runtime.mjs";
 
@@ -54,6 +56,9 @@ try {
       break;
     case "mcp-wrap":
       await mcpWrapCommand(argv);
+      break;
+    case "auth":
+      await authCommand(argv);
       break;
     case "config":
       printConfigGuide();
@@ -402,6 +407,76 @@ async function pluginValidateCommand(argv) {
   }
 }
 
+async function authCommand(argv) {
+  const [sub, ...rest] = argv;
+  const options = parseOptions(rest);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  if (config.keys.provider !== "local") {
+    throw new Error("haechi auth requires keys.provider local (the bearer store is hashed with the local key)");
+  }
+  const cryptoProvider = createLocalCryptoProvider({ keyFile: config.keys.keyFile });
+  const storePath = config.auth.store;
+
+  switch (sub) {
+    case "add": {
+      if (!options.type || options.type === true) {
+        throw new Error("auth add requires --type user|service|agent");
+      }
+      const { token, record } = await addToken({
+        path: storePath,
+        cryptoProvider,
+        type: options.type,
+        scopes: asList(options.scope),
+        labels: asLabels(options.label),
+        allowedLabelKeys: config.auth.allowedLabelKeys
+      });
+      writeJson({
+        ok: true,
+        command: "auth add",
+        id: record.id,
+        type: record.type,
+        scopes: record.scopes,
+        labels: record.labels,
+        token,
+        warning: "This token is shown only once. Store it now; it is not recoverable."
+      });
+      return;
+    }
+    case "list":
+      writeJson({ ok: true, command: "auth list", tokens: await listTokens(storePath) });
+      return;
+    case "revoke": {
+      const [id] = rest;
+      if (!id || id.startsWith("--")) {
+        throw new Error("auth revoke requires a token id");
+      }
+      writeJson({ ok: true, command: "auth revoke", result: await revokeToken({ path: storePath, id }) });
+      return;
+    }
+    default:
+      throw new Error("auth requires a subcommand: add | list | revoke");
+  }
+}
+
+function asList(value) {
+  if (!value || value === true) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function asLabels(value) {
+  const labels = {};
+  for (const entry of asList(value)) {
+    const index = entry.indexOf("=");
+    if (index === -1) {
+      throw new Error(`Invalid --label (expected key=value): ${entry}`);
+    }
+    labels[entry.slice(0, index)] = entry.slice(index + 1);
+  }
+  return labels;
+}
+
 async function mcpStdioCommand(argv) {
   const options = parseOptions(argv);
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
@@ -442,12 +517,17 @@ function parseOptions(argv) {
     }
     const key = arg.slice(2);
     const next = argv[index + 1];
-    if (!next || next.startsWith("--")) {
-      options[key] = true;
-      continue;
+    const value = (!next || next.startsWith("--")) ? true : next;
+    if (value !== true) {
+      index += 1;
     }
-    options[key] = next;
-    index += 1;
+    // Repeated flags accumulate into an array (e.g. --scope a --scope b);
+    // a single occurrence stays scalar for backward compatibility.
+    if (Object.prototype.hasOwnProperty.call(options, key)) {
+      options[key] = Array.isArray(options[key]) ? [...options[key], value] : [options[key], value];
+    } else {
+      options[key] = value;
+    }
   }
   return options;
 }
@@ -534,6 +614,11 @@ const COMMAND_HELP = {
     summary: "Wrap an MCP server with bidirectional stdio protection.",
     detail: "Spawns <command>, applies the method allowlist + params protection client→server, and result protection + injection heuristics server→client. Drop-in for MCP client configs."
   },
+  auth: {
+    usage: "haechi auth add --type user|service|agent [--scope k:v ...] [--label k=v ...]\n  haechi auth list [--config haechi.config.json]\n  haechi auth revoke <id> [--config haechi.config.json]",
+    summary: "Manage built-in bearer tokens (separate store, hashed).",
+    detail: "Tokens are stored hashed in auth.store (default .haechi/auth.json, 0600). `add` prints the plaintext token once — it cannot be recovered. `list` never reveals tokens; `revoke` disables one by id."
+  },
   config: {
     usage: "haechi config",
     summary: "Print the configuration guide (keys, defaults, common setups)."
@@ -551,7 +636,7 @@ function printHelp(topic) {
     "init", "protect", "report", "status", "audit-verify", "proxy",
     "policy-sign", "policy-verify",
     "token-reveal", "token-purge", "token-export",
-    "plugin-validate", "mcp-stdio", "mcp-wrap", "config"
+    "plugin-validate", "mcp-stdio", "mcp-wrap", "auth", "config"
   ];
   const lines = order.map((name) => `  ${name.padEnd(16)}${COMMAND_HELP[name].summary}`);
   console.log(`Haechi — self-hosted AI context enforcement (developer preview)

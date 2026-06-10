@@ -61,6 +61,16 @@
   "privacy": {
     "profile": null
   },
+  "auth": {
+    "provider": "none",
+    "store": ".haechi/auth.json",
+    "allowedLabelKeys": [
+      "team",
+      "env",
+      "tier",
+      "role"
+    ]
+  },
   "mcp": {
     "allowedMethods": [
       "initialize",

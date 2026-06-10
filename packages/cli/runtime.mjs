@@ -9,6 +9,7 @@ import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
 import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
+import { createBearerAuthProvider } from "../auth/index.mjs";
 import { DEFAULT_PROXY_PORT } from "../proxy/index.mjs";
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
@@ -72,6 +73,11 @@ export function defaultConfig() {
     },
     privacy: {
       profile: null
+    },
+    auth: {
+      provider: "none",
+      store: ".haechi/auth.json",
+      allowedLabelKeys: ["team", "env", "tier", "role"]
     },
     mcp: {
       allowedMethods: ["initialize", "tools/call", "resources/read", "prompts/get"],
@@ -144,10 +150,13 @@ export function createRuntime(config, providers = {}) {
   const policyEngine = providers.policyEngine ?? createPolicyEngine(policy);
   assertProvider("policyEngine", policyEngine, ["decide"]);
 
+  const authProvider = resolveAuthProvider(normalized, providers, cryptoProvider);
+
   return {
     config: normalized,
     tokenVault,
     auditSink,
+    authProvider,
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
@@ -211,6 +220,11 @@ export function normalizeConfig(config) {
     privacy: {
       ...defaultConfig().privacy,
       ...(config.privacy ?? {})
+    },
+    auth: {
+      ...defaultConfig().auth,
+      ...(config.auth ?? {}),
+      allowedLabelKeys: config.auth?.allowedLabelKeys ?? defaultConfig().auth.allowedLabelKeys
     },
     mcp: {
       ...defaultConfig().mcp,
@@ -288,12 +302,39 @@ export function normalizeConfig(config) {
   if (typeof merged.limits.upstreamTimeoutMs !== "number" || merged.limits.upstreamTimeoutMs < 1) {
     throw new Error("limits.upstreamTimeoutMs must be a positive number");
   }
+  if (!["none", "bearer", "external"].includes(merged.auth.provider)) {
+    throw new Error(`Invalid auth.provider: ${merged.auth.provider}`);
+  }
+  if (typeof merged.auth.store !== "string" || !merged.auth.store.trim()) {
+    throw new Error("auth.store must be a non-empty string");
+  }
+  if (!Array.isArray(merged.auth.allowedLabelKeys)
+    || !merged.auth.allowedLabelKeys.every((key) => typeof key === "string" && key.trim())) {
+    throw new Error("auth.allowedLabelKeys must be an array of non-empty strings");
+  }
   createProtocolAdapter(merged.target);
   return merged;
 }
 
 export function isValidPort(port) {
   return Number.isInteger(port) && port >= 0 && port <= 65535;
+}
+
+function resolveAuthProvider(config, providers, cryptoProvider) {
+  if (config.auth.provider === "external") {
+    if (typeof providers.authProvider?.authenticate !== "function") {
+      throw new Error("auth.provider external requires createRuntime(config, { authProvider })");
+    }
+    return providers.authProvider;
+  }
+  if (providers.authProvider) {
+    // An injected provider overrides the built-in selection.
+    return providers.authProvider;
+  }
+  if (config.auth.provider === "bearer") {
+    return createBearerAuthProvider({ path: config.auth.store, cryptoProvider });
+  }
+  return null;
 }
 
 function createConfiguredCryptoProvider(config) {

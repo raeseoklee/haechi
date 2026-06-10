@@ -45,7 +45,8 @@
     "./proxy": "./packages/proxy/index.mjs",
     "./runtime": "./packages/cli/runtime.mjs",
     "./token-vault": "./packages/token-vault/index.mjs",
-    "./stream-filter": "./packages/stream-filter/index.mjs"
+    "./stream-filter": "./packages/stream-filter/index.mjs",
+    "./auth": "./packages/auth/index.mjs"
   },
   "files": [
     "README.md",
