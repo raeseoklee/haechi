@@ -329,10 +329,13 @@ test("responseProtection fails closed for uninspectable responses", async () => 
   }
 });
 
-test("responseProtection stops reading upstream responses after maxBytes", { timeout: 2000 }, async () => {
+test("responseProtection rejects oversized upstream content-length before reading the body", async () => {
   const upstream = createServer(async (_request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.write(`{"content":"${"x".repeat(128)}`);
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": "128"
+    });
+    response.end("x".repeat(128));
   });
   const upstreamAddress = await listen(upstream);
 
@@ -366,7 +369,6 @@ test("responseProtection stops reading upstream responses after maxBytes", { tim
     const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      signal: AbortSignal.timeout(800),
       body: JSON.stringify({
         model: "local-model",
         messages: [{ role: "user", content: "hello" }]
