@@ -130,6 +130,88 @@ export function createPolicyEngine(policy) {
   };
 }
 
+// Compiles the base policy plus every named profile into ready policy engines
+// and a resolver that maps an identity to one. A profile inherits the base
+// policy's presets/actions and overrides on top (so a profile need only state
+// what differs). `transform` (e.g. applyPrivacyProfile) is applied to each
+// compiled policy source before buildPolicy.
+export function createPolicyProfiles(policyConfig = {}, { transform } = {}) {
+  const { profiles = {}, profileBinding = null, ...baseSource } = policyConfig;
+  const apply = (source) => (transform ? transform(source) : source);
+
+  const baseEngine = createPolicyEngine(buildPolicy(apply(baseSource)));
+  const profileNames = Object.keys(profiles);
+  const engines = new Map();
+
+  for (const name of profileNames) {
+    const override = profiles[name] ?? {};
+    const merged = {
+      ...baseSource,
+      ...override,
+      // Profile presets replace the base presets when given; actions merge over
+      // the base via buildPolicy's strengthen-only rules.
+      actions: { ...(baseSource.actions ?? {}), ...(override.actions ?? {}) },
+      modelAllowlist: override.modelAllowlist ?? baseSource.modelAllowlist,
+      rate: override.rate ?? baseSource.rate
+    };
+    engines.set(name, {
+      policyEngine: createPolicyEngine(buildPolicy(apply(merged))),
+      modelAllowlist: merged.modelAllowlist ?? null,
+      rate: merged.rate ?? null
+    });
+  }
+
+  if (profileBinding) {
+    if (!profileBinding.default || !engines.has(profileBinding.default)) {
+      throw new Error("policy.profileBinding.default must name a declared profile");
+    }
+    for (const map of [profileBinding.byScope ?? {}, profileBinding.byLabel ?? {}]) {
+      for (const [key, target] of Object.entries(map)) {
+        if (!engines.has(target)) {
+          throw new Error(`policy.profileBinding maps ${key} to unknown profile: ${target}`);
+        }
+      }
+    }
+  } else if (profileNames.length > 0) {
+    throw new Error("policy.profiles requires policy.profileBinding with a default");
+  }
+
+  const base = {
+    policyEngine: baseEngine,
+    modelAllowlist: baseSource.modelAllowlist ?? null,
+    rate: baseSource.rate ?? null
+  };
+
+  return {
+    base,
+    hasProfiles: profileNames.length > 0,
+    // Resolve identity → { profile, policyEngine, modelAllowlist, rate }.
+    // Order: scope match → label match → default. Without profiles or identity,
+    // the base policy applies.
+    resolve(identity) {
+      if (!profileBinding) {
+        return { profile: null, ...base };
+      }
+      if (identity) {
+        for (const scope of identity.scopes ?? []) {
+          const name = profileBinding.byScope?.[scope];
+          if (name) {
+            return { profile: name, ...engines.get(name) };
+          }
+        }
+        for (const [key, value] of Object.entries(identity.labels ?? {})) {
+          const name = profileBinding.byLabel?.[`${key}=${value}`];
+          if (name) {
+            return { profile: name, ...engines.get(name) };
+          }
+        }
+      }
+      const fallback = profileBinding.default;
+      return { profile: fallback, ...engines.get(fallback) };
+    }
+  };
+}
+
 export function validatePolicy(policy) {
   if (!policy || typeof policy !== "object") {
     throw new Error("Policy must be an object");

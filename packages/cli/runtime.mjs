@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createHaechi } from "../core/index.mjs";
 import { createDefaultFilterEngine } from "../filter/index.mjs";
-import { buildPolicy, createPolicyEngine } from "../policy/index.mjs";
+import { createPolicyProfiles } from "../policy/index.mjs";
 import { createLocalCryptoProvider, initLocalKeyFile } from "../crypto/index.mjs";
 import { createJsonlAuditSink } from "../audit/index.mjs";
 import { createLocalTokenVault } from "../token-vault/index.mjs";
@@ -141,13 +141,15 @@ export function createRuntime(config, providers = {}) {
       ...normalized.policy,
       mode: normalized.policy.mode ?? normalized.mode
     };
-  const policy = buildPolicy(normalized.privacy.profile
-    ? applyPrivacyProfile(policySource, normalized.privacy.profile)
-    : policySource);
+  const policyProfiles = createPolicyProfiles(policySource, {
+    transform: (source) => normalized.privacy.profile
+      ? applyPrivacyProfile(source, normalized.privacy.profile)
+      : source
+  });
 
   const filterEngine = providers.filterEngine ?? createDefaultFilterEngine(normalized.filters);
   assertProvider("filterEngine", filterEngine, ["detect"]);
-  const policyEngine = providers.policyEngine ?? createPolicyEngine(policy);
+  const policyEngine = providers.policyEngine ?? policyProfiles.base.policyEngine;
   assertProvider("policyEngine", policyEngine, ["decide"]);
 
   const authProvider = resolveAuthProvider(normalized, providers, cryptoProvider);
@@ -157,6 +159,7 @@ export function createRuntime(config, providers = {}) {
     tokenVault,
     auditSink,
     authProvider,
+    policyProfiles,
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
@@ -302,6 +305,7 @@ export function normalizeConfig(config) {
   if (typeof merged.limits.upstreamTimeoutMs !== "number" || merged.limits.upstreamTimeoutMs < 1) {
     throw new Error("limits.upstreamTimeoutMs must be a positive number");
   }
+  validatePolicyExtras(merged.policy);
   if (!["none", "bearer", "external"].includes(merged.auth.provider)) {
     throw new Error(`Invalid auth.provider: ${merged.auth.provider}`);
   }
@@ -318,6 +322,59 @@ export function normalizeConfig(config) {
 
 export function isValidPort(port) {
   return Number.isInteger(port) && port >= 0 && port <= 65535;
+}
+
+function validatePolicyExtras(policy) {
+  if (policy.modelAllowlist !== undefined) {
+    assertModelAllowlist(policy.modelAllowlist, "policy.modelAllowlist");
+  }
+  if (policy.rate !== undefined) {
+    assertRate(policy.rate, "policy.rate");
+  }
+  if (policy.profiles !== undefined) {
+    if (typeof policy.profiles !== "object" || policy.profiles === null || Array.isArray(policy.profiles)) {
+      throw new Error("policy.profiles must be an object of named profiles");
+    }
+    for (const [name, profile] of Object.entries(policy.profiles)) {
+      if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
+        throw new Error(`policy.profiles.${name} must be an object`);
+      }
+      if (profile.modelAllowlist !== undefined) {
+        assertModelAllowlist(profile.modelAllowlist, `policy.profiles.${name}.modelAllowlist`);
+      }
+      if (profile.rate !== undefined) {
+        assertRate(profile.rate, `policy.profiles.${name}.rate`);
+      }
+    }
+  }
+  if (policy.profileBinding !== undefined) {
+    const binding = policy.profileBinding;
+    if (typeof binding !== "object" || binding === null || Array.isArray(binding)) {
+      throw new Error("policy.profileBinding must be an object");
+    }
+    if (typeof binding.default !== "string" || !binding.default.trim()) {
+      throw new Error("policy.profileBinding.default must be a profile name");
+    }
+    for (const field of ["byScope", "byLabel"]) {
+      if (binding[field] !== undefined
+        && (typeof binding[field] !== "object" || binding[field] === null || Array.isArray(binding[field]))) {
+        throw new Error(`policy.profileBinding.${field} must be an object`);
+      }
+    }
+  }
+}
+
+function assertModelAllowlist(value, label) {
+  if (!Array.isArray(value) || !value.every((model) => typeof model === "string" && model.trim())) {
+    throw new Error(`${label} must be an array of non-empty strings`);
+  }
+}
+
+function assertRate(value, label) {
+  if (typeof value !== "object" || value === null
+    || typeof value.requestsPerMinute !== "number" || value.requestsPerMinute < 1) {
+    throw new Error(`${label}.requestsPerMinute must be a positive number`);
+  }
 }
 
 function resolveAuthProvider(config, providers, cryptoProvider) {
