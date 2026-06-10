@@ -24,7 +24,7 @@ The primary assets Haechi protects are:
 | CLI local process | Developer local trust | Dev key warning, dry-run default |
 | HTTP proxy listener | Untrusted client input | Loopback bind by default, remote bind requires explicit flag |
 | Upstream model/tool server | Untrusted or partially trusted | Request/response protection, uninspectable response fail-closed |
-| Streaming response | Currently uninspected | `stream: true` blocked by default |
+| Streaming response | Inspected (bounded) or blocked | `inspect` stream-filters SSE/NDJSON with a bounded cross-frame buffer; `block` (default) refuses |
 | MCP stdio peer | Partially trusted | JSON-RPC 2.0 required, method allowlist |
 | Local filesystem | Partially trusted | Local key/token vault at 0600, audit hash chain |
 | External provider/plugin | Untrusted | Provider method contract, plugin manifest-only gate |
@@ -34,7 +34,7 @@ The primary assets Haechi protects are:
 | Threat | Impact | Current Control |
 |---|---|---|
 | Internet-exposed proxy | Unauthenticated LLM gateway | Non-loopback bind fails by default |
-| Streaming bypass | SSE/NDJSON plaintext leak | Streaming requests fail by default |
+| Streaming bypass | SSE/NDJSON plaintext leak | `inspect` mode stream-filters SSE/NDJSON; `block` (default) refuses; `pass-through` is an explicit audited opt-out |
 | Ollama implicit streaming bypass | NDJSON plaintext leak when `stream` is omitted | `/api/chat` and `/api/generate` are treated as streaming unless `stream: false` is explicit; blocked by default |
 | Non-JSON / compressed / oversized response | responseProtection bypass | Fail-closed response policy |
 | Token reveal abuse | Restoration of tokenized PII | `revealPolicy` disabled by default; reveal/purge decisions recorded in audit |
@@ -56,7 +56,9 @@ The primary assets Haechi protects are:
 
 - A production KMS/HSM/Vault adapter
 - Authentication/authorization for internet-facing gateways
-- SSE/NDJSON stream inspection
+- Cross-frame matches longer than `streaming.maxMatchBytes` (may still split across stream frames)
+- Retraction of stream bytes already emitted before a `block` fires
+- Per-choice (`n > 1`) cross-frame buffering in streams (secondary choices get within-frame protection only)
 - Legal compliance certification
 - Complete defense against model hallucination or prompt injection
 - OAuth/resource binding validation for external MCP servers

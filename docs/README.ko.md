@@ -15,6 +15,7 @@
 - `docs/current/release-0.3-implementation-scope.md`: 0.3 vLLM/Ollama/llama.cpp adapter, response protection, npm publish readiness 구현 범위
 - `docs/current/release-0.3.2-hardening-scope.md`: 0.3.2 보안 하드닝 릴리스, 첫 npm developer preview 배포 대상
 - `docs/current/release-0.4-implementation-scope.md`: 0.4 token round-trip, mcp-wrap, audit-verify/status, identity/authProvider 계약 예약
+- `docs/current/release-0.5-implementation-scope.md`: 0.5 SSE/NDJSON 스트리밍 응답 검사 (bounded cross-frame buffer)
 - `docs/current/configuration.md`: 전체 설정 레퍼런스 (모든 키, 기본값, 검증, preset, 자주 쓰는 설정)
 - `docs/current/risk-register-release-gate.md`: 0.3.2 기준 배포 차단 리스크, 보안/운영 리스크, npm release gate
 - `docs/current/threat-model.md`: Haechi 0.3.2 신뢰 경계, 보호 자산, 주요 위협과 통제

@@ -41,6 +41,7 @@ The following exports are treated as preview in 0.4.0.
 - `injection` detection type and its heuristic rules
 - `identity` audit field and the `authProvider` contract (reserved in 0.4, implemented in 0.6 — shape may change until then)
 - `status` / `audit-verify` CLI output shapes
+- `haechi/stream-filter` (`inspectResponseStream`, path helpers) and `createStreamProtector` (streaming inspection internals)
 
 ## 4. Migration note criteria
 

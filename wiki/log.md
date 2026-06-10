@@ -29,3 +29,7 @@ All four 0.4.0 features landed (PRs #7–#10) and the release branch cut: determ
 ## [2026-06-10] ingest | Configuration reference and CLI help
 
 Added `docs/current/configuration.md` (+`.ko.md`): full per-key reference, presets, action strength, validation cheatsheet, common setups, and remote-bind guidance. Restructured `haechi help` (command list + `help <command>`) and added `haechi config` (condensed guide). Four-place config coupling is now five: defaultConfig, normalizeConfig, example json, configuration.md, and `haechi config`/COMMAND_HELP.
+
+## [2026-06-10] ingest | 0.5.0 streaming inspection shipped
+
+PR #14 added SSE/NDJSON streaming response inspection (`streaming.requestMode: "inspect"`): new `packages/stream-filter`, `core.createStreamProtector` with a bounded sliding buffer for cross-frame matches, per-adapter `{ format, deltaPath }`, and a fix where a specific `target.type` now beats a default-merged `target.adapter`. Rewrote `[[streaming-protection-gap]]` from gap to shipped design, marked the roadmap row, and recorded the bounded limits (`maxMatchBytes`, emitted-bytes-on-block, n>1 choices) as threat-model exclusions.

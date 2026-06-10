@@ -1,6 +1,6 @@
 {
   "name": "haechi",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Experimental developer preview for self-hosted AI context enforcement across LLM, MCP, vLLM, Ollama, and agent traffic.",
   "license": "Apache-2.0",
   "type": "module",

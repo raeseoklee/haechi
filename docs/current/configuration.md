@@ -1,7 +1,7 @@
 # Haechi Configuration Reference
 
 - Status: Living document
-- Target version: 0.4.0
+- Target version: 0.5.0
 
 `haechi init` writes `haechi.config.json`; a non-secret template is at `haechi.config.example.json`. Every command reads it with `--config <path>` (default `haechi.config.json`). Configuration is **validated fail-closed**: unknown providers, out-of-range numbers, and malformed values throw at load time rather than degrading silently. `haechi config` prints this reference; `haechi status` prints the *effective* state of a given config.
 
@@ -63,7 +63,9 @@ Inspects upstream JSON responses (off by default — turn on to protect what com
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
-| `streaming.requestMode` | `block` \| `pass-through` | `block` | `stream: true` requests get `501` unless `pass-through` (forwarded uninspected, with an audit decision). Ollama `/api/chat` and `/api/generate` are treated as streaming unless `stream: false` is set. Haechi does not inspect SSE/NDJSON (planned for 0.5). |
+| `streaming.requestMode` | `block` \| `pass-through` \| `inspect` | `block` | `block` → `501` for streaming; `inspect` → stream-filter SSE/NDJSON responses (bounded cross-frame buffer); `pass-through` → forward uninspected (audited). Ollama `/api/chat` and `/api/generate` are treated as streaming unless `stream: false` is set. |
+| `streaming.responseMode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | Enforcement mode applied to inspected streams (independent of the request direction). |
+| `streaming.maxMatchBytes` | positive integer | `256` | Cross-frame match window for `inspect`. A held tail of this size lets a detection spanning frames be caught before emission; a single match longer than this may still split across frames. |
 
 ## `limits`
 
@@ -205,4 +207,4 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## Validation cheatsheet
 
-These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; bad `streaming.requestMode`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`.
+These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`.
