@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createRuntime } from "../packages/cli/runtime.mjs";
+import { createRuntime, defaultConfig, normalizeConfig } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
-import { createHaechiProxy } from "../packages/proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, assertSafeProxyBind, createHaechiProxy } from "../packages/proxy/index.mjs";
 
 test("vLLM-compatible proxy protects request and JSON response", async () => {
   const upstream = createServer(async (request, response) => {
@@ -84,6 +84,414 @@ test("vLLM-compatible proxy protects request and JSON response", async () => {
   }
 });
 
+test("proxy refuses non-loopback bind unless explicitly allowed", () => {
+  assert.throws(
+    () => assertSafeProxyBind({ host: "0.0.0.0" }),
+    /Refusing to bind/
+  );
+
+  assert.doesNotThrow(() => assertSafeProxyBind({ host: "0.0.0.0", allowRemoteBind: true }));
+});
+
+test("proxy listen options are configurable with a safe default port", () => {
+  assert.equal(DEFAULT_PROXY_PORT, 1016);
+  assert.deepEqual(defaultConfig().proxy, {
+    host: "127.0.0.1",
+    port: 1016
+  });
+  assert.deepEqual(normalizeConfig({
+    proxy: {
+      host: "127.0.0.1",
+      port: 21016
+    }
+  }).proxy, {
+    host: "127.0.0.1",
+    port: 21016
+  });
+});
+
+test("proxy port config rejects invalid TCP port numbers", () => {
+  for (const port of [-1, 65536, 211016, 1.5, "1016"]) {
+    assert.throws(
+      () => normalizeConfig({ proxy: { port } }),
+      /proxy\.port must be an integer from 0 to 65535/
+    );
+  }
+});
+
+test("proxy rejects absolute-form request targets before forwarding", async () => {
+  let intendedUpstreamHit = false;
+  let attackerUpstreamHit = false;
+  const intendedUpstream = createServer(async (_request, response) => {
+    intendedUpstreamHit = true;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const attackerUpstream = createServer(async (_request, response) => {
+    attackerUpstreamHit = true;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ exfiltrated: true }));
+  });
+  const intendedAddress = await listen(intendedUpstream);
+  const attackerAddress = await listen(attackerUpstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-absolute-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${intendedAddress.port}`
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await sendRawHttpRequest({
+      host: proxyAddress.host,
+      port: proxyAddress.port,
+      path: `http://127.0.0.1:${attackerAddress.port}/v1/chat/completions`,
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+    const json = JSON.parse(response.body);
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(json.error, "haechi_invalid_proxy_target");
+    assert.equal(intendedUpstreamHit, false);
+    assert.equal(attackerUpstreamHit, false);
+  } finally {
+    await proxy.close();
+    await close(intendedUpstream);
+    await close(attackerUpstream);
+  }
+});
+
+test("proxy blocks streaming requests by default", async () => {
+  const upstream = createServer(async (_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-stream-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "local-model",
+        stream: true,
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 501);
+    assert.equal(json.error, "haechi_streaming_unsupported");
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("streaming pass-through records a bypass audit event", async () => {
+  const upstream = createServer(async (_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-stream-audit-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    streaming: {
+      requestMode: "pass-through"
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        stream: true,
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+    assert.equal(response.status, 200);
+
+    const audit = await readFile(auditPath, "utf8");
+    assert.match(audit, /streaming_request_pass_through/);
+    assert.doesNotMatch(audit, /hello/);
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("responseProtection fails closed for uninspectable responses", async () => {
+  const upstream = createServer(async (_request, response) => {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("minji.kim@example.com");
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-response-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    responseProtection: {
+      enabled: true,
+      mode: "enforce"
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "local-model",
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(json.error, "haechi_response_unprotected");
+    assert.equal(json.reason, "non_json_response");
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("responseProtection rejects oversized upstream content-length before reading the body", async () => {
+  const upstream = createServer(async (_request, response) => {
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": "128"
+    });
+    response.end("x".repeat(128));
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-response-limit-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    responseProtection: {
+      enabled: true,
+      mode: "enforce",
+      maxBytes: 64
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "local-model",
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(json.error, "haechi_response_unprotected");
+    assert.equal(json.reason, "response_body_too_large");
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("responseProtection allow mode records unprotected response decisions", async () => {
+  const upstream = createServer(async (_request, response) => {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("minji.kim@example.com");
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-response-allow-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    responseProtection: {
+      enabled: true,
+      mode: "enforce",
+      failureMode: "allow"
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "local-model",
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "minji.kim@example.com");
+
+    const audit = await readFile(auditPath, "utf8");
+    assert.match(audit, /response_unprotected_allowed/);
+    assert.doesNotMatch(audit, /minji\.kim@example\.com/);
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("proxy rejects request bodies over configured limit", async () => {
+  let upstreamHit = false;
+  const upstream = createServer(async (_request, response) => {
+    upstreamHit = true;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-limit-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: {
+      type: "vllm-openai",
+      upstream: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    limits: {
+      maxRequestBytes: 64
+    },
+    policy: {
+      mode: "enforce",
+      presets: ["llm-redact"]
+    },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "a".repeat(128) }]
+      })
+    });
+    const json = await response.json();
+
+    assert.equal(response.status, 413);
+    assert.equal(json.error, "haechi_request_body_too_large");
+    assert.equal(upstreamHit, false);
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
 function listen(server) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server.address()));
@@ -102,5 +510,29 @@ function readBody(request) {
     request.on("data", (chunk) => chunks.push(chunk));
     request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     request.on("error", reject);
+  });
+}
+
+function sendRawHttpRequest({ host, port, path, body }) {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host,
+      port,
+      path,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body)
+      }
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        statusCode: response.statusCode,
+        body: Buffer.concat(chunks).toString("utf8")
+      }));
+    });
+    request.on("error", reject);
+    request.end(body);
   });
 }

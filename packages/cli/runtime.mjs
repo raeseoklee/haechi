@@ -8,6 +8,8 @@ import { createJsonlAuditSink } from "../audit/index.mjs";
 import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
+import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
+import { DEFAULT_PROXY_PORT } from "../proxy/index.mjs";
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
@@ -19,9 +21,24 @@ export function defaultConfig() {
       adapter: "openai-compatible",
       upstream: "http://127.0.0.1:9999"
     },
+    proxy: {
+      host: "127.0.0.1",
+      port: DEFAULT_PROXY_PORT
+    },
     responseProtection: {
       enabled: false,
-      mode: "enforce"
+      mode: "enforce",
+      failureMode: "fail-closed",
+      allowNonJson: false,
+      allowCompressed: false,
+      maxBytes: 1048576
+    },
+    streaming: {
+      requestMode: "block"
+    },
+    limits: {
+      maxRequestBytes: 1048576,
+      upstreamTimeoutMs: 120000
     },
     policy: {
       mode: "dry-run",
@@ -44,7 +61,18 @@ export function defaultConfig() {
     },
     tokenVault: {
       provider: "local",
-      path: ".haechi/token-vault.json"
+      path: ".haechi/token-vault.json",
+      revealPolicy: "disabled",
+      retentionDays: 30
+    },
+    privacy: {
+      profile: null
+    },
+    mcp: {
+      allowedMethods: ["initialize", "tools/call", "resources/read", "prompts/get"],
+      protectParams: true,
+      protectResults: true,
+      requireJsonRpc: true
     }
   };
 }
@@ -74,10 +102,20 @@ export async function writeDefaultConfig(configPath = DEFAULT_CONFIG_PATH, { for
   return { created: true, configPath, config };
 }
 
-export function createRuntime(config) {
+export function createRuntime(config, providers = {}) {
   const normalized = normalizeConfig(config);
-  const cryptoProvider = createLocalCryptoProvider({ keyFile: normalized.keys.keyFile });
-  const tokenVault = createLocalTokenVault({ path: normalized.tokenVault.path, cryptoProvider });
+  const cryptoProvider = providers.cryptoProvider ?? createConfiguredCryptoProvider(normalized);
+  assertProvider("cryptoProvider", cryptoProvider, ["encrypt", "decrypt"]);
+  const auditSink = providers.auditSink ?? createJsonlAuditSink({ path: normalized.audit.path });
+  assertProvider("auditSink", auditSink, ["record"]);
+  const tokenVault = providers.tokenVault ?? createLocalTokenVault({
+    path: normalized.tokenVault.path,
+    cryptoProvider,
+    revealPolicy: normalized.tokenVault.revealPolicy,
+    retentionDays: normalized.tokenVault.retentionDays,
+    auditSink
+  });
+  assertProvider("tokenVault", tokenVault, ["tokenize", "reveal", "purge"]);
   const policySource = normalized.policy.bundlePath
     ? {
       ...loadVerifiedPolicyBundleFileSync({
@@ -90,21 +128,27 @@ export function createRuntime(config) {
       ...normalized.policy,
       mode: normalized.policy.mode ?? normalized.mode
     };
-  const policy = buildPolicy({
-    ...policySource
-  });
+  const policy = buildPolicy(normalized.privacy.profile
+    ? applyPrivacyProfile(policySource, normalized.privacy.profile)
+    : policySource);
+
+  const filterEngine = providers.filterEngine ?? createDefaultFilterEngine(normalized.filters);
+  assertProvider("filterEngine", filterEngine, ["detect"]);
+  const policyEngine = providers.policyEngine ?? createPolicyEngine(policy);
+  assertProvider("policyEngine", policyEngine, ["decide"]);
 
   return {
     config: normalized,
     tokenVault,
+    auditSink,
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
-      filterEngine: createDefaultFilterEngine(normalized.filters),
-      policyEngine: createPolicyEngine(policy),
+      filterEngine,
+      policyEngine,
       cryptoProvider,
       tokenVault,
-      auditSink: createJsonlAuditSink({ path: normalized.audit.path })
+      auditSink
     })
   };
 }
@@ -117,9 +161,21 @@ export function normalizeConfig(config) {
       ...defaultConfig().target,
       ...(config.target ?? {})
     },
+    proxy: {
+      ...defaultConfig().proxy,
+      ...(config.proxy ?? {})
+    },
     responseProtection: {
       ...defaultConfig().responseProtection,
       ...(config.responseProtection ?? {})
+    },
+    streaming: {
+      ...defaultConfig().streaming,
+      ...(config.streaming ?? {})
+    },
+    limits: {
+      ...defaultConfig().limits,
+      ...(config.limits ?? {})
     },
     policy: {
       ...defaultConfig().policy,
@@ -144,11 +200,26 @@ export function normalizeConfig(config) {
     tokenVault: {
       ...defaultConfig().tokenVault,
       ...(config.tokenVault ?? {})
+    },
+    privacy: {
+      ...defaultConfig().privacy,
+      ...(config.privacy ?? {})
+    },
+    mcp: {
+      ...defaultConfig().mcp,
+      ...(config.mcp ?? {}),
+      allowedMethods: config.mcp?.allowedMethods ?? defaultConfig().mcp.allowedMethods
     }
   };
 
-  if (merged.keys.provider !== "local") {
-    throw new Error("Current implementation only supports local key provider");
+  if (!["local", "external"].includes(merged.keys.provider)) {
+    throw new Error(`Unsupported key provider: ${merged.keys.provider}`);
+  }
+  if (typeof merged.proxy.host !== "string" || !merged.proxy.host.trim()) {
+    throw new Error("proxy.host must be a non-empty string");
+  }
+  if (!isValidPort(merged.proxy.port)) {
+    throw new Error("proxy.port must be an integer from 0 to 65535");
   }
   if (merged.audit.sink !== "jsonl") {
     throw new Error("Current implementation only supports jsonl audit sink");
@@ -156,6 +227,61 @@ export function normalizeConfig(config) {
   if (merged.tokenVault.provider !== "local") {
     throw new Error("0.2 only supports local token vault provider");
   }
+  if (!["disabled", "local-dev"].includes(merged.tokenVault.revealPolicy)) {
+    throw new Error(`Invalid tokenVault.revealPolicy: ${merged.tokenVault.revealPolicy}`);
+  }
+  if (typeof merged.tokenVault.retentionDays !== "number" || merged.tokenVault.retentionDays < 1) {
+    throw new Error("tokenVault.retentionDays must be a positive number");
+  }
+  if (!Array.isArray(merged.mcp.allowedMethods) || merged.mcp.allowedMethods.length === 0) {
+    throw new Error("mcp.allowedMethods must be a non-empty array");
+  }
+  if (!merged.mcp.allowedMethods.every((method) => typeof method === "string" && method.trim())) {
+    throw new Error("mcp.allowedMethods must contain only non-empty strings");
+  }
+  if (typeof merged.mcp.protectParams !== "boolean" || typeof merged.mcp.protectResults !== "boolean") {
+    throw new Error("mcp.protectParams and mcp.protectResults must be boolean");
+  }
+  if (typeof merged.mcp.requireJsonRpc !== "boolean") {
+    throw new Error("mcp.requireJsonRpc must be boolean");
+  }
+  if (merged.privacy.profile) {
+    getPrivacyProfile(merged.privacy.profile);
+  }
+  if (!["fail-closed", "allow"].includes(merged.responseProtection.failureMode)) {
+    throw new Error(`Invalid responseProtection.failureMode: ${merged.responseProtection.failureMode}`);
+  }
+  if (typeof merged.responseProtection.maxBytes !== "number" || merged.responseProtection.maxBytes < 1) {
+    throw new Error("responseProtection.maxBytes must be a positive number");
+  }
+  if (!["block", "pass-through"].includes(merged.streaming.requestMode)) {
+    throw new Error(`Invalid streaming.requestMode: ${merged.streaming.requestMode}`);
+  }
+  if (typeof merged.limits.maxRequestBytes !== "number" || merged.limits.maxRequestBytes < 1) {
+    throw new Error("limits.maxRequestBytes must be a positive number");
+  }
+  if (typeof merged.limits.upstreamTimeoutMs !== "number" || merged.limits.upstreamTimeoutMs < 1) {
+    throw new Error("limits.upstreamTimeoutMs must be a positive number");
+  }
   createProtocolAdapter(merged.target);
   return merged;
+}
+
+export function isValidPort(port) {
+  return Number.isInteger(port) && port >= 0 && port <= 65535;
+}
+
+function createConfiguredCryptoProvider(config) {
+  if (config.keys.provider === "external") {
+    throw new Error("keys.provider external requires createRuntime(config, { cryptoProvider })");
+  }
+  return createLocalCryptoProvider({ keyFile: config.keys.keyFile });
+}
+
+function assertProvider(name, provider, methods) {
+  for (const method of methods) {
+    if (typeof provider?.[method] !== "function") {
+      throw new Error(`${name} provider must implement ${method}()`);
+    }
+  }
 }

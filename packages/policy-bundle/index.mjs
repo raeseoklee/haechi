@@ -75,8 +75,13 @@ function loadActiveKey(keyFile, kid = null) {
   };
 }
 
+const SIGNING_KEY_DOMAIN = "haechi:policy-bundle:signing:v1";
+
 function hmac(key, payload) {
-  return createHmac("sha256", key).update(canonicalize(payload)).digest("base64url");
+  // Domain-separated signing key: the stored key material doubles as the
+  // AES-256-GCM encryption key, so it must never be used for HMAC directly.
+  const signingKey = createHmac("sha256", key).update(SIGNING_KEY_DOMAIN).digest();
+  return createHmac("sha256", signingKey).update(canonicalize(payload)).digest("base64url");
 }
 
 function safeEqual(left, right) {

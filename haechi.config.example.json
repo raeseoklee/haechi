@@ -5,9 +5,24 @@
     "adapter": "openai-compatible",
     "upstream": "http://127.0.0.1:9999"
   },
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 1016
+  },
   "responseProtection": {
     "enabled": false,
-    "mode": "enforce"
+    "mode": "enforce",
+    "failureMode": "fail-closed",
+    "allowNonJson": false,
+    "allowCompressed": false,
+    "maxBytes": 1048576
+  },
+  "streaming": {
+    "requestMode": "block"
+  },
+  "limits": {
+    "maxRequestBytes": 1048576,
+    "upstreamTimeoutMs": 120000
   },
   "policy": {
     "mode": "dry-run",
@@ -34,6 +49,22 @@
   },
   "tokenVault": {
     "provider": "local",
-    "path": ".haechi/token-vault.json"
+    "path": ".haechi/token-vault.json",
+    "revealPolicy": "disabled",
+    "retentionDays": 30
+  },
+  "privacy": {
+    "profile": null
+  },
+  "mcp": {
+    "allowedMethods": [
+      "initialize",
+      "tools/call",
+      "resources/read",
+      "prompts/get"
+    ],
+    "protectParams": true,
+    "protectResults": true,
+    "requireJsonRpc": true
   }
 }

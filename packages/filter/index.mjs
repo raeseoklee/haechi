@@ -18,7 +18,8 @@ const DEFAULT_RULES = [
     type: "kr_rrn",
     pattern: "\\b\\d{6}[-\\s]?[1-8]\\d{6}\\b",
     flags: "g",
-    confidence: 0.85
+    confidence: 0.85,
+    validate: krRrnValid
   },
   {
     id: "card-like",
@@ -45,7 +46,9 @@ const DEFAULT_RULES = [
   {
     id: "assignment-secret",
     type: "secret",
-    pattern: "\\b(?:api[_-]?key|secret|token|password)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9._~+/-]{12,}",
+    // Lookbehind keeps the key name out of the match so transforms replace
+    // only the secret value, not the assignment prefix.
+    pattern: "(?<=\\b(?:api[_-]?key|secret|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
     flags: "gi",
     confidence: 0.85
   }
@@ -82,6 +85,7 @@ export function detectEntry(entry, rules) {
         ruleId: rule.id,
         path: entry.path,
         pathText: entry.pathText,
+        kind: entry.kind ?? "value",
         start: match.index,
         end: match.index + value.length,
         confidence: rule.confidence,
@@ -97,6 +101,8 @@ function normalizeCustomRule(rule) {
   if (!rule.id || !rule.type || !rule.pattern) {
     throw new Error("Custom filter rule requires id, type, and pattern");
   }
+  validateCustomPattern(rule.pattern);
+  validateFlags(rule.flags ?? "g");
   return {
     id: rule.id,
     type: rule.type,
@@ -104,6 +110,24 @@ function normalizeCustomRule(rule) {
     flags: rule.flags ?? "g",
     confidence: rule.confidence ?? 0.7
   };
+}
+
+function validateCustomPattern(pattern) {
+  if (pattern.length > 500) {
+    throw new Error("Custom filter rule pattern is too long");
+  }
+  if (/(?:\([^)]*[+*][^)]*\)){1}[+*{]/.test(pattern)) {
+    throw new Error("Custom filter rule pattern contains nested quantifiers");
+  }
+  if (/\\[1-9]/.test(pattern)) {
+    throw new Error("Custom filter rule pattern must not use backreferences");
+  }
+}
+
+function validateFlags(flags) {
+  if (!/^[dgimsuvy]*$/.test(flags)) {
+    throw new Error(`Invalid custom filter flags: ${flags}`);
+  }
 }
 
 function removeOverlaps(detections) {
@@ -150,4 +174,16 @@ function luhnValid(value) {
   }
 
   return sum % 10 === 0;
+}
+
+function krRrnValid(value) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 13) {
+    return false;
+  }
+
+  const weights = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5];
+  const sum = weights.reduce((total, weight, index) => total + weight * Number(digits[index]), 0);
+  const check = (11 - (sum % 11)) % 10;
+  return check === Number(digits[12]);
 }

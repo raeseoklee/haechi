@@ -1,54 +1,54 @@
-# 오픈소스 모듈형 아키텍처 초안
+# Open-Source Modular Architecture Draft
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-08
-- 제품명: Haechi
-- 목적: SaaS가 아닌 오픈소스/self-hosted 보안 인프라로서, 암호화·정책·개인정보 필터링 로직을 쉽게 교체할 수 있는 구조 정의
+- Status: Draft 0.1
+- Date: 2026-06-08
+- Product: Haechi
+- Purpose: Define a structure for open-source/self-hosted security infrastructure — not SaaS — where encryption, policy, and privacy filtering logic can be swapped out easily
 
-## 1. 방향
+## 1. Direction
 
-Haechi의 초기 목표는 상용 SaaS가 아니다. 작고, 보안적으로 설명 가능하며, 다른 개발자가 자기 AI/LLM/MCP 애플리케이션에 붙여 볼 수 있는 오픈소스 모듈이다.
+Haechi's initial goal is not a commercial SaaS product. It is a small, security-auditable open-source module that other developers can attach to their own AI/LLM/MCP applications.
 
-핵심은 "Haechi가 모든 정답을 제공한다"가 아니라 "Haechi가 안전한 경계와 테스트 기준을 제공하고, 사용자는 그 안에서 자기 구현을 갈아끼운다"다.
+The core idea is not "Haechi provides all the answers" but rather "Haechi provides safe boundaries and test standards; users swap in their own implementations within those boundaries."
 
-따라서 초기 설계의 우선순위는 다음이다.
+Therefore, the priorities for the initial design are:
 
-1. 동작하는 MCP/LLM 보호 데모
-2. 교체 가능한 provider interface
-3. reference implementation
-4. conformance test와 negative security test
-5. 플러그인 capability 선언과 fail-closed loading
+1. A working MCP/LLM protection demo
+2. Replaceable provider interfaces
+3. Reference implementations
+4. Conformance tests and negative security tests
+5. Plugin capability declarations and fail-closed loading
 
-### 1.1 적용성 기준
+### 1.1 Adoptability Criteria
 
-보안적으로 좋은 설계라도 적용이 어렵다면 OSS로 확산되기 어렵다. Haechi는 다음 적용성 기준을 제품 요구사항으로 둔다.
+Even a sound security design is hard to spread as OSS if it is difficult to adopt. Haechi treats the following adoptability criteria as product requirements.
 
-| 기준 | 목표 |
+| Criterion | Target |
 |---|---|
-| 5분 local demo | `haechi init` 후 local key, sample policy, dry-run audit까지 실행 |
-| 30분 MCP/LLM PoC | 기존 MCP host 또는 LLM HTTP 호출을 local proxy로 우회 |
-| 1일 custom filter PoC | 사용자가 자체 dictionary/regex/rule을 추가하고 fixture test 실행 |
-| 최소 코드 변경 | proxy mode에서는 app code 변경 없이 base URL/env var 변경으로 시작 |
-| 점진적 강제 | 처음에는 `dry-run`, 이후 `redact`, `tokenize`, `encrypt`, `block` 적용 |
-| 쉬운 교체 | config 또는 dependency injection으로 provider 교체 |
+| 5-minute local demo | Run `haechi init` through local key, sample policy, and dry-run audit |
+| 30-minute MCP/LLM PoC | Route an existing MCP host or LLM HTTP call through the local proxy |
+| 1-day custom filter PoC | Add a custom dictionary/regex/rule and run fixture tests |
+| Minimal code changes | In proxy mode, start by changing only base URL/env vars — no app code changes |
+| Incremental enforcement | Start with `dry-run`, then progress to `redact`, `tokenize`, `encrypt`, `block` |
+| Easy replacement | Swap providers via config or dependency injection |
 
-적용 경로는 세 단계로 나눈다.
+The adoption path is divided into three stages:
 
-1. No-code adoption: local proxy, sidecar, env var, target URL 변경
-2. Low-code adoption: middleware 또는 SDK wrapper 10줄 이내 적용
-3. Custom adoption: `PolicyEngine`, `FilterEngine`, `CryptoProvider`, `AuditSink` 교체
+1. No-code adoption: local proxy, sidecar, env var, target URL change
+2. Low-code adoption: middleware or SDK wrapper in 10 lines or fewer
+3. Custom adoption: replace `PolicyEngine`, `FilterEngine`, `CryptoProvider`, `AuditSink`
 
-## 2. 비목표
+## 2. Non-Goals
 
-- hosted SaaS control plane
-- 과금, 구독, tenant admin portal
-- SOC 2/ISO 인증을 전제로 한 영업용 evidence pack
-- KCMVP 또는 FIPS 인증 provider 내장
-- 자체 암호 primitive 개발
-- 모든 LLM/MCP/A2A/gRPC protocol을 0.1에서 production 수준으로 지원
-- 규제 준수 보증 문구 제공
+- Hosted SaaS control plane
+- Billing, subscriptions, tenant admin portal
+- Sales-oriented evidence pack targeting SOC 2/ISO certification
+- Built-in KCMVP or FIPS certified providers
+- Developing custom cryptographic primitives
+- Production-grade support for all LLM/MCP/A2A/gRPC protocols in 0.1
+- Providing regulatory compliance assurance language
 
-## 3. 패키지 구조 제안
+## 3. Proposed Package Structure
 
 ```text
 packages/
@@ -77,22 +77,22 @@ docs/
   threat-model/
 ```
 
-초기 공개 범위는 `core`, `crypto`, `policy`, `filter`, `audit`, `mcp`, `llm`, `cli`, `testing`, `examples`만으로 충분하다. `grpc`와 `a2a`는 interface와 skeleton 수준으로 남겨도 된다.
+For the initial public release, `core`, `crypto`, `policy`, `filter`, `audit`, `mcp`, `llm`, `cli`, `testing`, and `examples` are sufficient. `grpc` and `a2a` can remain at the interface and skeleton level.
 
-## 3.1 적용 모드
+## 3.1 Adoption Modes
 
-| Mode | 변경 범위 | 적합한 상황 | 예시 |
+| Mode | Scope of change | When to use | Example |
 |---|---|---|---|
-| Local proxy | 코드 변경 거의 없음 | LLM HTTP, MCP Streamable HTTP를 빠르게 보호 | base URL을 `http://localhost:8787`로 변경 |
-| SDK wrapper | 작은 코드 변경 | 앱 내부 context를 더 정확히 전달 | `haechi.protectMessage(...)` |
-| Middleware | 웹/API 서버에 삽입 | Express/Fastify/FastAPI 같은 gateway | request/response hook |
-| Sidecar | self-hosted service 옆 배치 | 컨테이너/서버 운영 환경 | app -> sidecar -> provider |
-| Protocol adapter | protocol별 통합 | MCP stdio, gRPC, A2A | adapter가 normalize/denormalize |
-| Custom provider | 특정 로직 교체 | 사내 정책/필터/키 관리 필요 | custom `FilterEngine` |
+| Local proxy | Almost no code changes | Quickly protect LLM HTTP or MCP Streamable HTTP | Change base URL to `http://localhost:1016` |
+| SDK wrapper | Small code changes | Pass more precise in-app context | `haechi.protectMessage(...)` |
+| Middleware | Insert into web/API server | Gateways like Express/Fastify/FastAPI | request/response hook |
+| Sidecar | Deploy alongside self-hosted service | Container/server runtime environments | app -> sidecar -> provider |
+| Protocol adapter | Per-protocol integration | MCP stdio, gRPC, A2A | adapter normalize/denormalize |
+| Custom provider | Replace specific logic | In-house policy/filter/key management needed | custom `FilterEngine` |
 
-초기 UX는 proxy mode를 최우선으로 둔다. 이유는 사용자가 보안 모듈의 가치를 확인하기 전에 기존 앱을 크게 고치게 만들면 채택이 느려지기 때문이다.
+Proxy mode is the top UX priority for the initial release. Requiring users to significantly rewrite existing apps before they can evaluate the value of the security module slows adoption.
 
-최소 설정 예시는 다음과 같다.
+The minimal configuration example is as follows:
 
 ```yaml
 mode: proxy
@@ -113,7 +113,7 @@ audit:
   path: ./.haechi/audit.jsonl
 ```
 
-초기 명령 흐름은 다음 정도가 적절하다.
+The initial command flow looks like:
 
 ```bash
 haechi init --preset mcp-basic --profile kr
@@ -146,24 +146,24 @@ Core Pipeline
 Protected protocol output
 ```
 
-Pipeline은 protocol별 구현보다 위에 있어야 한다. MCP, LLM HTTP, gRPC, A2A adapter는 모두 같은 `SecurityContext`, `PolicyDecision`, `Detection`, `AuditEvent` 모델을 사용해야 한다.
+The pipeline must sit above protocol-specific implementations. MCP, LLM HTTP, gRPC, and A2A adapters must all share the same `SecurityContext`, `PolicyDecision`, `Detection`, and `AuditEvent` models.
 
-## 5. 교체 가능한 Provider 경계
+## 5. Replaceable Provider Boundaries
 
-| Provider | 책임 | 기본 구현 | 사용자가 교체하는 이유 |
+| Provider | Responsibility | Default implementation | Why users replace it |
 |---|---|---|---|
-| `CryptoProvider` | 암호화, 복호화, rewrap, envelope metadata 검증 | XChaCha20-Poly1305 또는 AES-GCM 기반 envelope | 조직 표준 암호 포맷, JWE, HPKE, HSM 연동 |
-| `KeyProvider` | key id 해석, data key/wrapping key 제공, rotation | local software key | Vault, AWS KMS, GCP KMS, Azure Key Vault, HSM |
-| `PolicyEngine` | payload 처리 결정 | JSON/YAML policy | OPA/Rego, CEL, 자체 ABAC/RBAC 정책 |
-| `FilterEngine` | PII/secret 탐지와 변환 후보 생성 | regex/checksum/dictionary | 자체 개인정보 룰, NER, local classifier |
-| `TokenVault` | tokenization 원문 보관, reveal, purge | local encrypted vault | DB, organization vault, zero-retention tokenization |
-| `AuditSink` | 평문 없는 감사 이벤트 기록 | JSON Lines | SIEM, OpenTelemetry-safe exporter, custom log pipeline |
-| `ProtocolAdapter` | protocol input/output 정규화 | MCP/LLM reference adapter | 사내 gateway, agent framework, custom socket |
-| `ClassifierPlugin` | semantic classification | 없음 또는 local-only demo | 도메인별 민감정보 분류기 |
+| `CryptoProvider` | Encrypt, decrypt, rewrap, envelope metadata validation | XChaCha20-Poly1305 or AES-GCM based envelope | Organization cipher format standards, JWE, HPKE, HSM integration |
+| `KeyProvider` | Resolve key IDs, provide data keys/wrapping keys, rotation | Local software key | Vault, AWS KMS, GCP KMS, Azure Key Vault, HSM |
+| `PolicyEngine` | Decide how to process payloads | JSON/YAML policy | OPA/Rego, CEL, custom ABAC/RBAC policies |
+| `FilterEngine` | Detect PII/secrets and generate transform candidates | regex/checksum/dictionary | Custom privacy rules, NER, local classifier |
+| `TokenVault` | Store tokenization originals, reveal, purge | Local encrypted vault | DB, organization vault, zero-retention tokenization |
+| `AuditSink` | Record audit events without plaintext | JSON Lines | SIEM, OpenTelemetry-safe exporter, custom log pipeline |
+| `ProtocolAdapter` | Normalize/denormalize protocol input/output | MCP/LLM reference adapter | In-house gateway, agent framework, custom socket |
+| `ClassifierPlugin` | Semantic classification | None or local-only demo | Domain-specific sensitive data classifiers |
 
-## 6. Interface 초안
+## 6. Interface Draft
 
-초기 구현은 TypeScript interface를 기준으로 시작하고, Python SDK는 같은 JSON-compatible request/response model을 공유하는 방식이 현실적이다.
+Starting with TypeScript interfaces is practical for the initial implementation. A Python SDK sharing the same JSON-compatible request/response model is a realistic approach.
 
 ```ts
 export interface HaechiProvider {
@@ -211,7 +211,7 @@ export interface ProtocolAdapter extends HaechiProvider {
 
 ## 7. Security Context
 
-Provider가 받는 context는 protocol별 raw metadata가 아니라 canonical context여야 한다.
+The context received by providers must be a canonical context, not protocol-specific raw metadata.
 
 ```ts
 export interface SecurityContext {
@@ -233,11 +233,11 @@ export interface SecurityContext {
 }
 ```
 
-중요한 원칙은 `SecurityContext`가 암호화 AAD, 정책 평가, 감사 이벤트의 공통 기준이라는 점이다. 같은 payload라도 tenant, task, tool, model, policy version이 다르면 다른 보안 판단과 다른 암호문이 나와야 한다.
+The key principle is that `SecurityContext` serves as the common basis for cryptographic AAD, policy evaluation, and audit events. The same payload must produce a different security decision and a different ciphertext when the tenant, task, tool, model, or policy version differs.
 
 ## 8. Plugin Manifest
 
-Plugin은 코드만 등록하면 안 된다. 무엇을 할 수 있는지 먼저 선언해야 한다.
+A plugin must not merely register code. It must first declare what it is capable of doing.
 
 ```yaml
 haechiPlugin:
@@ -264,11 +264,11 @@ haechiPlugin:
     negative: ./fixtures/negative.json
 ```
 
-Manifest에 없는 capability를 plugin이 요구하면 load를 거부한다. 보안상 알 수 없는 plugin은 fail-closed가 기본이다.
+If a plugin requests a capability not declared in its manifest, loading is rejected. Fail-closed is the default for any plugin that cannot be verified.
 
-## 9. 쉽게 갈아끼우는 사용 예
+## 9. Easy Replacement Usage Examples
 
-사용자는 기본 필터를 그대로 쓰다가 자기 조직의 내부 프로젝트명, 고객 코드, 계약번호를 잡는 custom filter만 추가할 수 있어야 한다.
+Users should be able to keep the default filters as-is and add only a custom filter that catches their organization's internal project names, customer codes, and contract numbers.
 
 ```ts
 import { createHaechi } from "@haechi/core";
@@ -291,7 +291,7 @@ export const haechi = createHaechi({
 });
 ```
 
-다른 사용자는 정책 엔진만 OPA/Rego로 바꾸고 나머지는 reference implementation을 유지할 수 있다.
+Another user can swap only the policy engine to OPA/Rego while keeping the rest as reference implementations.
 
 ```ts
 export const haechi = createHaechi({
@@ -303,82 +303,82 @@ export const haechi = createHaechi({
 });
 ```
 
-## 10. Plugin 보안 검토 항목
+## 10. Plugin Security Review Items
 
-Plugin architecture는 확장성을 주지만 새로운 공격면도 만든다. 다음 항목은 MVP부터 테스트 기준으로 둔다.
+A plugin architecture provides extensibility but also introduces new attack surface. The following items are treated as test requirements starting from MVP.
 
-| 항목 | 위험 | 기준 |
+| Item | Risk | Requirement |
 |---|---|---|
-| 평문 접근 | filter, crypto, policy plugin이 prompt/tool result를 읽음 | manifest `readsPlaintext` 필수 선언 |
-| 네트워크 송신 | classifier가 원문을 외부 endpoint로 전송 | 기본 금지, opt-in도 audit 필수 |
-| 로그 유출 | plugin debug log에 원문 저장 | raw payload logging 금지 fixture |
-| policy bypass | custom policy가 hard block rule을 완화 | global emergency block 우선순위 고정 |
-| audit 조작 | plugin이 audit event를 누락하거나 변조 | core가 최종 audit event를 직접 생성 |
-| key misuse | custom crypto가 nonce 재사용 또는 AAD 누락 | conformance negative test 통과 필수 |
-| supply chain | 악성 dependency 포함 | SBOM, dependency policy, signed release |
-| version drift | core와 plugin schema 불일치 | compatibility range와 schema validation |
+| Plaintext access | filter, crypto, policy plugins read prompt/tool results | `readsPlaintext` must be declared in manifest |
+| Network egress | classifier sends original content to an external endpoint | Blocked by default; opt-in also requires audit |
+| Log leakage | plugin debug logs store original content | Raw payload logging prohibited — fixture test required |
+| Policy bypass | custom policy weakens a hard block rule | Global emergency block priority is fixed |
+| Audit tampering | plugin omits or alters audit events | Core generates the final audit event directly |
+| Key misuse | custom crypto reuses a nonce or omits AAD | Must pass conformance negative tests |
+| Supply chain | malicious dependency included | SBOM, dependency policy, signed release |
+| Version drift | core and plugin schema mismatch | Compatibility range and schema validation |
 
-## 11. Conformance Test
+## 11. Conformance Tests
 
-Provider 교체를 쉽게 하려면 테스트가 interface의 일부여야 한다.
+To make provider replacement straightforward, tests must be part of the interface contract.
 
-필수 test category:
+Required test categories:
 
-- `golden`: 정상 입력에서 결정적 결과 구조 확인
-- `tamper`: AAD, ciphertext, policy version 변조 시 실패
-- `cross-context`: 다른 tenant/task/tool/model에서 복호화 실패
-- `replay`: nonce/session/stream sequence 재사용 실패
-- `privacy-leak`: audit/log/metric에 원문 미포함
-- `policy-conflict`: hard block이 allow override보다 우선
-- `capability`: manifest 밖 capability 사용 실패
-- `regional-profile`: EU/US/KR profile별 action 차이 확인
-- `custom-filter`: 사용자 rule 충돌, rollback, fixture 기반 검증
+- `golden`: Verify deterministic result structure for valid inputs
+- `tamper`: Fail on AAD, ciphertext, or policy version tampering
+- `cross-context`: Fail to decrypt under a different tenant/task/tool/model
+- `replay`: Fail on nonce/session/stream sequence reuse
+- `privacy-leak`: Audit/log/metric must not contain plaintext
+- `policy-conflict`: Hard block takes priority over allow overrides
+- `capability`: Fail when a capability outside the manifest is used
+- `regional-profile`: Verify action differences across EU/US/KR profiles
+- `custom-filter`: User rule conflicts, rollback, fixture-based validation
 
-## 12. OSS 공개 전략
+## 12. OSS Release Strategy
 
-초기 repository는 작게 공개하는 편이 낫다.
+Starting with a small initial repository is preferable.
 
-권장 공개물:
+Recommended initial release artifacts:
 
-- `README.md`: 문제, 데모, 설치, non-compliance disclaimer
-- `SECURITY.md`: 취약점 제보, 지원 버전, 금지 claim
+- `README.md`: Problem statement, demo, installation, non-compliance disclaimer
+- `SECURITY.md`: Vulnerability reporting, supported versions, prohibited claims
 - `docs/threat-model/`: AI/MCP threat model
-- `docs/specs/`: envelope, policy, filter, audit schema
-- `examples/`: MCP tool-call 보호와 LLM prompt filtering demo
-- `packages/testing/`: plugin conformance test
-- `LICENSE`: Apache-2.0 우선 검토
+- `docs/specs/`: Envelope, policy, filter, and audit schemas
+- `examples/`: MCP tool-call protection and LLM prompt filtering demo
+- `packages/testing/`: Plugin conformance tests
+- `LICENSE`: Apache-2.0 as the primary candidate
 
-라이선스는 Apache-2.0을 우선 검토한다. 이유는 오픈소스 보안 인프라에서 특허 grant가 명시되어 있어 기업/개발자 채택에 더 유리하기 때문이다. 단순성과 permissive simplicity를 최우선으로 두면 MIT도 가능하다.
+Apache-2.0 is the primary license candidate. The explicit patent grant makes it more favorable for enterprise and developer adoption in open-source security infrastructure. MIT is also viable if simplicity and permissive terms are the top priority.
 
-## 13. 0.1 구현 우선순위
+## 13. Implementation Priorities for 0.1
 
-| 순서 | 구현 | 이유 |
+| Order | Implementation | Reason |
 |---:|---|---|
-| 1 | `@haechi/core` pipeline과 provider registry | 모든 교체 가능 구조의 중심 |
-| 2 | `PolicyEngine`, `FilterEngine`, `CryptoProvider` interface | 사용자가 가장 바꾸고 싶어 할 지점 |
-| 3 | reference JSON/YAML policy | 이해하기 쉬운 기본 정책 |
-| 4 | Korean PII/secret reference filter | 국내 적용성과 기본 보호 범위를 보여주기 좋음 |
-| 5 | envelope crypto reference | 암호화 솔루션의 핵심 데모 |
-| 6 | MCP Streamable HTTP proxy | AI/MCP 특화 포지션 증명 |
-| 7 | OpenAI-compatible adapter | LLM gateway 적용성 증명 |
-| 8 | JSONL audit sink | 평문 미노출 검증 가능 |
-| 9 | conformance/negative tests | 보안 프로젝트의 신뢰도 확보 |
-| 10 | custom filter/policy examples | "갈아끼우기 쉬움"을 실제로 증명 |
+| 1 | `@haechi/core` pipeline and provider registry | The foundation of all replaceable structure |
+| 2 | `PolicyEngine`, `FilterEngine`, `CryptoProvider` interfaces | The points users will most want to customize |
+| 3 | Reference JSON/YAML policy | Easy-to-understand default policy |
+| 4 | Korean PII/secret reference filter | Best demonstrates local adoptability and baseline protection coverage |
+| 5 | Envelope crypto reference | Core demo of the encryption solution |
+| 6 | MCP Streamable HTTP proxy | Proves the AI/MCP-specific positioning |
+| 7 | OpenAI-compatible adapter | Proves LLM gateway adoptability |
+| 8 | JSONL audit sink | Enables verification that no plaintext is exposed |
+| 9 | Conformance/negative tests | Establishes credibility as a security project |
+| 10 | Custom filter/policy examples | Proves in practice that replacement is easy |
 
-## 14. 남은 결정
+## 14. Open Decisions
 
-- TypeScript-first로 interface를 고정할지, JSON Schema/IDL을 먼저 둘지
-- reference crypto format을 JWE로 둘지 compact custom envelope로 둘지
-- policy 언어를 자체 YAML로 시작할지 CEL/OPA 호환을 우선할지
-- plugin sandbox를 Node process isolation까지 할지, manifest와 test gate부터 시작할지
-- Python SDK를 0.1에 포함할지, 0.2로 미룰지
-- Apache-2.0과 MIT 중 어떤 라이선스를 선택할지
+- Whether to fix interfaces as TypeScript-first, or define JSON Schema/IDL first
+- Whether the reference crypto format should be JWE or a compact custom envelope
+- Whether to start the policy language as a custom YAML or prioritize CEL/OPA compatibility
+- Whether plugin sandboxing should go as far as Node process isolation, or start with manifest and test gates
+- Whether to include a Python SDK in 0.1 or defer to 0.2
+- Whether to choose Apache-2.0 or MIT
 
-## 15. 결론
+## 15. Conclusion
 
-이 방향은 SaaS보다 오픈소스 확산과 self-hosted 적용에 더 잘 맞는다. 기능을 크게 보이게 만드는 것보다, 작은 core가 실제로 MCP/LLM payload를 보호하고 사용자가 policy/filter/crypto를 바꿔도 같은 보안 테스트를 통과하게 만드는 것이 더 강한 프로젝트 신호다.
+This direction is better suited to open-source distribution and self-hosted adoption than a SaaS model. Rather than making the feature set look large, a stronger project signal is a small core that actually protects MCP/LLM payloads and ensures that the same security tests pass even when users swap out policy, filter, or crypto components.
 
-초기 슬로건은 다음 정도가 적절하다.
+An appropriate initial tagline:
 
 ```text
 AI context protection toolkit for MCP and LLM apps.

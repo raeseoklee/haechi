@@ -1,112 +1,154 @@
-# Haechi 리스크 레지스터 및 릴리스 게이트
+# Haechi Risk Register and Release Gates
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-10
-- 기준 버전: 0.3.0
-- 기준 커밋: `5d42852`
-- 기준 검증: Codexus `verification_20260609_232055_448f50`
+- Status: Draft 0.3
+- Date: 2026-06-10
+- Target version: 0.3.2
+- Branch: `irae/risk-resolution`
 
-## 1. 현재 판단
+## 1. Current Assessment
 
-GitHub 공개 저장소와 `v0.3.0` 태그는 유지 가능하다. 단, npm 공개 배포는 P0 배포 차단 리스크가 닫히기 전까지 보류한다.
+0.3.2 resolves the additional security and operational risks identified during the full 0.3.1 code review, meeting the bar for developer preview. Publishing to GitHub and distributing on npm as a developer preview are permitted. Actual npm publish must pass the following external operator gates: npm account authentication, package ownership, and successful execution of the GitHub release workflow.
 
-이 판단의 근거는 다음과 같다.
-
-| 구분 | 판단 | 이유 |
+| Category | Judgment | Rationale |
 |---|---|---|
-| GitHub public | 허용 | README와 SECURITY.md가 early/self-hosted toolkit임을 밝히고 있고, 사용자가 직접 코드를 검토할 수 있다. |
-| GitHub release/tag | 조건부 허용 | `v0.3.0`은 기능 검증 태그로 유지 가능하나, production-ready release로 표현하면 안 된다. |
-| npm publish | 보류 | npm 설치는 사용자에게 더 강한 신뢰 신호를 주며, proxy/streaming/key 경계가 아직 충분히 안전하지 않다. |
-| production use | 금지 | local software key, incomplete streaming handling, missing auth boundary 때문에 운영 사용을 권장할 수 없다. |
+| GitHub public | Allowed | Security limitations, threat model, shared responsibility, and developer preview language are documented |
+| GitHub release/tag | Allowed | Must be presented as developer preview, not production-ready |
+| npm developer preview | Conditionally allowed | Requires passing `npm run release:preflight`, then running `release:preflight:npm` and a provenance publish from an authenticated account |
+| npm stable | On hold | Stable label prohibited until 1.0 API stability, production KMS/HSM/Vault reference adapter, and stream-aware enforcement are in place |
+| Production use | Prohibited | 0.3.2 is a self-hosted developer preview; production auth/authz/key custody is the user's responsibility |
 
-## 2. 릴리스 게이트
+## 2. Release Gates
 
-| Gate | 대상 | 기준 | 현재 상태 |
+| Gate | Target | Criteria | Current Status |
 |---|---|---|---|
-| G0 | GitHub source 공개 | 테스트 통과, 보안 한계 문서화, 평문 audit leak 없음 | Pass |
-| G1 | GitHub pre-release | P0 리스크가 문서화되고 production-ready 표현이 없음 | Conditional Pass |
-| G2 | npm developer preview | P0-REL 전체 해결, README에 위험한 기본값 명시 | Blocked |
-| G3 | npm stable | P0/P1 주요 항목 해결, CI/security evidence 공개 | Blocked |
+| G0 | GitHub source publication | Tests pass, security limitations documented, no plaintext audit leak | Pass |
+| G1 | GitHub pre-release | P0 code risks resolved, no production-ready language | Pass |
+| G2 | npm developer preview | P0 resolved, preflight/SBOM/provenance paths ready, npm auth confirmed | Conditional Pass |
+| G3 | npm stable | P1 production reference, stream-aware enforcement, API stability hardened | Blocked |
 
-0.3.0의 권장 상태는 `GitHub public + tag`, npm은 `not published`다. npm에 올릴 경우 버전은 `0.3.1` 또는 `0.4.0`으로 올리고, 아래 P0 항목을 먼저 닫는다.
+## 3. P0 Distribution-Blocking Risk Status
 
-## 3. P0 배포 차단 리스크
-
-| ID | 리스크 | 영향 | 현재 증거 | 해소 기준 |
-|---|---|---|---|---|
-| P0-REL-001 | npm 인증/권한 미해결 | 배포 불가, package ownership 불확실 | `npm whoami`가 `E401 Unauthorized` | npm 로그인 후 `npm publish --access public`, `npm view haechi version` 통과 |
-| P0-REL-002 | proxy 외부 노출 위험 | `--host 0.0.0.0` 사용 시 인증 없는 LLM proxy가 될 수 있음 | CLI가 host 값을 제한하지 않음 | non-loopback bind는 명시 플래그와 경고 없이는 실패 |
-| P0-REL-003 | streaming 요청 처리 불명확 | `stream: true`, SSE, NDJSON에서 필터링 누락 또는 responseProtection 오해 가능 | 0.3 문서가 streaming 제외를 명시하지만 runtime guard 없음 | streaming 요청은 fail-closed 또는 명시 pass-through mode에서만 허용 |
-| P0-REL-004 | responseProtection 실패 모드 불명확 | JSON parse 실패, 비JSON, 압축/대용량 응답에서 평문이 그대로 나갈 수 있음 | content-type JSON만 처리하고 parse 실패는 proxy 500, 비JSON은 pass-through | responseProtection enabled 상태에서는 미처리 응답 유형을 fail-closed 또는 명시 allow policy로 제어 |
-| P0-REL-005 | local dev key의 운영 오해 | `.haechi/dev.keys.json`을 운영 키처럼 사용할 수 있음 | 파일명은 dev key이나 CLI 경고가 약함 | `init`/README/SECURITY에 production key provider 부재와 dev-only 경고 명시 |
-| P0-REL-006 | npm package 신뢰 표현 과다 | 보안 도구가 완성된 제품처럼 오해될 수 있음 | npm metadata는 publish-ready지만 developer preview 문구가 약함 | package description/README에 experimental/developer preview 명시 |
-
-## 4. P1 보안 설계 리스크
-
-| ID | 리스크 | 영향 | 해소 방향 |
+| ID | Risk | Status | Resolution evidence |
 |---|---|---|---|
-| P1-SEC-001 | KMS/HSM/Vault 미지원 | 키 custody와 rotation 요구를 충족하지 못함 | `KeyProvider` interface와 Vault 또는 AWS KMS reference adapter |
-| P1-SEC-002 | TokenVault 권한 모델 부족 | token reveal이 권한/승인/보존 정책과 분리됨 | reveal authorization, retention, purge audit, DSAR export 설계 |
-| P1-SEC-003 | audit 무결성 부족 | 감사 로그 위변조와 삭제를 탐지하기 어려움 | hash chain, signing, rotation, append-only sink |
-| P1-SEC-004 | plugin runtime 없음 | manifest 검증만으로 plugin 실행 안전성을 보장할 수 없음 | dynamic loading 전 sandbox, capability gate, conformance test |
-| P1-SEC-005 | policy conflict 처리 부족 | custom rule/action 충돌 시 예측 불가능한 결과 가능 | priority, hard-block override, conflict matrix test |
-| P1-SEC-006 | regex 중심 필터 정확도 한계 | PII/secret false negative와 false positive 가능 | checksum, dictionary, classifier plugin, red-team corpus |
-| P1-SEC-007 | AAD/replay 확장 부족 | streaming/chunk/retry에서 context-bound encryption 약화 가능 | nonce/replay cache, stream sequence, retry idempotency test |
-| P1-SEC-008 | MCP security contract 미완성 | MCP auth/token passthrough/resource binding 경계가 약함 | MCP protocol version, OAuth resource binding, env allowlist, consent model |
+| P0-REL-001 | npm authentication/authorization unresolved | External Gate | Gated via `release:preflight:npm`, GitHub release workflow, and `npm publish --provenance --access public`. Actual authentication requires an operator |
+| P0-REL-002 | Proxy exposed to external network | Resolved | Non-loopback bind fails by default; `--allow-remote-bind` must be specified explicitly |
+| P0-REL-003 | Streaming request handling unclear | Resolved | `stream: true` defaults to 501 fail-closed; `streaming.requestMode: "pass-through"` must be set explicitly |
+| P0-REL-004 | `responseProtection` failure mode unclear | Resolved | Non-JSON, invalid JSON, compressed, and oversized responses are fail-closed; explicit allow policies are separated |
+| P0-REL-005 | Local dev key misunderstood as production key | Resolved | `init`, README, and SECURITY warn that the dev-only key is not a production key provider |
+| P0-REL-006 | npm package trust overstated | Resolved | package description, README, and SECURITY updated to reflect experimental developer preview status |
 
-## 5. P1 운영/배포 리스크
+## 4. P1 Security Design Risk Status
 
-| ID | 리스크 | 영향 | 해소 방향 |
+| ID | Risk | Status | Resolution evidence |
 |---|---|---|---|
-| P1-OPS-001 | CI 부재 | 로컬 검증에 의존 | GitHub Actions로 `npm test`, stale-name scan, pack dry-run |
-| P1-OPS-002 | SBOM/provenance 부재 | OSS 보안 신뢰 자료 부족 | SBOM 생성, npm provenance, signed release artifact |
-| P1-OPS-003 | 실제 vLLM/Ollama/llama.cpp 통합 테스트 부재 | adapter가 mock 서버에서만 검증됨 | container 또는 optional local integration test |
-| P1-OPS-004 | 성능/대용량 payload 미측정 | proxy memory pressure와 latency를 모름 | payload size limit, benchmark, timeout, body limit |
-| P1-OPS-005 | npm ownership 미확정 | 패키지명 선점 또는 권한 문제 가능 | npm 계정 인증 후 실제 publish 또는 이름 변경 판단 |
+| P1-SEC-001 | KMS/HSM/Vault not supported | Resolved for OSS core | `createRuntime(config, { cryptoProvider })` external crypto provider injection; fails closed if no external provider is supplied |
+| P1-SEC-002 | TokenVault permission model insufficient | Resolved | `revealPolicy: "disabled"` is the default; `--allow-dev-reveal`, metadata export, retention/purge timestamps added |
+| P1-SEC-003 | Audit integrity insufficient | Resolved | JSONL audit SHA-256 hash chain and `verifyAuditChain` |
+| P1-SEC-004 | No plugin runtime | Resolved by gating | Dynamic runtime is rejected; only `manifest-only` plugins pass |
+| P1-SEC-005 | Policy conflict handling insufficient | Resolved | Downgrading a stronger action (e.g., preset block) to a weaker one fails closed on conflict |
+| P1-SEC-006 | Regex-based filter accuracy limited | Resolved for preview | KR RRN checksum, Luhn, and unsafe custom regex restrictions added. ML/classifier plugin is in the stable backlog |
+| P1-SEC-007 | AAD/replay/stream extension insufficient | Resolved for preview | AAD hash mismatch is explicit; streaming is blocked by default. Stream sequence/replay cache required when stream support is introduced |
+| P1-SEC-008 | MCP security contract incomplete | Resolved for preview | JSON-RPC 2.0 required, method allowlist, params/result protection toggles. OAuth resource binding is the responsibility of the external MCP layer |
 
-## 6. P2 제품/문서 리스크
+## 5. P1 Operational/Deployment Risk Status
 
-| ID | 리스크 | 영향 | 해소 방향 |
+| ID | Risk | Status | Resolution evidence |
 |---|---|---|---|
-| P2-DOC-001 | threat model 별도 문서 부족 | 보안 경계 설명이 흩어짐 | `docs/current/threat-model.md` 작성 |
-| P2-DOC-002 | shared responsibility 부족 | 사용자가 운영 책임을 오해할 수 있음 | self-hosted mode별 책임 매트릭스 |
-| P2-DOC-003 | region/privacy profile 미구현 | 글로벌 적용 메시지가 구현보다 앞설 수 있음 | KR/EU/US profile fixture와 문서 분리 |
-| P2-DOC-004 | API stability 정책 없음 | pre-release API 변경 기준이 불명확 | semver, experimental API, migration note |
+| P1-OPS-001 | No CI | Resolved | `.github/workflows/ci.yml` |
+| P1-OPS-002 | No SBOM/provenance | Resolved | `npm run sbom`, `.github/workflows/npm-publish.yml`, `publishConfig.provenance` |
+| P1-OPS-003 | No real vLLM/Ollama/llama.cpp integration tests | Resolved for preview | Env-gated optional local inference integration tests added. CI skips when no external model server is present |
+| P1-OPS-004 | Performance/large payload not measured | Resolved for preview | Request/response byte limits, `npm run bench:payload` |
+| P1-OPS-005 | npm ownership unconfirmed | External Gate | `npm run release:preflight:npm` from an authenticated npm account required; post-publish `npm view haechi version` needed |
 
-## 7. npm 배포 전 최소 작업
+## 5.1 Additional Security Review Risk Resolution Status
 
-npm developer preview를 허용하려면 아래 작업을 먼저 완료한다.
+| ID | Risk | Status | Resolution evidence |
+|---|---|---|---|
+| P1-SEC-009 | Proxy absolute-form request target could bypass upstream or enable SSRF | Resolved | Absolute/protocol-relative request targets are rejected as `haechi_invalid_proxy_target`; upstream URL combines only path and search with the fixed upstream |
+| P1-SEC-010 | `responseProtection.maxBytes` checked after full buffering, enabling memory DoS | Resolved | Upstream body is read via stream reader with a byte cap; excess immediately triggers cancel/fail-closed. `failureMode: "allow"` cannot bypass the hard byte cap |
+| P1-SEC-011 | Concurrent writes to audit hash chain could cause sequence/previousHash collision | Resolved | JSONL audit sink serializes hash-chain record building and append via per-sink write queue and lock file |
+| P1-SEC-012 | PII/secrets in JSON object keys could be exposed in audit paths or token metadata | Resolved | Detection `pathText` records `key_<hash>` structured paths instead of raw key names |
+| P1-SEC-013 | Concurrent tokenization/purge in local TokenVault could cause lost updates | Resolved | Vault mutation queue, lock file, and atomic write via temp-file-then-rename applied |
+| P1-SEC-014 | No audit record for `streaming.requestMode: "pass-through"` and `responseProtection.failureMode: "allow"` bypass decisions | Resolved | Decision audit records `streaming_request_pass_through` and `response_unprotected_allowed/blocked` without raw payload |
+| P1-SEC-015 | MCP `allowedMethods` element type validation insufficient | Resolved | Config validation strengthened to allow only non-empty strings |
+| P1-OPS-006 | GitHub Actions major-tag pinning could allow supply-chain drift | Resolved | `checkout`, `setup-node`, and `upload-artifact` pinned to verified commit SHAs |
 
-1. `haechi proxy --host 0.0.0.0` 기본 차단 또는 `--allow-remote-bind` 요구.
-2. request body의 `stream: true` 감지 후 명시 정책 없이는 차단.
-3. responseProtection enabled 상태에서 비JSON/parse-fail/압축 응답 처리 정책 추가.
-4. `haechi init` 출력과 README에 local dev key 경고 추가.
-5. README와 package description에 `experimental developer preview` 명시.
-6. `npm test`, `npm pack --dry-run`, stale-name scan, Codexus verification 통과.
-7. npm 인증 후 `npm publish --access public`와 `npm view haechi version` 확인.
+## 5.2 Second Full Code Review Risk Resolution Status (0.3.2)
 
-## 8. 권장 다음 릴리스
+| ID | Risk | Status | Resolution evidence |
+|---|---|---|---|
+| P0-SEC-016 | Ollama `/api/chat` and `/api/generate` default to streaming when `stream` is omitted, allowing streaming block bypass | Resolved | `streamingDefault` introduced in protocol adapter; requests without explicit `stream: false` are treated as streaming and default to 501 fail-closed |
+| P1-SEC-017 | Token reveal/purge not recorded in audit | Resolved | `auditSink` injected into local TokenVault; `reveal_allowed/denied/failed`, `purge`, and `purge_expired` decision audits recorded (no plaintext) |
+| P1-SEC-018 | Privacy profile could silently weaken user-specified policies | Resolved | `applyPrivacyProfile` compares ACTION_STRENGTH and only allows strengthening |
+| P1-SEC-019 | Decrypt ignores envelope `kid`; `init --force` destroys existing keys, permanently losing vault/ciphertext | Resolved | Key selection based on `kid`; `--force` now performs rotation that preserves existing keys as `retired` |
+| P1-SEC-020 | Policy bundle signing reuses the AES encryption key as an HMAC key, violating key separation | Resolved | Domain-separated signing key derived with `haechi:policy-bundle:signing:v1` |
+| P1-SEC-021 | `retentionDays` only blocks reveal but does not delete expired data | Resolved | Expired tokens are automatically pruned on vault mutation; `purgeExpired()` and `haechi token-purge --expired` added |
+| P1-SEC-022 | No upstream fetch timeout, enabling connection exhaustion | Resolved | `limits.upstreamTimeoutMs` (default 120000) and `504 haechi_upstream_timeout` |
+| P1-SEC-023 | JSON numbers (card numbers) and PII/secrets in object keys not detected or transformed | Resolved | Number leaves and object keys included in detection/transform scope (keys are renamed on enforce) |
+| P1-OPS-007 | Stale lock file causes permanent audit/vault write failure | Resolved | Stale locks older than 30 seconds are automatically stolen and reacquired |
+| P1-OPS-008 | Audit append re-reads the entire file on every write (O(n²)) | Resolved | File tail-chunk read for O(1) append |
+| P2-SEC-024 | Unknown `target.type` silently falls back to openai-compatible | Resolved | Unknown type fails closed at config validation |
+| P2-SEC-025 | Short-value masking exposes most of the value (4 of 5 characters) | Resolved | Values of 8 characters or fewer are fully masked |
+| P2-SEC-026 | Assignment-secret redaction removes the key name as well | Resolved | Lookbehind pattern replaces only the secret value |
+| P2-SEC-027 | MCP notifications receive error responses in violation of the JSON-RPC spec; batch handling unspecified | Resolved | Notifications are dropped; batch is explicitly rejected fail-closed |
+| P2-SEC-028 | Proxy internal error messages exposed to clients | Resolved | Unexpected errors return a generic message; details go to stderr |
+| P2-DOC-005 | Default dry-run + responseProtection off could be mistaken for "protection active" | Resolved | Proxy startup and `protect` output explicitly warn when enforcement is inactive |
 
-| 버전 | 목표 | 포함해야 할 리스크 |
+Base64/encoded-value decode inspection, query-string inspection, and audit tail truncation detection are explicitly excluded and documented in the threat model (0.4+ backlog).
+
+## 6. P2 Product/Documentation Risk Status
+
+| ID | Risk | Status | Resolution evidence |
+|---|---|---|---|
+| P2-DOC-001 | Separate threat model document missing | Resolved | `docs/current/threat-model.md` |
+| P2-DOC-002 | Shared responsibility documentation insufficient | Resolved | `docs/current/shared-responsibility.md` |
+| P2-DOC-003 | Region/privacy profile not implemented | Resolved for baseline | `haechi/privacy-profiles`, `privacy.profile` applied at runtime |
+| P2-DOC-004 | No API stability policy | Resolved | `docs/current/api-stability.md` |
+
+## 7. npm Developer Preview Pre-Distribution Checklist
+
+Current external npm gate check results:
+
+- `npm whoami`: `raeseoklee`
+- `npm view haechi version`: `E404 Not Found`
+
+The `haechi` name appears to be available, but package ownership is confirmed only after the first successful publish from an authenticated account. `release:preflight:npm` verifies authentication and blocks duplicate publish of `haechi@<current version>`; E404 before the first publish is treated as a passing condition.
+
+1. `npm run release:preflight`
+2. `npm run sbom`
+3. `npm run bench:payload`
+4. `npm run release:preflight:npm`
+5. Create GitHub release
+6. GitHub Actions `Publish npm Developer Preview` succeeds
+7. Confirm actual published version with `npm view haechi version`
+
+## 8. Remaining Non-Blocking Backlog
+
+| Version | Goal | Remaining scope |
 |---|---|---|
-| 0.3.1 | npm developer preview safety patch | P0-REL-001부터 P0-REL-006 |
-| 0.4.0 | streaming and deployment hardening | P1-SEC-007, P1-OPS-004, actual adapter integration test |
-| 0.5.0 | key custody and audit hardening | P1-SEC-001, P1-SEC-003, SBOM/provenance |
+| 0.4.0 | Token round-trip and adoption | Request-scoped response detokenization, deterministic tokenization (derived key), `haechi mcp-wrap` (bidirectional stdio), `haechi audit-verify`/`haechi status`, injection detection type (default allow), PII-safe `identity` field and `authProvider` contract reserved. See `docs/current/release-0.4-implementation-scope.md` |
+| 0.5.0 | Streaming hardening | SSE/NDJSON stream inspection, stream sequence AAD, replay cache, stronger remote deployment guide |
+| 0.6.0 | Auth and operational controls | Built-in bearer auth, per-client policy scope, model allowlist/rate budget, Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, npm org (`@haechi/*`) acquisition |
+| 0.7.0 | Observability | npm workspaces migration, `@haechi/dashboard` read-only audit viewer (hash chain integrity display, summary/search/timeline) |
+| 1.0.0 | Stable API contract | Migration policy, long-term audit schema, plugin sandbox/runtime conformance, and dynamic loading of external auth/classifier packages that pass allowlist/manifest |
 
-## 9. 현재 허용 가능한 사용 범위
+Dynamic npm package loading is prohibited until the 1.0 plugin sandbox. External providers in 0.4–0.7 are supported only via `createRuntime(config, providers)` programmatic injection.
 
-현재 0.3.0은 다음 범위에서만 사용한다.
+## 9. Current Permitted Use
 
-- 로컬 개발 환경
-- 샘플 payload 검증
+0.3.2 is intended for use in the following contexts:
+
+- Local development environments
+- Sample payload validation
 - OpenAI-compatible/vLLM/Ollama/llama.cpp proxy PoC
-- 정책/필터/감사 pipeline 검토
-- GitHub 코드 리뷰와 보안 설계 논의
+- Policy/filter/audit pipeline review
+- GitHub code review and security design discussion
+- npm developer preview
 
-현재 0.3.0은 다음 용도로 사용하지 않는다.
+0.3.2 is not intended for the following uses:
 
-- production LLM gateway
-- 인터넷에 노출되는 proxy
-- 실제 고객/환자/결제/인증정보 처리
-- compliance evidence 또는 법적 준수 증명
-- npm stable package로 배포
+- Production LLM gateway
+- Proxy directly exposed to the internet
+- Processing real customer/patient/payment/authentication data
+- Compliance evidence or legal conformance proof
+- npm stable package

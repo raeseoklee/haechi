@@ -1,8 +1,10 @@
 .haechi/
 .codexus/
+.omc/
 .DS_Store
 AGENTS.md
 node_modules/
 coverage/
+sbom.cdx.json
 *.log
 tmp/

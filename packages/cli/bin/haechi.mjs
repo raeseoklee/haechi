@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { readAuditSummary } from "../../audit/index.mjs";
-import { createHaechiProxy } from "../../proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
 import { runMcpStdioFilter } from "../../mcp-stdio/index.mjs";
-import { DEFAULT_CONFIG_PATH, createRuntime, loadConfig, writeDefaultConfig } from "../runtime.mjs";
+import { DEFAULT_CONFIG_PATH, createRuntime, isValidPort, loadConfig, writeDefaultConfig } from "../runtime.mjs";
 
 const [command, ...argv] = process.argv.slice(2);
 
@@ -34,6 +34,9 @@ try {
       break;
     case "token-purge":
       await tokenPurgeCommand(argv);
+      break;
+    case "token-export":
+      await tokenExportCommand(argv);
       break;
     case "plugin-validate":
       await pluginValidateCommand(argv);
@@ -66,7 +69,11 @@ async function initCommand(argv) {
     created: result.created,
     keyFile: result.config.keys.keyFile,
     auditPath: result.config.audit.path,
-    mode: result.config.mode
+    mode: result.config.mode,
+    warnings: [
+      "The generated .haechi/dev.keys.json file is for local development only.",
+      "Haechi 0.3.x does not include a production KMS/HSM/Vault key provider."
+    ]
   });
 }
 
@@ -80,18 +87,25 @@ async function protectCommand(argv) {
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
   const input = JSON.parse(await readFile(inputPath, "utf8"));
+  const effectiveMode = config.policy.mode ?? config.mode;
   const result = await runtime.haechi.protectJson(input, {
     protocol: config.target.type,
     operation: "cli protect",
-    mode: config.policy.mode ?? config.mode
+    mode: effectiveMode
   });
 
+  const enforced = !["dry-run", "report-only"].includes(effectiveMode);
   writeJson({
     ok: !result.blocked,
+    mode: effectiveMode,
+    enforced,
     blocked: result.blocked,
     auditId: result.auditEvent.id,
     summary: result.summary,
-    payload: result.payload
+    payload: result.payload,
+    warnings: enforced ? [] : [
+      `policy mode is ${effectiveMode}: detections were audited but the payload was NOT modified or blocked. Set policy.mode to "enforce" to protect payloads.`
+    ]
   });
 
   if (result.blocked) {
@@ -113,14 +127,25 @@ async function proxyCommand(argv) {
   const options = parseOptions(argv);
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
-  const port = Number(options.port ?? 8787);
-  const host = options.host ?? "127.0.0.1";
-  const proxy = createHaechiProxy({ runtime, port, host });
+  const port = parsePort(options.port ?? config.proxy.port);
+  const host = options.host ?? config.proxy.host;
+  const allowRemoteBind = Boolean(options["allow-remote-bind"]);
+  const proxy = createHaechiProxy({ runtime, port, host, allowRemoteBind });
   const address = await proxy.listen();
 
+  const effectiveMode = config.policy.mode ?? config.mode;
   console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
   console.log(`Upstream: ${config.target.upstream}`);
-  console.log(`Mode: ${config.policy.mode ?? config.mode}`);
+  console.log(`Mode: ${effectiveMode}`);
+  if (allowRemoteBind) {
+    console.error("warning: --allow-remote-bind exposes the proxy beyond loopback. Put Haechi behind explicit network access controls.");
+  }
+  if (effectiveMode !== "enforce") {
+    console.error(`warning: policy mode is ${effectiveMode}. Payloads are inspected and audited but NOT modified or blocked. Set policy.mode to "enforce" to protect traffic.`);
+  }
+  if (!config.responseProtection.enabled) {
+    console.error("warning: responseProtection.enabled is false. Upstream responses are forwarded without inspection.");
+  }
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.once(signal, async () => {
@@ -177,6 +202,9 @@ async function tokenRevealCommand(argv) {
   }
   const options = parseOptions(rest);
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  if (options["allow-dev-reveal"]) {
+    config.tokenVault.revealPolicy = "local-dev";
+  }
   const runtime = createRuntime(config);
   const result = await runtime.tokenVault.reveal({ token });
   writeJson({
@@ -188,17 +216,45 @@ async function tokenRevealCommand(argv) {
 }
 
 async function tokenPurgeCommand(argv) {
-  const [token, ...rest] = argv;
-  if (!token || token.startsWith("--")) {
-    throw new Error("token-purge requires a token");
+  const options = parseOptions(argv);
+
+  if (options.expired) {
+    const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+    const runtime = createRuntime(config);
+    if (typeof runtime.tokenVault.purgeExpired !== "function") {
+      throw new Error("Configured token vault provider does not support purgeExpired");
+    }
+    writeJson({
+      ok: true,
+      command: "token-purge",
+      result: await runtime.tokenVault.purgeExpired()
+    });
+    return;
   }
-  const options = parseOptions(rest);
+
+  const [token] = argv;
+  if (!token || token.startsWith("--")) {
+    throw new Error("token-purge requires a token or --expired");
+  }
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
   writeJson({
     ok: true,
     command: "token-purge",
     result: await runtime.tokenVault.purge({ token })
+  });
+}
+
+async function tokenExportCommand(argv) {
+  const options = parseOptions(argv);
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const runtime = createRuntime(config);
+  writeJson({
+    ok: true,
+    command: "token-export",
+    tokens: await runtime.tokenVault.exportMetadata({
+      type: typeof options.type === "string" ? options.type : null
+    })
   });
 }
 
@@ -249,6 +305,20 @@ function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function parsePort(value) {
+  if (typeof value === "boolean") {
+    throw new Error("proxy port must be an integer from 0 to 65535");
+  }
+  if (typeof value === "string" && !/^\d+$/.test(value.trim())) {
+    throw new Error("proxy port must be an integer from 0 to 65535");
+  }
+  const port = typeof value === "number" ? value : Number(value);
+  if (!isValidPort(port)) {
+    throw new Error("proxy port must be an integer from 0 to 65535");
+  }
+  return port;
+}
+
 function printHelp() {
   console.log(`Haechi MVP CLI
 
@@ -256,11 +326,13 @@ Usage:
   haechi init [--config haechi.config.json] [--force]
   haechi protect <input.json> [--config haechi.config.json]
   haechi report [--audit .haechi/audit.jsonl]
-  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port 8787]
+  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]
   haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
   haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
-  haechi token-reveal <token> [--config haechi.config.json]
+  haechi token-reveal <token> [--config haechi.config.json] [--allow-dev-reveal]
   haechi token-purge <token> [--config haechi.config.json]
+  haechi token-purge --expired [--config haechi.config.json]
+  haechi token-export [--config haechi.config.json] [--type email]
   haechi plugin-validate <plugin-manifest.json>
   haechi mcp-stdio [--config haechi.config.json]
 

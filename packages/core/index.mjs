@@ -51,7 +51,13 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
 
 export function collectStringEntries(value, path = []) {
   if (typeof value === "string") {
-    return [{ path, pathText: pathToString(path), value }];
+    return [{ path, pathText: safePathToString(path), value, kind: "value" }];
+  }
+
+  // Long digit runs (e.g. card numbers) can arrive as JSON numbers; scan their
+  // string form so numeric leaves are not a detection blind spot.
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return [{ path, pathText: safePathToString(path), value: String(value), kind: "number" }];
   }
 
   if (Array.isArray(value)) {
@@ -59,7 +65,12 @@ export function collectStringEntries(value, path = []) {
   }
 
   if (value && typeof value === "object") {
-    return Object.entries(value).flatMap(([key, item]) => collectStringEntries(item, path.concat(key)));
+    // Object keys are scanned too: a PII/secret used as a map key would
+    // otherwise be forwarded upstream in plaintext.
+    return Object.entries(value).flatMap(([key, item]) => [
+      { path: path.concat(key), pathText: safePathToString(path.concat(key)), value: key, kind: "key" },
+      ...collectStringEntries(item, path.concat(key))
+    ]);
   }
 
   return [];
@@ -71,6 +82,16 @@ export function pathToString(path) {
       return `${text}[${part}]`;
     }
     return index === 0 ? String(part) : `${text}.${part}`;
+  }, "");
+}
+
+export function safePathToString(path) {
+  return path.reduce((text, part, index) => {
+    if (typeof part === "number") {
+      return `${text}[${part}]`;
+    }
+    const safePart = `key_${shortHash(String(part))}`;
+    return index === 0 ? safePart : `${text}.${safePart}`;
   }, "");
 }
 
@@ -115,20 +136,62 @@ async function transformPayload(payload, detections, decisions, { context, crypt
   const byPath = new Map();
 
   detections.forEach((detection, index) => {
-    const key = JSON.stringify(detection.path);
+    const key = JSON.stringify([detection.kind ?? "value", detection.path]);
     const field = byPath.get(key) ?? [];
     field.push({ detection, decision: decisions[index] });
     byPath.set(key, field);
   });
 
-  for (const [pathKey, items] of byPath.entries()) {
-    const path = JSON.parse(pathKey);
+  const valueGroups = [];
+  const keyGroups = [];
+  for (const [groupKey, items] of byPath.entries()) {
+    const [kind, path] = JSON.parse(groupKey);
+    (kind === "key" ? keyGroups : valueGroups).push({ kind, path, items });
+  }
+
+  for (const { kind, path, items } of valueGroups) {
     const original = getByPath(output, path);
+    if (kind === "number") {
+      if (typeof original !== "number") {
+        continue;
+      }
+      const transformed = await transformString(String(original), items, { context, cryptoProvider, tokenVault });
+      if (transformed !== String(original)) {
+        setByPath(output, path, transformed);
+      }
+      continue;
+    }
     if (typeof original !== "string") {
       continue;
     }
     const transformed = await transformString(original, items, { context, cryptoProvider, tokenVault });
     setByPath(output, path, transformed);
+  }
+
+  // Key renames run after value transforms (value paths reference original
+  // keys), deepest first so ancestor paths stay valid while renaming.
+  keyGroups.sort((left, right) => right.path.length - left.path.length);
+  for (const { path, items } of keyGroups) {
+    const parentPath = path.slice(0, -1);
+    const parent = parentPath.length > 0 ? getByPath(output, parentPath) : output;
+    const originalKey = path.at(-1);
+    if (!parent || typeof parent !== "object" || Array.isArray(parent)
+      || !Object.prototype.hasOwnProperty.call(parent, originalKey)) {
+      continue;
+    }
+    const transformedKey = await transformString(String(originalKey), items, { context, cryptoProvider, tokenVault });
+    if (transformedKey === originalKey) {
+      continue;
+    }
+    const childValue = parent[originalKey];
+    delete parent[originalKey];
+    let nextKey = transformedKey;
+    let suffix = 2;
+    while (Object.prototype.hasOwnProperty.call(parent, nextKey)) {
+      nextKey = `${transformedKey}#${suffix}`;
+      suffix += 1;
+    }
+    parent[nextKey] = childValue;
   }
 
   return output;
@@ -208,6 +271,7 @@ function buildAuditEvent({ context, mode, enforced, blocked, payload, detections
       type: detection.type,
       ruleId: detection.ruleId,
       path: detection.pathText,
+      kind: detection.kind ?? "value",
       confidence: detection.confidence,
       action: decisions[index]?.action ?? "unknown",
       enforced
@@ -229,7 +293,8 @@ function setByPath(value, path, nextValue) {
 }
 
 function maskSensitive(value) {
-  if (value.length <= 4) {
+  // Short values would leak most of their content through partial masking.
+  if (value.length <= 8) {
     return "*".repeat(value.length);
   }
   return `${value.slice(0, 2)}${"*".repeat(Math.max(4, value.length - 4))}${value.slice(-2)}`;

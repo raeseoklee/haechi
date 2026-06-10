@@ -3,8 +3,8 @@
     "id": "example-custom-filter",
     "version": "0.1.0",
     "kind": "filter-engine",
-    "runtime": "node",
-    "entrypoint": "./dist/index.js",
+    "runtime": "manifest-only",
+    "entrypoint": "./manifest-only",
     "compatibility": {
       "haechiCore": ">=0.2.0 <0.3.0"
     },

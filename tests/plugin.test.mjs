@@ -8,8 +8,8 @@ test("plugin manifest validates required capability contract", () => {
       id: "example-filter",
       version: "0.1.0",
       kind: "filter-engine",
-      runtime: "node",
-      entrypoint: "./dist/index.js",
+      runtime: "manifest-only",
+      entrypoint: "./manifest-only",
       compatibility: {
         haechiCore: ">=0.2.0 <0.3.0"
       },
@@ -37,8 +37,8 @@ test("plugin manifest rejects raw payload logging", () => {
       id: "bad-filter",
       version: "0.1.0",
       kind: "filter-engine",
-      runtime: "node",
-      entrypoint: "./dist/index.js",
+      runtime: "manifest-only",
+      entrypoint: "./manifest-only",
       compatibility: {
         haechiCore: ">=0.2.0 <0.3.0"
       },
@@ -58,4 +58,34 @@ test("plugin manifest rejects raw payload logging", () => {
 
   assert.equal(result.valid, false);
   assert.match(result.errors.join("\n"), /logsRawPayload/);
+});
+
+test("plugin manifest rejects dynamic runtime execution", () => {
+  const result = validatePluginManifest({
+    haechiPlugin: {
+      id: "dynamic-filter",
+      version: "0.1.0",
+      kind: "filter-engine",
+      runtime: "node",
+      entrypoint: "./dist/index.js",
+      compatibility: {
+        haechiCore: ">=0.3.0 <0.4.0"
+      },
+      capabilities: {
+        readsPlaintext: true,
+        writesPlaintext: false,
+        networkEgress: false,
+        fileWrite: false,
+        auditWrite: false,
+        externalSecrets: false
+      },
+      dataHandling: {
+        retention: "none",
+        logsRawPayload: false
+      }
+    }
+  });
+
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join("\n"), /dynamic plugin execution/);
 });
