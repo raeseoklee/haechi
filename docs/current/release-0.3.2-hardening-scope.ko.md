@@ -4,7 +4,7 @@
 - 작성일: 2026-06-10
 - 기준 버전: 0.3.2
 - 성격: 보안 하드닝 릴리스, 첫 npm developer preview 배포 대상
-- 배포: 2026-06-10 — npm `haechi@0.3.2` (provenance), `v0.3.2` 태그, GitHub pre-release
+- 배포: 2026-06-10 — npm `haechi@0.3.2` (로컬 패스키 publish, provenance 이월), `v0.3.2` 태그, GitHub pre-release
 
 ## 1. 배경
 

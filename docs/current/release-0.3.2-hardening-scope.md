@@ -4,7 +4,7 @@
 - Date: 2026-06-10
 - Target version: 0.3.2
 - Type: Security hardening release; first npm developer preview distribution target
-- Published: 2026-06-10 — `haechi@0.3.2` on npm (provenance), tag `v0.3.2`, GitHub pre-release
+- Published: 2026-06-10 — `haechi@0.3.2` on npm (local passkey publish; provenance deferred), tag `v0.3.2`, GitHub pre-release
 
 ## 1. Background
 

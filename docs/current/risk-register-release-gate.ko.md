@@ -7,13 +7,13 @@
 
 ## 1. 현재 판단
 
-0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했다. 외부 운영자 게이트(npm 계정 인증, package ownership, GitHub release workflow)는 2026-06-10에 통과했다: `haechi@0.3.2`가 provenance와 함께 npm에 배포되었고, `v0.3.2` 태그와 GitHub pre-release가 생성되었다.
+0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했다. 외부 운영자 게이트(npm 계정 인증, package ownership, GitHub tag/release)는 2026-06-10에 통과했다: `haechi@0.3.2`가 로컬 패스키 인증으로 npm에 배포되었고, `v0.3.2` 태그와 GitHub pre-release가 생성되었다. npm provenance는 GitHub Actions trusted publishing 경로로 이월한다.
 
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility, developer preview 문구가 문서화됨 |
 | GitHub release/tag | 허용 | production-ready가 아닌 developer preview로 표현해야 함 |
-| npm developer preview | 허용 (배포 완료) | 2026-06-10 인증된 계정에서 `haechi@0.3.2` provenance publish 완료 |
+| npm developer preview | 허용 (배포 완료) | 2026-06-10 인증된 계정에서 `haechi@0.3.2` publish 완료, provenance는 trusted publishing으로 이월 |
 | npm stable | 보류 | 1.0 API 안정성, 운영 KMS/HSM/Vault reference adapter, stream-aware enforcement 전까지 stable 표현 금지 |
 | production use | 금지 | 0.3.2는 self-hosted developer preview이며 운영 인증/인가/key custody는 사용자 책임 |
 
@@ -30,7 +30,7 @@
 
 | ID | 기존 리스크 | 상태 | 해소 증거 |
 |---|---|---|---|
-| P0-REL-001 | npm 인증/권한 미해결 | Resolved | 2026-06-10 GitHub release workflow로 `haechi@0.3.2` provenance publish 성공, npm 인증·package ownership 확정 |
+| P0-REL-001 | npm 인증/권한 미해결 | Resolved | 2026-06-10 로컬 패스키 인증으로 `haechi@0.3.2` publish 성공, npm 인증·package ownership 확정 |
 | P0-REL-002 | proxy 외부 노출 위험 | Resolved | non-loopback bind는 기본 실패, `--allow-remote-bind` 필요 |
 | P0-REL-003 | streaming 요청 처리 불명확 | Resolved | `stream: true` 기본 501 fail-closed, `streaming.requestMode: "pass-through"` 명시 필요 |
 | P0-REL-004 | responseProtection 실패 모드 불명확 | Resolved | 비JSON/invalid JSON/압축/대용량 응답 fail-closed, 명시 allow 정책 분리 |
@@ -112,7 +112,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 - `npm whoami`: `raeseoklee`
 - `npm view haechi version`: `0.3.2`
 
-아래 체크리스트는 2026-06-10 0.3.2 배포에서 전부 완료되었다(`v0.3.2` 태그, GitHub pre-release, provenance publish). 체크리스트는 이후 릴리스의 템플릿으로 유지한다.
+아래 체크리스트는 2026-06-10 0.3.2 배포에서 provenance publish 경로를 제외하고 완료되었다(`v0.3.2` 태그와 GitHub pre-release 완료). provenance는 GitHub Actions trusted publishing으로 이월하며, 체크리스트는 이후 릴리스의 템플릿으로 유지한다.
 
 1. `npm run release:preflight`
 2. `npm run sbom`

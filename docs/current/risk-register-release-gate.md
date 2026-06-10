@@ -7,13 +7,13 @@
 
 ## 1. Current Assessment
 
-0.3.2 resolves the additional security and operational risks identified during the full 0.3.1 code review, meeting the bar for developer preview. The external operator gates (npm account authentication, package ownership, GitHub release workflow) were passed on 2026-06-10: `haechi@0.3.2` is published to npm with provenance, tagged `v0.3.2`, and released as a GitHub pre-release.
+0.3.2 resolves the additional security and operational risks identified during the full 0.3.1 code review, meeting the bar for developer preview. The external operator gates (npm account authentication, package ownership, GitHub tag/release) were passed on 2026-06-10: `haechi@0.3.2` is published to npm via local passkey authentication, tagged `v0.3.2`, and released as a GitHub pre-release. npm provenance remains deferred to the GitHub Actions trusted publishing path.
 
 | Category | Judgment | Rationale |
 |---|---|---|
 | GitHub public | Allowed | Security limitations, threat model, shared responsibility, and developer preview language are documented |
 | GitHub release/tag | Allowed | Must be presented as developer preview, not production-ready |
-| npm developer preview | Allowed (published) | `haechi@0.3.2` published with provenance from an authenticated account on 2026-06-10 |
+| npm developer preview | Allowed (published) | `haechi@0.3.2` published from an authenticated account on 2026-06-10; provenance deferred to trusted publishing |
 | npm stable | On hold | Stable label prohibited until 1.0 API stability, production KMS/HSM/Vault reference adapter, and stream-aware enforcement are in place |
 | Production use | Prohibited | 0.3.2 is a self-hosted developer preview; production auth/authz/key custody is the user's responsibility |
 
@@ -30,7 +30,7 @@
 
 | ID | Risk | Status | Resolution evidence |
 |---|---|---|---|
-| P0-REL-001 | npm authentication/authorization unresolved | Resolved | `haechi@0.3.2` published with provenance via the GitHub release workflow on 2026-06-10; npm authentication and package ownership confirmed |
+| P0-REL-001 | npm authentication/authorization unresolved | Resolved | `haechi@0.3.2` published via local passkey authentication on 2026-06-10; npm authentication and package ownership confirmed |
 | P0-REL-002 | Proxy exposed to external network | Resolved | Non-loopback bind fails by default; `--allow-remote-bind` must be specified explicitly |
 | P0-REL-003 | Streaming request handling unclear | Resolved | `stream: true` defaults to 501 fail-closed; `streaming.requestMode: "pass-through"` must be set explicitly |
 | P0-REL-004 | `responseProtection` failure mode unclear | Resolved | Non-JSON, invalid JSON, compressed, and oversized responses are fail-closed; explicit allow policies are separated |
@@ -112,7 +112,7 @@ External npm gate check results (2026-06-10, post-publish):
 - `npm whoami`: `raeseoklee`
 - `npm view haechi version`: `0.3.2`
 
-All checklist items below were completed for 0.3.2 on 2026-06-10 (`v0.3.2` tag, GitHub pre-release, provenance publish). The checklist remains the template for future releases.
+All checklist items below were completed for 0.3.2 on 2026-06-10 except the provenance publish path, which is deferred to GitHub Actions trusted publishing (`v0.3.2` tag and GitHub pre-release were completed). The checklist remains the template for future releases.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
