@@ -16,10 +16,32 @@
 // a promoted dependency / a missing export must each make it fail).
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Every published satellite under satellites/* (by package name), so adding a
+// new satellite is gated automatically without editing this script.
+function discoverSatelliteNames() {
+  const names = [];
+  let entries = [];
+  try {
+    entries = readdirSync("satellites", { withFileTypes: true });
+  } catch {
+    return names;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const pkg = JSON.parse(readFileSync(`satellites/${entry.name}/package.json`, "utf8"));
+      if (pkg.name) names.push(pkg.name);
+    } catch {
+      // skip non-package dirs
+    }
+  }
+  return names;
+}
 
 const norm = (p) => p.replace(/^package\//, "").replace(/^\.\//, "");
 
@@ -83,7 +105,11 @@ export function packSatellite(workspace) {
 }
 
 async function main(argv) {
-  const workspaces = argv.length > 0 ? argv : ["@haechi/crypto-kms"];
+  const workspaces = argv.length > 0 ? argv : discoverSatelliteNames();
+  if (workspaces.length === 0) {
+    process.stderr.write("satellite-packaging: no satellites found under satellites/*\n");
+    return;
+  }
   let ok = true;
   for (const ws of workspaces) {
     const { name, files, manifest } = packSatellite(ws);
