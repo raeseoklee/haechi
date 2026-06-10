@@ -137,6 +137,38 @@ Response and tool-result text is screened with heuristic rules for indirect prom
 
 These heuristics are not a complete defense against prompt injection; see `docs/current/threat-model.md`.
 
+## Authentication & Per-Client Controls
+
+With multiple clients/agents in front of one host, turn on bearer auth and bind each client to a policy profile. Tokens live in a separate `.haechi/auth.json` (0600), stored only as keyed-HMAC hashes:
+
+```bash
+haechi auth add --type service --scope team:eng --label env=prod   # prints the token ONCE
+haechi auth list                                                   # never shows tokens
+haechi auth revoke <id>
+```
+
+```json
+{
+  "auth": { "provider": "bearer" },
+  "policy": {
+    "mode": "enforce", "presets": ["llm-redact"],
+    "profiles": {
+      "strict":   { "presets": ["strict-block"] },
+      "internal": { "presets": ["llm-redact"], "modelAllowlist": ["llama3"], "rate": { "requestsPerMinute": 120 } }
+    },
+    "profileBinding": { "byScope": { "team:eng": "internal" }, "default": "strict" }
+  }
+}
+```
+
+- **Bearer auth** (`auth.provider: bearer`): clients send `Authorization: Bearer <token>`. Missing/invalid/revoked → `401` (the body is never read, upstream is never reached). `provider: none` (default) keeps behavior unchanged; `external` requires an injected `authProvider`.
+- **Named profiles**: each authenticated identity resolves to a profile by **scope → label → required `default`** (fail-closed to `default` for unmatched/anonymous). A profile overrides the base policy and may carry its own `modelAllowlist` and `rate`.
+- **Model allowlist**: a request whose `model` is not allowed → `403`.
+- **Rate limit**: per-identity requests-per-minute → `429` (in-memory, per-process).
+- Audit events carry the **PII-safe** `identity` (keyed-HMAC subject/issuer, never raw values) and the resolved `profile`; `auth_denied` / `model_not_allowed` / `rate_limited` decisions never include credentials. `/__haechi/health` stays unauthenticated.
+
+OIDC/JWT providers and KMS-backed key custody are 0.7+ satellite packages.
+
 ## Configuration
 
 `haechi init` writes `haechi.config.json`; a non-secret template lives at `haechi.config.example.json`. All keys validate fail-closed — unknown or malformed values refuse to start.
@@ -164,6 +196,9 @@ These heuristics are not a complete defense against prompt injection; see `docs/
 | `tokenVault.deterministic` / `deterministicTypes` / `detokenizeResponses` | `false` / `null` / `false` | Token round-trip (see above) |
 | `privacy.profile` | `null` | `kr-pipa`, `eu-gdpr`, `us-general` baseline actions (strengthen-only) |
 | `mcp.allowedMethods` | `initialize`, `tools/call`, `resources/read`, `prompts/get` | Client-callable method allowlist for `mcp-stdio`/`mcp-wrap` |
+| `auth.provider` / `auth.store` | `none` / `.haechi/auth.json` | `none`/`bearer`/`external`. Bearer tokens stored as keyed-HMAC hashes (0600) |
+| `policy.profiles` / `policy.profileBinding` | — | Named per-client policy profiles bound by scope → label → required `default` |
+| `policy.modelAllowlist` / `policy.rate` | — | Allowed model names (403 otherwise); requests-per-minute rate limit (429) — also settable per profile |
 
 The table above is a quick reference. The full per-key reference — types, validation rules, presets, action strength, and common setups — is in [`docs/current/configuration.md`](docs/current/configuration.md), and the CLI prints a condensed version:
 
@@ -225,3 +260,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.4.0 adds the token round-trip (deterministic tokenization + request-scoped response detokenization), the `mcp-wrap` bidirectional MCP filter, `status` and `audit-verify` commands, report-only injection detection heuristics, and reserves the PII-safe `identity`/`authProvider` contracts for 0.6 auth. See `docs/current/release-0.4-implementation-scope.md`.
 
 0.5.0 adds SSE/NDJSON streaming response inspection: `streaming.requestMode: "inspect"` stream-filters responses with a bounded sliding buffer that catches PII split across frames (`streaming.maxMatchBytes`). See `docs/current/release-0.5-implementation-scope.md`.
+
+0.6.0 adds authentication and per-client controls: built-in bearer auth with a hashed token store and `haechi auth` CLI, named policy profiles bound by identity scope/label, model allowlisting, and per-identity rate limiting — with PII-safe identity in the audit log. See `docs/current/release-0.6-implementation-scope.md`.
