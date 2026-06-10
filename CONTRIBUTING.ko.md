@@ -21,10 +21,12 @@
 
 ## 커밋
 
-- 영문 한 줄 명령형 제목, 본문 없음, attribution trailer 없음.
+- 영문 한 줄 명령형 제목을 사용한다.
   - 좋은 예: `Make local proxy port configurable before preview publish`
-  - 나쁜 예: `fixed stuff`, `WIP`, `Co-Authored-By` trailer가 붙은 제목
+  - 나쁜 예: `fixed stuff`, `WIP`
 - 커밋 하나는 하나의 논리적 변경만 담는다.
+- 중요 변경은 짧은 본문에 Lore 스타일 git trailer를 남긴다. 유용할 때 `Constraint:`, `Rejected:`, `Confidence:`, `Scope-risk:`, `Directive:`, `Tested:`, `Not-tested:` 등을 사용한다.
+- `Co-Authored-By` 같은 attribution 또는 generated-by footer는 추가하지 않는다.
 
 ## Pull Request
 
@@ -41,7 +43,7 @@ npm run release:preflight   # 테스트 + 타입 체크 + stale-name 스캔 + pa
 
 1. `main`에서 `release/<version>` 분기; `package.json` 버전 범프, `docs/current/release-<version>-*.md`(및 `.ko.md`) 추가/갱신, 리스크 레지스터 게이트 갱신.
 2. PR로 머지 후 `main`에 `v<version>` 태그.
-3. GitHub release 생성(`0.x` 동안은 pre-release). `Publish npm Developer Preview` workflow가 provenance와 함께 npm에 배포한다.
+3. GitHub release 생성(`0.x` 동안은 pre-release). `Publish npm Developer Preview` workflow는 trusted publishing이 구성된 뒤 provenance 경로로 사용한다. 로컬 publish를 수행한 경우 release note에 provenance gap을 기록해야 한다.
 4. `npm view haechi version`으로 확인.
 
 게이트 상세는 `docs/current/release-process.md`를 따른다.

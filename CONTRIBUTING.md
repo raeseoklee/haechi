@@ -21,10 +21,12 @@ Do not use personal-name prefixes (e.g. `irae/...`).
 
 ## Commits
 
-- One-line imperative English subject, no body, no attribution trailers.
+- Use a one-line imperative English subject.
   - Good: `Make local proxy port configurable before preview publish`
-  - Bad: `fixed stuff`, `WIP`, subjects with `Co-Authored-By` trailers
+  - Bad: `fixed stuff`, `WIP`
 - Keep each commit a single logical change.
+- For non-trivial changes, include a short body with Lore-style git trailers such as `Constraint:`, `Rejected:`, `Confidence:`, `Scope-risk:`, `Directive:`, `Tested:`, and `Not-tested:` when they add useful decision context.
+- Do not add attribution or generated-by footers such as `Co-Authored-By`.
 
 ## Pull Requests
 
@@ -41,7 +43,7 @@ npm run release:preflight   # tests + type check + stale-name scan + pack dry-ru
 
 1. Branch `release/<version>` from `main`; bump `package.json`, add/update `docs/current/release-<version>-*.md` (and `.ko.md`), update the risk register gates.
 2. Merge via PR, then tag `v<version>` on `main`.
-3. Create a GitHub release (pre-release while in `0.x`). The `Publish npm Developer Preview` workflow publishes to npm with provenance.
+3. Create a GitHub release (pre-release while in `0.x`). The `Publish npm Developer Preview` workflow is the intended provenance path once trusted publishing is configured; any local publish must record the provenance gap in the release notes.
 4. Verify with `npm view haechi version`.
 
 See `docs/current/release-process.md` for gate details.
