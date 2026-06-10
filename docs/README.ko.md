@@ -22,14 +22,9 @@
 - `docs/current/api-stability.md`: developer preview API 안정성 및 migration note 기준
 - `docs/current/release-process.md`: release preflight, SBOM, npm provenance publish 절차
 
-## Archive
-
-- `docs/archive/2026-06-08-initial/research-summary.md`: 범용 모듈형 구간암호화 초기 리서치 요약
-- `docs/archive/2026-06-08-initial/`: 범용 모듈형 구간암호화 PRD, SRS, 보안검토 초안
-
 ## 방향 전환 기록
 
-초기 문서는 HTTP/HTTPS/socket/gRPC/A2A까지 포괄하는 범용 모듈형 구간암호화 레이어를 다뤘다. 현재 방향은 AI, LLM, MCP, A2A, agent 플랫폼의 prompt, context, tool-call, resource, artifact, streaming message를 보호하는 특화 암호화 솔루션이다.
+초기 초안(현재 제거됨; 이 커밋 이전 git 히스토리 참조)은 HTTP/HTTPS/socket/gRPC/A2A까지 포괄하는 범용 모듈형 구간암호화 레이어를 다뤘다. 현재 방향은 AI, LLM, MCP, A2A, agent 플랫폼의 prompt, context, tool-call, resource, artifact, streaming message를 보호하는 특화 암호화 솔루션이다.
 
 상용 SaaS보다 오픈소스/self-hosted 보안 인프라를 우선한다. 따라서 현재 문서는 hosted control plane보다 self-hosted SDK/CLI/proxy, 교체 가능한 `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `KeyProvider`, `AuditSink`, plugin conformance test를 중심으로 정리한다.
 
