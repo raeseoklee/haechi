@@ -1,24 +1,24 @@
-# MVP 0.1 구현 범위
+# MVP 0.1 Implementation Scope
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-09
-- 관련 제품: Haechi
+- Status: Draft 0.1
+- Date: 2026-06-09
+- Target version: Haechi
 
-## 1. 결론
+## 1. Summary
 
-MVP 0.1은 넓은 protocol coverage보다 "쉽게 붙이고 바로 확인할 수 있는 로컬 보안 레이어"를 완성하는 데 집중한다.
+MVP 0.1 focuses on delivering a local security layer that is easy to attach and immediately verifiable, rather than broad protocol coverage.
 
-0.1의 성공 기준은 다음이다.
+The success criteria for 0.1 are:
 
-1. 사용자가 `haechi init`으로 local key, sample policy, audit path를 생성한다.
-2. 사용자가 `haechi protect`로 OpenAI-compatible JSON payload를 보호해 본다.
-3. 사용자가 `haechi proxy`로 기존 LLM HTTP 호출을 local proxy에 붙여 본다.
-4. 사용자가 `haechi report`로 평문 없는 audit summary를 확인한다.
-5. 테스트가 개인정보/secret 탐지, redaction, block, encryption, audit plaintext leak 방지를 검증한다.
+1. The user runs `haechi init` to generate a local key, sample policy, and audit path.
+2. The user runs `haechi protect` to protect an OpenAI-compatible JSON payload.
+3. The user runs `haechi proxy` to route an existing LLM HTTP call through a local proxy.
+4. The user runs `haechi report` to view an audit summary containing no plaintext.
+5. Tests verify PII/secret detection, redaction, blocking, encryption, and prevention of plaintext leakage in the audit log.
 
-## 2. 0.1 포함 범위
+## 2. 0.1 Included Scope
 
-| 영역 | 포함 |
+| Area | Included |
 |---|---|
 | Runtime | Node.js ESM, no external runtime dependency |
 | Config | JSON config, preset policy |
@@ -33,20 +33,20 @@ MVP 0.1은 넓은 protocol coverage보다 "쉽게 붙이고 바로 확인할 수
 | Proxy | local HTTP JSON proxy with upstream forwarding |
 | Tests | Node built-in test runner |
 
-## 3. 0.1 제외 범위
+## 3. 0.1 Excluded Scope
 
-| 제외 | 이유 | 다음 단계 |
+| Excluded | Reason | Next Step |
 |---|---|---|
-| Python SDK | 0.1 quickstart에는 Node CLI만으로 충분 | 0.2 |
-| Vault/AWS KMS | 외부 설정이 필요해 5분 demo를 방해 | 0.2 adapter |
-| MCP stdio wrapper | process/env handling이 별도 보안 검토 필요 | 0.2 |
-| Full MCP protocol proxy | 0.1은 HTTP JSON payload 보호 검증 우선 | 0.2 |
-| A2A/gRPC production adapter | protocol contract 선행 필요 | 0.3 |
-| TokenVault | reveal/purge governance가 별도 설계 필요 | 0.2 |
-| Signed policy bundle | 0.1은 local config validation 우선 | 0.2 |
-| SBOM/signing | release 단계 작업 | 0.2 |
+| Python SDK | Node CLI alone is sufficient for the 0.1 quickstart | 0.2 |
+| Vault/AWS KMS | Requires external setup, which breaks the 5-minute demo | 0.2 adapter |
+| MCP stdio wrapper | process/env handling requires a separate security review | 0.2 |
+| Full MCP protocol proxy | 0.1 prioritizes validating HTTP JSON payload protection | 0.2 |
+| A2A/gRPC production adapter | Requires prior protocol contract definition | 0.3 |
+| TokenVault | reveal/purge governance requires separate design | 0.2 |
+| Signed policy bundle | 0.1 prioritizes local config validation | 0.2 |
+| SBOM/signing | Release-phase work | 0.2 |
 
-## 4. Quickstart 흐름
+## 4. Quickstart Flow
 
 ```bash
 npm test
@@ -56,24 +56,24 @@ node packages/cli/bin/haechi.mjs report --audit .haechi/audit.jsonl
 node packages/cli/bin/haechi.mjs proxy --config haechi.config.json --port 8787
 ```
 
-## 5. 구현 원칙
+## 5. Implementation Principles
 
-- 외부 dependency 없이 시작한다.
-- JSON 설정을 사용한다. YAML은 0.2 이후로 미룬다.
-- 암호 primitive는 직접 만들지 않고 Node `crypto`의 AES-256-GCM을 사용한다.
-- default mode는 `dry-run`이다.
-- enforcement mode에서도 audit에는 원문을 남기지 않는다.
-- 적용 실패 시 원문 유출보다 요청 차단을 우선한다.
-- provider boundary는 코드 구조로 남기되, 0.1에서는 과한 plugin loader를 만들지 않는다.
+- Start with no external dependencies.
+- Use JSON configuration. Defer YAML support to 0.2 or later.
+- Do not implement crypto primitives directly; use AES-256-GCM from Node `crypto`.
+- Default mode is `dry-run`.
+- Even in enforcement mode, do not write raw input to the audit log.
+- On processing failure, prefer blocking the request over leaking plaintext.
+- Preserve provider boundaries in the code structure, but do not build an elaborate plugin loader in 0.1.
 
-## 6. 0.1 완료 기준
+## 6. 0.1 Completion Criteria
 
-| 기준 | 완료 조건 |
+| Criterion | Done When |
 |---|---|
-| CLI | `init`, `protect`, `report`, `proxy`가 동작 |
-| 보안 | audit JSONL에 sentinel 원문이 남지 않음 |
-| 개인정보 | email/phone/secret/card-like/RRN-like fixture 탐지 |
-| 정책 | dry-run/redact/mask/encrypt/block fixture 통과 |
-| 암호 | AAD 변조 시 복호화 실패 |
-| 적용성 | example payload를 CLI로 보호하고 audit report 확인 |
-| 검증 | `npm test` 통과 |
+| CLI | `init`, `protect`, `report`, and `proxy` are functional |
+| Security | No sentinel plaintext remains in the audit JSONL |
+| PII | email/phone/secret/card-like/RRN-like fixtures are detected |
+| Policy | dry-run/redact/mask/encrypt/block fixtures pass |
+| Crypto | Decryption fails when AAD is tampered with |
+| Applicability | Example payload can be protected via CLI and verified in the audit report |
+| Verification | `npm test` passes |

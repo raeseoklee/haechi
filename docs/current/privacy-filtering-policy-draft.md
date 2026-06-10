@@ -1,125 +1,125 @@
-# 개인정보 필터링 정책 초안
+# Privacy Filtering Policy Draft
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-08
-- 관련 제품: Haechi
+- Status: Draft 0.1
+- Date: 2026-06-08
+- Related product: Haechi
 
-## 1. 목적
+## 1. Purpose
 
-본 문서는 AI/LLM/MCP 환경에서 개인정보와 고위험 민감 데이터를 모델, tool, agent, 로그, trace, replay artifact로 전달하기 전에 탐지하고 처리하는 정책 초안을 정의한다.
+This document defines a draft policy for detecting and handling personal information and high-risk sensitive data before it is passed to models, tools, agents, logs, traces, and replay artifacts in AI/LLM/MCP environments.
 
-개인정보 필터링은 암호화의 대체물이 아니다. 필터링은 평문 공개 여부를 결정하고, 암호화는 저장·전송·권한 경계를 보호한다. Haechi는 두 기능을 함께 적용한다.
+Privacy filtering is not a substitute for encryption. Filtering determines whether data is exposed in plaintext; encryption protects data at rest, in transit, and across authorization boundaries. Haechi applies both mechanisms together.
 
-## 2. 필터링 지점
+## 2. Filtering Points
 
-| 지점 | 설명 | 기본 정책 |
+| Point | Description | Default Policy |
 |---|---|---|
-| Pre-model | LLM provider 호출 전 prompt/message 필터링 | Must |
-| Post-model | LLM 응답을 사용자, agent, tool에 전달하기 전 필터링 | Must |
-| MCP tool input | MCP tools/call arguments 필터링 | Must |
-| MCP tool output | tool result와 resource content 필터링 | Must |
-| RAG input | retrieval query, snippet, source metadata 필터링 | Should |
-| A2A message | agent message, task, artifact 필터링 | Should |
-| Observability | log, trace, replay, metric label 필터링 | Must |
+| Pre-model | Filter prompts/messages before calling an LLM provider | Must |
+| Post-model | Filter LLM responses before delivering them to users, agents, or tools | Must |
+| MCP tool input | Filter MCP tools/call arguments | Must |
+| MCP tool output | Filter tool results and resource content | Must |
+| RAG input | Filter retrieval queries, snippets, and source metadata | Should |
+| A2A message | Filter agent messages, tasks, and artifacts | Should |
+| Observability | Filter logs, traces, replays, and metric labels | Must |
 
-## 3. 기본 탐지 카탈로그
+## 3. Default Detection Catalog
 
-| 분류 | 예시 | 기본 액션 |
+| Category | Examples | Default Action |
 |---|---|---|
-| 고유식별정보 | 주민등록번호, 외국인등록번호, 여권번호, 운전면허번호 | block 또는 tokenize |
-| 민감정보 | 건강정보, 생체정보, 유전정보, 범죄경력, 정치/노조/종교 관련 정보 | block 또는 human-review |
-| 연락처 | 휴대전화번호, 전화번호, 이메일, 주소 | mask 또는 tokenize |
-| 금융정보 | 계좌번호, 카드번호, 카드 유효기간, CVC 유사값 | tokenize 또는 block |
-| 인증정보 | 비밀번호, access token, refresh token, API key, private key | block |
-| 고객 데이터 | 고객번호, 계약번호, 주문번호, 내부 식별자 | tokenize 또는 encrypt |
-| AI 특화 민감정보 | prompt 내 secret, tool output 내 개인정보, RAG snippet 내 개인정보 | redact, tokenize, encrypt |
+| Unique identifiers | Korean RRN, alien registration number, passport number, driver's license number | block or tokenize |
+| Sensitive data | Health information, biometric data, genetic data, criminal records, political/union/religious information | block or human-review |
+| Contact information | Mobile phone number, telephone number, email, address | mask or tokenize |
+| Financial information | Bank account number, card number, card expiry date, CVC-like values | tokenize or block |
+| Credentials | Passwords, access tokens, refresh tokens, API keys, private keys | block |
+| Customer data | Customer ID, contract number, order number, internal identifiers | tokenize or encrypt |
+| AI-specific sensitive data | Secrets in prompts, personal information in tool outputs, personal information in RAG snippets | redact, tokenize, or encrypt |
 
-## 4. 글로벌 규제 프로파일
+## 4. Global Regulatory Profiles
 
-지역별 기본 프로파일은 탐지 카탈로그, 기본 액션, 전송 제한, 감사 필드, 보존 정책을 바꾼다. 이 표는 제품 정책 설계를 위한 출발점이며 법률 자문을 대체하지 않는다.
+Regional default profiles alter the detection catalog, default actions, transfer restrictions, audit fields, and retention policies. This table is a starting point for product policy design and does not substitute for legal counsel.
 
-| Profile | 주요 기준 | 기본 강화 항목 |
+| Profile | Key Standards | Default Enhancements |
 |---|---|---|
-| KR-PIPA | 개인정보, 고유식별정보, 민감정보, 안전성 확보조치 | 고유식별정보 block/tokenize, 암호키 관리, 접속기록 |
-| EU-GDPR | personal data, special categories, pseudonymisation, data minimisation, international transfer | special category 기본 block/human-review, SCC/adequacy evidence, DPIA evidence |
-| UK-GDPR | UK GDPR, IDTA/Addendum, special category data | UK transfer mechanism evidence, special category 강화 |
+| KR-PIPA | Personal information, unique identifiers, sensitive information, security measures | Unique identifier block/tokenize, encryption key management, access logging |
+| EU-GDPR | personal data, special categories, pseudonymisation, data minimisation, international transfer | Special category default block/human-review, SCC/adequacy evidence, DPIA evidence |
+| UK-GDPR | UK GDPR, IDTA/Addendum, special category data | UK transfer mechanism evidence, enhanced special category handling |
 | US-CCPA-CPRA | personal information, sensitive personal information, limit use/disclosure | SPI limit-use flag, consumer request evidence |
 | US-HIPAA | PHI, covered entity/business associate, de-identification | PHI default block/tokenize, Safe Harbor style identifier catalog, BAA evidence |
-| PCI-DSS | cardholder data, sensitive authentication data | PAN tokenize/mask, CVC block, payment data logging 금지 |
-| JP-APPI | personal information, special care-required personal information, anonymized/pseudonymized information | special care-required 정보 human-review, cross-border consent/evidence |
-| SG-PDPA | consent, purpose limitation, protection, retention, transfer limitation | purpose binding, transfer limitation evidence |
-| CA-PIPEDA | consent, limiting collection/use/disclosure, safeguards, cross-border handling | consent/purpose evidence, safeguard audit |
-| BR-LGPD | personal data, sensitive personal data, international transfer | sensitive data 강화, ANPD transfer mechanism evidence |
+| PCI-DSS | cardholder data, sensitive authentication data | PAN tokenize/mask, CVC block, prohibition on logging payment data |
+| JP-APPI | personal information, special care-required personal information, anonymized/pseudonymized information | Special care-required information human-review, cross-border consent/evidence |
+| SG-PDPA | consent, purpose limitation, protection, retention, transfer limitation | Purpose binding, transfer limitation evidence |
+| CA-PIPEDA | consent, limiting collection/use/disclosure, safeguards, cross-border handling | Consent/purpose evidence, safeguard audit |
+| BR-LGPD | personal data, sensitive personal data, international transfer | Enhanced sensitive data handling, ANPD transfer mechanism evidence |
 
-## 5. 글로벌 정책 결정 context
+## 5. Global Policy Decision Context
 
-| Context | 설명 |
+| Context | Description |
 |---|---|
-| data_subject_region | 정보주체의 추정 또는 명시 지역 |
-| controller_region | 고객/controller 지역 |
-| processor_region | Haechi/processor 처리 지역 |
-| model_provider_region | LLM provider 처리 지역 |
-| transfer_mechanism | SCC, IDTA, adequacy, BCR, consent, local-only 등 |
-| sector_profile | healthcare, payment, finance, education, public sector 등 |
-| lawful_basis_or_purpose | 처리 목적 또는 법적 근거를 표현하는 고객 정의 값 |
+| data_subject_region | Inferred or declared region of the data subject |
+| controller_region | Region of the customer/controller |
+| processor_region | Region where Haechi/processor processes data |
+| model_provider_region | Region where the LLM provider processes data |
+| transfer_mechanism | SCC, IDTA, adequacy, BCR, consent, local-only, etc. |
+| sector_profile | healthcare, payment, finance, education, public sector, etc. |
+| lawful_basis_or_purpose | Customer-defined value expressing the processing purpose or legal basis |
 | residency_policy | local-only, region-locked, allowed-regions |
-| retention_policy | audit와 token vault 보존 정책 |
+| retention_policy | Retention policy for audit and token vault |
 
-## 6. 탐지 방식
+## 6. Detection Methods
 
-| 방식 | 적용 대상 | 요구사항 |
+| Method | Applies To | Requirements |
 |---|---|---|
-| Deterministic rule | 주민등록번호, 카드번호, 이메일, 전화번호, API key | 규칙 ID와 버전을 관리해야 한다. |
-| Checksum validation | 주민등록번호 후보, 카드번호 후보 | 유효성 검증 실패 후보는 confidence를 낮춘다. |
-| Dictionary | 조직명, 내부 시스템명, 금칙어 | tenant별 dictionary를 지원한다. |
-| NER/classifier | 이름, 주소, 의료/건강 문맥, 민감 추론 | local-first를 기본으로 하고 외부 전송 시 별도 동의/정책이 필요하다. |
-| Custom entity rule | 고객별 식별자, 계약번호, 티켓번호 | policy에서 schema와 action을 정의한다. |
+| Deterministic rule | Korean RRN, card number, email, phone number, API key | Rule IDs and versions must be managed. |
+| Checksum validation | Korean RRN candidates, card number candidates | Candidates that fail validation receive a lower confidence score. |
+| Dictionary | Organization names, internal system names, prohibited terms | Per-tenant dictionaries must be supported. |
+| NER/classifier | Names, addresses, medical/health context, sensitive inference | Local-first by default; external transmission requires separate consent or policy. |
+| Custom entity rule | Customer-specific identifiers, contract numbers, ticket numbers | Schema and action are defined in policy. |
 
-## 7. 커스텀 필터링
+## 7. Custom Filtering
 
-기본 규제 프로파일은 고객 내부 데이터를 충분히 알 수 없다. Haechi는 tenant별 custom filter를 1급 기능으로 제공해야 한다.
+Default regulatory profiles cannot have full knowledge of a customer's internal data. Haechi must provide per-tenant custom filters as a first-class feature.
 
-### 7.1 커스텀 탐지 대상
+### 7.1 Custom Detection Targets
 
-| 대상 | 예시 |
+| Target | Examples |
 |---|---|
-| 내부 식별자 | 고객번호, 사번, 멤버십 ID, 계약번호, 주문번호, 티켓번호 |
-| 제품/프로젝트 기밀 | 코드명, 제품 출시명, 내부 roadmap keyword |
-| 사내 시스템 정보 | internal hostname, repository name, table name, service name |
-| 산업 특화 데이터 | 의료 chart id, 보험 증권번호, 송장번호, 계좌 별칭 |
-| AI 특화 데이터 | prompt template secret, tool name, private skill name, vector collection name |
-| 보안정보 | internal API key prefix, service account, private endpoint, secret naming pattern |
+| Internal identifiers | Customer ID, employee ID, membership ID, contract number, order number, ticket number |
+| Product/project confidential data | Code names, product launch names, internal roadmap keywords |
+| Internal system information | internal hostname, repository name, table name, service name |
+| Industry-specific data | Medical chart ID, insurance policy number, invoice number, account alias |
+| AI-specific data | prompt template secret, tool name, private skill name, vector collection name |
+| Security information | internal API key prefix, service account, private endpoint, secret naming pattern |
 
-### 7.2 Custom filter DSL 요구사항
+### 7.2 Custom Filter DSL Requirements
 
-| 기능 | 설명 |
+| Feature | Description |
 |---|---|
-| regex | 정규식 기반 탐지 |
-| checksum | 고객 정의 checksum 또는 validator 함수 |
-| dictionary | tenant별 단어/구문 사전 |
-| allowlist | 오탐 예외 처리 |
-| denylist | 즉시 차단 대상 |
-| path scope | JSONPath, protobuf field path, MCP method, A2A part type 범위 지정 |
-| context condition | tenant, app, environment, model provider, region, purpose 조건 |
-| action override | 기본 profile action보다 강한 조치 적용 |
-| confidence override | rule별 confidence 계산 또는 고정 |
-| test fixture | positive/negative sample과 expected action |
+| regex | Regex-based detection |
+| checksum | Customer-defined checksum or validator function |
+| dictionary | Per-tenant word/phrase dictionary |
+| allowlist | False positive exception handling |
+| denylist | Immediate block targets |
+| path scope | Scope specification by JSONPath, protobuf field path, MCP method, or A2A part type |
+| context condition | Conditions on tenant, app, environment, model provider, region, or purpose |
+| action override | Apply a stricter action than the default profile action |
+| confidence override | Per-rule confidence calculation or fixed confidence value |
+| test fixture | Positive/negative samples with expected actions |
 
-### 7.3 Rule lifecycle
+### 7.3 Rule Lifecycle
 
-| 단계 | 요구사항 |
+| Stage | Requirements |
 |---|---|
-| draft | rule 작성자는 production traffic에 영향을 주지 않고 초안을 만들 수 있어야 한다. |
-| validate | schema, regex safety, catastrophic backtracking, action 충돌을 검사해야 한다. |
-| test | fixture와 shadow traffic으로 false positive/negative를 측정해야 한다. |
-| approve | 고위험 action, 예: block, external classifier, region override는 승인 절차가 필요하다. |
-| publish | versioned rollout과 tenant/app/environment scope가 필요하다. |
-| monitor | hit rate, action rate, override rate를 관측해야 한다. |
-| rollback | 이전 rule version으로 즉시 되돌릴 수 있어야 한다. |
+| draft | Rule authors must be able to create drafts without affecting production traffic. |
+| validate | Must check schema, regex safety, catastrophic backtracking, and action conflicts. |
+| test | False positive/negative rates must be measured using fixtures and shadow traffic. |
+| approve | High-risk actions — e.g., block, external classifier, region override — require an approval workflow. |
+| publish | Versioned rollout and tenant/app/environment scope are required. |
+| monitor | Hit rate, action rate, and override rate must be observable. |
+| rollback | Must be able to immediately revert to a previous rule version. |
 
-### 7.4 우선순위
+### 7.4 Priority
 
-강한 보호가 약한 보호보다 우선한다.
+Stronger protection takes precedence over weaker protection.
 
 1. Emergency global block rule
 2. Legal/regional profile mandatory rule
@@ -129,9 +129,9 @@
 6. Allowlist exception
 7. Default profile rule
 
-Allowlist는 고유식별정보, PHI, card security code, secret 같은 hard-block entity를 우회할 수 없어야 한다.
+An allowlist must not be able to bypass hard-block entities such as unique identifiers, PHI, card security codes, and secrets.
 
-### 7.5 커스텀 규칙 예시
+### 7.5 Custom Rule Examples
 
 ```yaml
 customRules:
@@ -149,11 +149,11 @@ customRules:
     action: tokenize
     tests:
       positive:
-        - input: "계약번호는 CTR-2026-AB12CD34 입니다"
+        - input: "Contract number is CTR-2026-AB12CD34."
           expectedEntity: TENANT_CONTRACT_ID
           expectedAction: tokenize
       negative:
-        - input: "CTR-ABCD는 제품 코드입니다"
+        - input: "CTR-ABCD is a product code."
           expectedEntity: null
 
   - id: internal-project-codename
@@ -168,21 +168,21 @@ customRules:
         - private-cloud
 ```
 
-## 8. 처리 액션
+## 8. Processing Actions
 
-| 액션 | 의미 |
+| Action | Meaning |
 |---|---|
-| allow | 탐지 결과를 허용한다. audit event는 남긴다. |
-| mask | 일부 문자만 유지하고 나머지를 마스킹한다. |
-| redact | 값을 제거하고 placeholder로 대체한다. |
-| tokenize | 복원 가능한 token으로 대체한다. 복원은 권한 평가 후 수행한다. |
-| encrypt | envelope ciphertext로 대체한다. |
-| block | 요청, 응답, tool-call 또는 artifact 전달을 차단한다. |
-| human-review | 승인 workflow로 보낸다. 자동 전달하지 않는다. |
-| region-deny | 지역/전송 정책 위반으로 차단한다. |
-| local-only | 외부 provider 호출 없이 로컬 처리만 허용한다. |
+| allow | Permit the detected result. An audit event is still recorded. |
+| mask | Retain only some characters and mask the rest. |
+| redact | Remove the value and replace it with a placeholder. |
+| tokenize | Replace with a recoverable token. Recovery is performed after authorization evaluation. |
+| encrypt | Replace with an envelope ciphertext. |
+| block | Block the request, response, tool-call, or artifact delivery. |
+| human-review | Send to an approval workflow. Do not forward automatically. |
+| region-deny | Block due to a regional/transfer policy violation. |
+| local-only | Allow local processing only; no calls to external providers. |
 
-## 9. 정책 예시
+## 9. Policy Examples
 
 ```yaml
 profiles:
@@ -244,57 +244,57 @@ rules:
         - BCR
 ```
 
-## 10. 감사 이벤트
+## 10. Audit Events
 
-감사 이벤트는 원문을 포함하지 않아야 한다.
+Audit events must not contain the original plaintext values.
 
-| 필드 | 설명 |
+| Field | Description |
 |---|---|
-| decision_id | 정책 결정 ID |
-| entity_type | 탐지된 entity type |
-| rule_id | 적용된 rule |
-| confidence | 탐지 confidence |
-| action | 적용한 처리 |
-| source | pre_model, mcp_tool_input 등 |
-| tenant_id_hash | tenant 식별자 hash |
-| agent_id_hash | agent 식별자 hash |
-| request_id | correlation id |
-| profile | 적용된 regional/sector profile |
-| transfer_mechanism | 적용된 전송 메커니즘 |
-| residency_decision | 지역 정책 결정 |
-| custom_rule_id | 커스텀 규칙이 적용된 경우 rule id |
-| custom_rule_version | 커스텀 규칙 버전 |
+| decision_id | Policy decision ID |
+| entity_type | Detected entity type |
+| rule_id | Rule that was applied |
+| confidence | Detection confidence |
+| action | Processing action applied |
+| source | pre_model, mcp_tool_input, etc. |
+| tenant_id_hash | Hash of the tenant identifier |
+| agent_id_hash | Hash of the agent identifier |
+| request_id | Correlation ID |
+| profile | Regional/sector profile applied |
+| transfer_mechanism | Transfer mechanism applied |
+| residency_decision | Residency policy decision |
+| custom_rule_id | Rule ID if a custom rule was applied |
+| custom_rule_version | Custom rule version |
 
-## 11. 테스트 기준
+## 11. Test Requirements
 
-- 한국 개인정보 fixture를 유지한다.
-- EU special category, US sensitive personal information, HIPAA PHI, PCI card data, Japan/Singapore/Brazil/Canada fixture를 유지한다.
-- 주민등록번호, 외국인등록번호, 카드번호는 checksum positive/negative fixture를 모두 포함한다.
-- custom rule별 positive/negative fixture를 필수로 요구한다.
-- regex catastrophic backtracking과 과도한 CPU/memory 사용을 검사한다.
-- allowlist가 hard-block entity를 우회하지 못하는지 테스트한다.
-- prompt, MCP tool input/output, resource, artifact, log line별 fixture를 둔다.
-- false positive와 false negative를 별도 측정한다.
-- 필터링 전후 결과에 원문이 남지 않는 snapshot test를 수행한다.
-- 외부 classifier를 사용할 경우 classifier 요청 payload에 개인정보가 전송되는지 별도 검사한다.
-- region-deny, local-only, allowed-regions, transfer-mechanism missing 부정 테스트를 수행한다.
+- Maintain Korean personal information fixtures.
+- Maintain fixtures for EU special categories, US sensitive personal information, HIPAA PHI, PCI card data, and Japan/Singapore/Brazil/Canada data.
+- Korean RRN, alien registration number, and card number fixtures must include both checksum-positive and checksum-negative cases.
+- Positive and negative fixtures are mandatory for each custom rule.
+- Check for regex catastrophic backtracking and excessive CPU/memory usage.
+- Test that allowlists cannot bypass hard-block entities.
+- Maintain fixtures per source: prompt, MCP tool input/output, resource, artifact, and log line.
+- Measure false positives and false negatives separately.
+- Perform snapshot tests to verify that no original plaintext remains in pre- and post-filtering results.
+- When using an external classifier, separately verify that personal information is not transmitted in the classifier request payload.
+- Perform negative tests for region-deny, local-only, allowed-regions, and missing transfer-mechanism scenarios.
 
-## 12. 미결정 사항
+## 12. Open Questions
 
-- 주민등록번호 등 고위험 식별자를 모든 환경에서 block할지, 폐쇄망/customer-managed-key 환경에서 tokenization을 허용할지 결정해야 한다.
-- 이름/주소 탐지를 deterministic rule 위주로 할지 NER classifier를 포함할지 결정해야 한다.
-- 개인정보 필터링 confidence threshold를 global default로 둘지 tenant별로 둘지 결정해야 한다.
-- 필터링 결과를 LLM에게 placeholder로 설명할지, 완전히 삭제할지 결정해야 한다.
-- GDPR/UK GDPR transfer mechanism을 제품이 hard enforcement할지, customer-provided evidence validation으로 둘지 결정해야 한다.
-- HIPAA/PCI sector profile을 MVP에 포함할지 결정해야 한다.
-- custom filter DSL을 자체 YAML 스키마로 유지할지, CEL/OPA/Rego 등 기존 표현식을 제한적으로 채택할지 결정해야 한다.
-- 고객 제공 dictionary를 제품 관리 KMS로 암호화할지 customer-managed key만 허용할지 결정해야 한다.
+- Decide whether high-risk identifiers such as Korean RRNs should be blocked in all environments, or whether tokenization should be permitted in air-gapped or customer-managed-key environments.
+- Decide whether name/address detection should rely primarily on deterministic rules or also include NER classifiers.
+- Decide whether the privacy filtering confidence threshold should be a global default or configurable per tenant.
+- Decide whether filtering results should be described to the LLM via placeholders or removed entirely.
+- Decide whether GDPR/UK GDPR transfer mechanisms should be hard-enforced by the product or left to customer-provided evidence validation.
+- Decide whether HIPAA/PCI sector profiles should be included in the MVP.
+- Decide whether the custom filter DSL should be maintained as a proprietary YAML schema or adopt a limited subset of an existing expression language such as CEL, OPA, or Rego.
+- Decide whether customer-provided dictionaries should be encrypted with a product-managed KMS or only with customer-managed keys.
 
-## 13. 참고
+## 13. References
 
-- 개인정보의 안전성 확보조치 기준: https://law.go.kr/LSW/admRulInfoP.do?admRulSeq=2100000192069&chrClsCd=010201
-- 개인정보보호위원회 개인정보보호지침: https://law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000240116
-- KISA 암호이용 FAQ: https://seed.kisa.or.kr/kisa/bbs/faq.do
+- Korea Personal Information Safety Measures Standards: https://law.go.kr/LSW/admRulInfoP.do?admRulSeq=2100000192069&chrClsCd=010201
+- Korea Personal Information Protection Commission Guidelines: https://law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000240116
+- KISA Cryptography Usage FAQ: https://seed.kisa.or.kr/kisa/bbs/faq.do
 - European Commission GDPR overview: https://commission.europa.eu/law/law-topic/data-protection/reform/what-does-general-data-protection-regulation-gdpr-govern_en
 - European Commission SCC: https://commission.europa.eu/law/law-topic/data-protection/international-dimension-data-protection/standard-contractual-clauses-scc_en
 - California CCPA: https://www.oag.ca.gov/privacy/ccpa

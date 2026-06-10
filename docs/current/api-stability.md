@@ -1,34 +1,34 @@
 # Haechi API Stability Policy
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-10
-- 기준 버전: 0.3.2
+- Status: Draft 0.1
+- Date: 2026-06-10
+- Target version: 0.3.2
 
-## 1. 버전 해석
+## 1. Version Interpretation
 
-0.x 버전은 developer preview다. public exports는 사용 가능하지만, stable API로 간주하지 않는다.
+0.x releases are developer previews. Public exports are available for use but are not considered stable API.
 
-| 버전 범위 | 의미 |
+| Version range | Meaning |
 |---|---|
 | `0.3.x` | local inference/proxy safety patch line |
 | `0.4.x` | streaming/deployment hardening target |
 | `0.5.x` | key custody/audit hardening target |
-| `1.0.0` | API compatibility contract를 선언할 수 있는 첫 stable 후보 |
+| `1.0.0` | First stable candidate at which an API compatibility contract may be declared |
 
-## 2. 변경 정책
+## 2. Change Policy
 
-| 변경 유형 | 0.x 처리 |
+| Change type | 0.x handling |
 |---|---|
-| 보안 기본값 강화 | patch에서 허용 |
-| unsafe config 차단 | patch에서 허용 |
-| export 제거/이름 변경 | minor에서 허용, README에 migration note 필요 |
-| policy action 의미 변경 | minor 이상 필요 |
-| audit schema 변경 | minor 이상 필요 |
-| crypto envelope format 변경 | minor 이상 필요, backward handling 필요 |
+| Strengthening security defaults | Allowed in patch |
+| Blocking unsafe config | Allowed in patch |
+| Removing or renaming exports | Allowed in minor; migration note required in README |
+| Changing policy action semantics | Requires minor or higher |
+| Changing audit schema | Requires minor or higher |
+| Changing crypto envelope format | Requires minor or higher; backward handling required |
 
 ## 3. Experimental exports
 
-다음 export는 0.3.2에서 preview로 취급한다.
+The following exports are treated as preview in 0.3.2.
 
 - `haechi/runtime`
 - `haechi/proxy`
@@ -36,13 +36,13 @@
 - `haechi/privacy-profiles`
 - `haechi/plugin`
 
-## 4. Migration note 기준
+## 4. Migration note criteria
 
-다음 변경이 있으면 `docs/current/release-*.md` 또는 README에 migration note를 남긴다.
+A migration note is added to `docs/current/release-*.md` or the README whenever any of the following changes occur.
 
-- config key 추가/삭제
-- default enforcement 변경
-- CLI flag 추가/삭제
-- audit event 필드 변경
-- token format 변경
-- plugin manifest schema 변경
+- Adding or removing a config key
+- Changing default enforcement behavior
+- Adding or removing a CLI flag
+- Changing an audit event field
+- Changing the token format
+- Changing the plugin manifest schema

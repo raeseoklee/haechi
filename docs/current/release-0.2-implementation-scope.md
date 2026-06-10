@@ -1,22 +1,22 @@
-# Release 0.2 구현 범위
+# Release 0.2 Implementation Scope
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-09
-- 관련 제품: Haechi
+- Status: Draft 0.1
+- Date: 2026-06-09
+- Target version: Haechi
 
-## 1. 목표
+## 1. Goals
 
-0.2는 0.1 quickstart 위에 보안 신뢰 경계와 교체 가능성을 보강한다.
+0.2 reinforces the security trust boundary and replaceability on top of the 0.1 quickstart.
 
-포함 범위:
+Included scope:
 
-- local encrypted TokenVault
-- signed policy bundle signing/verification
-- plugin manifest validation
+- Local encrypted TokenVault
+- Signed policy bundle signing/verification
+- Plugin manifest validation
 - MCP stdio JSON-RPC line filter skeleton
-- 관련 CLI와 테스트
+- Related CLI commands and tests
 
-## 2. CLI 추가
+## 2. New CLI Commands
 
 ```bash
 node packages/cli/bin/haechi.mjs policy-sign policy.json --out policy.bundle.json
@@ -27,20 +27,20 @@ node packages/cli/bin/haechi.mjs token-purge <token>
 node packages/cli/bin/haechi.mjs mcp-stdio --config haechi.config.json
 ```
 
-## 3. 제외 범위
+## 3. Excluded Scope
 
-- 외부 Vault/AWS/GCP/Azure KMS 실제 연동
-- plugin code dynamic loading
+- Live integration with external Vault/AWS/GCP/Azure KMS
+- Dynamic loading of plugin code
 - MCP server child process lifecycle management
-- signed release artifact와 SBOM 자동 생성
+- Automated generation of signed release artifacts and SBOM
 - Python SDK
 
-## 4. 완료 기준
+## 4. Completion Criteria
 
-| 기준 | 완료 조건 |
+| Criterion | Done When |
 |---|---|
-| TokenVault | `tokenize` action이 encrypted local vault에 mapping 저장 |
-| Signed policy | policy bundle 서명 검증 실패 시 runtime load 실패 |
-| Plugin manifest | capability와 dataHandling 필드 검증 |
-| MCP stdio | JSON-RPC `params`/`result` payload 보호 |
-| Tests | token vault, policy bundle, plugin manifest, MCP stdio fixture 통과 |
+| TokenVault | `tokenize` action stores mappings in an encrypted local vault |
+| Signed policy | Runtime load fails when policy bundle signature verification fails |
+| Plugin manifest | `capability` and `dataHandling` fields are validated |
+| MCP stdio | JSON-RPC `params`/`result` payloads are protected |
+| Tests | token vault, policy bundle, plugin manifest, and MCP stdio fixtures pass |

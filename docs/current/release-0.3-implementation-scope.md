@@ -1,23 +1,23 @@
-# Release 0.3 구현 범위
+# Release 0.3 Implementation Scope
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-10
-- 관련 제품: Haechi
+- Status: Draft 0.1
+- Date: 2026-06-10
+- Target version: Haechi
 
-## 1. 목표
+## 1. Goals
 
-0.3은 Haechi를 vLLM, Ollama, llama.cpp 같은 self-hosted/local inference server 앞단에 더 쉽게 붙일 수 있도록 한다.
+0.3 makes it easier to place Haechi in front of self-hosted/local inference servers such as vLLM, Ollama, and llama.cpp.
 
-포함 범위:
+Included scope:
 
-- OpenAI-compatible, vLLM, Ollama, llama.cpp protocol adapter preset
-- request path별 operation 분류와 audit correlation
-- 선택적 JSON response protection
+- OpenAI-compatible, vLLM, Ollama, and llama.cpp protocol adapter presets
+- Per-request-path operation classification and audit correlation
+- Optional JSON response protection
 - `local-inference` policy preset
-- npm publish-ready package metadata, exports, files 목록
+- npm publish-ready package metadata, exports, and files list
 - 0.3.1 safety patch: remote bind guard, streaming fail-closed, response failure policy, audit hash chain, provider injection, CI/SBOM/provenance workflow
 
-## 2. 적용 예시
+## 2. Usage Examples
 
 ### vLLM
 
@@ -68,19 +68,19 @@
 }
 ```
 
-## 3. 제외 범위
+## 3. Excluded Scope
 
 - SSE/NDJSON streaming response transformation beyond default fail-closed blocking
-- 이미지/멀티모달 payload 전용 media scanner
-- vendor-specific KMS, Vault, HSM adapter implementation
-- production authentication/authorization gateway
+- Dedicated media scanner for image/multimodal payloads
+- Vendor-specific KMS, Vault, and HSM adapter implementations
+- Production authentication/authorization gateway
 
-## 4. 완료 기준
+## 4. Completion Criteria
 
-| 기준 | 완료 조건 |
+| Criterion | Done When |
 |---|---|
-| Protocol adapters | vLLM, Ollama, llama.cpp route classification test 통과 |
-| Response protection | upstream JSON 응답의 민감정보가 정책에 따라 변환되고 audit에 평문이 남지 않음 |
-| Package readiness | `npm pack --dry-run` 통과 |
-| Release safety | `npm run release:preflight` 통과 |
-| Regression | 전체 `npm test` 통과 |
+| Protocol adapters | vLLM, Ollama, and llama.cpp route classification tests pass |
+| Response protection | Sensitive data in upstream JSON responses is transformed per policy; no plaintext remains in the audit log |
+| Package readiness | `npm pack --dry-run` passes |
+| Release safety | `npm run release:preflight` passes |
+| Regression | Full `npm test` passes |
