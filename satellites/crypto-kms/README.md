@@ -1,6 +1,6 @@
-# `@haechi/crypto-kms`
+# `haechi-crypto-kms`
 
-A KMS-backed `cryptoProvider` for Haechi's `keys.provider: external` path. It lives in the Haechi monorepo under `satellites/` and is published independently as `@haechi/crypto-kms`. Core (`haechi`) stays zero-runtime-dependency, and so does this satellite by default: a KMS-client SDK (e.g. `@aws-sdk/client-kms`) is an **optional peer dependency**, installed only by consumers who use that backend.
+A KMS-backed `cryptoProvider` for Haechi's `keys.provider: external` path. It lives in the Haechi monorepo under `satellites/` and is published independently as `haechi-crypto-kms`. Core (`haechi`) stays zero-runtime-dependency, and so does this satellite by default: a KMS-client SDK (e.g. `@aws-sdk/client-kms`) is an **optional peer dependency**, installed only by consumers who use that backend.
 
 ## How it works
 
@@ -11,7 +11,7 @@ The envelope matches Haechi's contract (`v, alg, kid, iv, ct, tag, aadHash`) plu
 ## Install
 
 ```sh
-npm install @haechi/crypto-kms        # peer: haechi >=0.8.0 <1.0.0
+npm install haechi-crypto-kms        # peer: haechi >=0.8.0 <1.0.0
 ```
 
 The satellite reuses your installed `haechi` instance (declared as a peer dependency), so there is a single crypto/identity surface.
@@ -31,12 +31,12 @@ Inject any client implementing:
 
 `createInMemoryKms()` is a process-local stand-in for examples/tests. For real custody, use the bundled AWS KMS client (below) or implement the same interface over another KMS / Vault.
 
-## AWS KMS (`@haechi/crypto-kms/aws`)
+## AWS KMS (`haechi-crypto-kms/aws`)
 
 ```js
 import { createRuntime } from "haechi/runtime";
-import { createKmsCryptoProvider } from "@haechi/crypto-kms";
-import { createAwsKmsClient } from "@haechi/crypto-kms/aws";
+import { createKmsCryptoProvider } from "haechi-crypto-kms";
+import { createAwsKmsClient } from "haechi-crypto-kms/aws";
 
 const kms = createAwsKmsClient({
   keyId: "arn:aws:kms:us-east-1:123456789012:key/abcd…",
@@ -55,7 +55,7 @@ The AWS client wraps a CSPRNG-generated 32-byte data key with KMS `Encrypt`/`Dec
 **`@aws-sdk/client-kms` is an optional peer dependency.** Install it only if you use the AWS path:
 
 ```sh
-npm install @haechi/crypto-kms @aws-sdk/client-kms
+npm install haechi-crypto-kms @aws-sdk/client-kms
 ```
 
 It is imported lazily, so consumers on the in-memory or an injected client never pull the SDK. For tests, inject `createAwsKmsClient({ keyId, client })` with a `{ encrypt, decrypt }` mock — no SDK or network required.
@@ -64,7 +64,7 @@ It is imported lazily, so consumers on the in-memory or an injected client never
 
 ```js
 import { createRuntime } from "haechi/runtime";
-import { createKmsCryptoProvider, createInMemoryKms } from "@haechi/crypto-kms";
+import { createKmsCryptoProvider, createInMemoryKms } from "haechi-crypto-kms";
 
 const cryptoProvider = createKmsCryptoProvider({ kms: createInMemoryKms() });
 const runtime = createRuntime({ keys: { provider: "external" }, /* ... */ }, { cryptoProvider });

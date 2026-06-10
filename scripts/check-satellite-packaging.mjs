@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Packaging gate for the published `@haechi/*` satellite tarballs.
+// Packaging gate for the published `haechi-*` satellite tarballs.
 //
-//   node scripts/check-satellite-packaging.mjs [workspace ...]   # default: @haechi/crypto-kms
+//   node scripts/check-satellite-packaging.mjs [workspace ...]   # default: haechi-crypto-kms
 //
 // The core gate (check-core-packaging.mjs) guards `haechi`; this guards the
 // satellites, before the irreversible publish. Invariants per satellite tarball:

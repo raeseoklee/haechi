@@ -21,7 +21,7 @@ Every page must be listed here with a one-line summary. Update this index on eve
 
 - [[release-roadmap]] — agreed version sequence 0.3.2 → 1.0 with the rationale for each cut
 - [[identity-and-auth]] — reserved identity schema, authProvider contract, and the dynamic-loading gate
-- [[packaging-and-distribution]] — npm-first distribution, `@haechi/*` satellite packages, rejected curl|sh installer
+- [[packaging-and-distribution]] — npm-first distribution, `haechi-*` satellite packages, rejected curl|sh installer
 
 ## Reviews
 

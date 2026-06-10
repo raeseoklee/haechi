@@ -117,7 +117,7 @@ export async function buildIdentity(record, cryptoProvider) {
   };
 }
 
-// PII-safe identity builder for EXTERNAL auth providers (e.g. the @haechi/auth-jwt
+// PII-safe identity builder for EXTERNAL auth providers (e.g. the haechi-auth-jwt
 // satellite). Core owns identity construction so the keyed-HMAC domain and the
 // identity shape stay authoritative here — a satellite supplies raw claims and
 // never sees or stores the IDENTITY_DOMAIN. subject/issuer become keyed HMACs;

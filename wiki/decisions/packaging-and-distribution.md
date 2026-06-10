@@ -11,12 +11,12 @@ Single npm package `haechi` (unscoped), zero runtime dependencies, subpath expor
 
 ## Satellite package strategy
 
-- Create npm org **`@haechi/*`** (also defends the namespace against squatting — a registered concern in the risk register).
-- Core keeps the unscoped `haechi` name; satellites: `@haechi/crypto-kms`, `@haechi/dashboard`, `@haechi/auth-oidc`, `@haechi/auth-jwt`, `@haechi/classifier-*`.
-- **Reference-then-publish:** a satellite ships first as a repo example/source (e.g. `examples/crypto-kms-reference/` in 0.7), then is promoted to a published `@haechi/*` package once the org + workspaces land (0.8). This keeps core zero-dep while the adapter exists and is testable.
+- **Naming (corrected 2026-06-10):** the original plan was an npm org/scope `@haechi/*`, but **`@haechi` is already taken by a third party** — so satellites are **unscoped `haechi-*`** instead (`haechi-crypto-kms`, `haechi-auth-jwt`, and future `haechi-dashboard`, `haechi-auth-oidc`, `haechi-classifier-*`). No org needed; each name is reserved + Trusted-Publisher-bound individually. The trade-off vs a scope is the loss of namespace grouping/squat-defence; the `haechi-` prefix is the convention.
+- Core keeps the unscoped `haechi` name.
+- **Reference-then-publish:** a satellite ships first as a repo example/source (e.g. `examples/crypto-kms-reference/` in 0.7), then is promoted to a published `haechi-*` package once workspaces land (0.8). This keeps core zero-dep while the adapter exists and is testable.
 - **Auth: contract in core, implementations as satellites** ([[identity-and-auth]]) — security-critical interfaces must be core-owned.
 - **Dashboard: fully separate.** Read-only consumer of the audit JSONL (reads files directly; no audit query API on the proxy — don't grow its attack surface). UI dependencies must not contaminate core's zero-dep posture. Shows [[audit-integrity]] chain status as a feature.
-- **First two published satellites are 0.8:** `@haechi/crypto-kms` (real AWS KMS client) and `@haechi/auth-jwt` (headless JWKS). `@haechi/auth-oidc` + `@haechi/dashboard` moved to 0.9 to keep 0.8 code-light ([[release-roadmap]]).
+- **First two published satellites are 0.8:** `haechi-crypto-kms` (real AWS KMS client) and `haechi-auth-jwt` (headless JWKS). `haechi-auth-oidc` + `haechi-dashboard` moved to 0.9 to keep 0.8 code-light ([[release-roadmap]]).
 
 ## npm workspaces mechanic (verified 2026-06-10, design 0.8)
 
@@ -27,9 +27,9 @@ The monorepo conversion is a **0.8** step (earlier wiki text said 0.7 — correc
 - Zero-dep is defended by inspecting the **packed** `package.json` (not the installed-tree SBOM, which passes vacuously): assert the tarball manifest's `dependencies` is empty, and that no `satellites/` paths appear. Negatively tested so the gate isn't a vacuous pass.
 - Consequence: the satellite imports `canonicalize` from `haechi/crypto` (the pre-0.8 reference inlined it only because nested-package self-resolution failed); a conformance test asserts byte-for-byte AAD-canonicalization parity.
 
-**Shipped — PR1 (workspaces conversion) + PR2 (`@haechi/crypto-kms` AWS client):**
+**Shipped — PR1 (workspaces conversion) + PR2 (`haechi-crypto-kms` AWS client):**
 
-- `@haechi/crypto-kms` (`satellites/crypto-kms/`) is the first satellite: in-memory client + a real AWS KMS client at `@haechi/crypto-kms/aws` (`wrap`=KMS `Encrypt`, `unwrap`=`Decrypt`, `deriveHmacKey`=HKDF-SHA256 over a KMS-decrypted root). Both clients use **HKDF-SHA256** with the same domain-separated info, so they derive identical HMAC keys from the same root (cross-backend parity, tested).
+- `haechi-crypto-kms` (`satellites/crypto-kms/`) is the first satellite: in-memory client + a real AWS KMS client at `haechi-crypto-kms/aws` (`wrap`=KMS `Encrypt`, `unwrap`=`Decrypt`, `deriveHmacKey`=HKDF-SHA256 over a KMS-decrypted root). Both clients use **HKDF-SHA256** with the same domain-separated info, so they derive identical HMAC keys from the same root (cross-backend parity, tested).
 - **`@aws-sdk/client-kms` is an OPTIONAL peer dependency** (decided 2026-06-10, overriding the design draft's "satellite's own dependency"): imported lazily only when no `client` is injected. The monorepo `npm ci` never pulls the AWS SDK; the 8+ AWS tests run SDK-free by injecting a faithful keyId-aware KMS-ops mock. Consumers add the SDK only for the AWS path.
 - **Two packaging gates** in `release:preflight`: `check-core-packaging` (core tarball: no `satellites/` leak, zero runtime deps) and `check-satellite-packaging` (each satellite tarball: zero runtime deps so the optional peer never becomes a hard dep, all `files`/`exports` present, no `*.test.mjs` leak). Both inspect the **packed** manifest and are negatively unit-tested.
 - **Per-package publish** ([[release-roadmap]]): core publishes on `v<semver>` (`npm-publish.yml`), the satellite on `crypto-kms-v<semver>` (`crypto-kms-publish.yml`), each guarded by an `if: startsWith(tag, …)` + strict regex + (satellite) tag-version-must-equal-package-version, so the two workflows never cross-fire. Each binds to its own npmjs.com Trusted Publisher (workflow filename). Bootstrap order (reserve name → configure TP → tag) is in `release-process.md`.

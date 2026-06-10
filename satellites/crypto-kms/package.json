@@ -1,5 +1,5 @@
 {
-  "name": "@haechi/crypto-kms",
+  "name": "haechi-crypto-kms",
   "version": "0.1.0",
   "description": "KMS-backed cryptoProvider satellite for Haechi (keys.provider: external) — envelope encryption with an injected KMS client.",
   "license": "Apache-2.0",

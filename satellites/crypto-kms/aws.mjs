@@ -1,4 +1,4 @@
-// AWS KMS client for @haechi/crypto-kms.
+// AWS KMS client for haechi-crypto-kms.
 //
 // Returns a `kms` client (the same small interface createInMemoryKms implements:
 // keyId / wrap / unwrap / deriveHmacKey) backed by AWS KMS, so it plugs straight

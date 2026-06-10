@@ -10,7 +10,7 @@
 
 Implement the `authProvider`/`identity` contracts reserved in 0.4 and turn identity into real per-client controls: built-in bearer authentication, named per-client policy profiles, model allowlisting, and request rate limiting. This makes Haechi safe(r) to put in front of multiple clients/agents on one host.
 
-**Scope decision (2026-06-10):** 0.6 is focused on the auth core. The heavier operational items originally grouped under 0.6 — Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, npm org (`@haechi/*`) acquisition — move to **0.7** so each gets its own security design instead of bloating one release.
+**Scope decision (2026-06-10):** 0.6 is focused on the auth core. The heavier operational items originally grouped under 0.6 — Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, the `haechi-*` package family — move to **0.7** so each gets its own security design instead of bloating one release.
 
 ## 2. Scope
 
@@ -21,7 +21,7 @@ Implement the `authProvider`/`identity` contracts reserved in 0.4 and turn ident
 - Selected by `auth.provider`:
   - `none` (default) — no authentication; `identity` stays `null` (byte-identical audit shape to 0.5). Per-client policy resolves to the default profile / base policy.
   - `bearer` — built-in token auth (§2.2).
-  - `external` — requires an injected `authProvider`; fail-closed if absent (mirrors `keys.provider: external`). The OIDC/JWT providers remain **0.7+ satellite packages** (`@haechi/auth-oidc`); 0.6 ships no network IdP code.
+  - `external` — requires an injected `authProvider`; fail-closed if absent (mirrors `keys.provider: external`). The OIDC/JWT providers remain **0.7+ satellite packages** (`haechi-auth-oidc`); 0.6 ships no network IdP code.
 
 ### 2.2 Built-in bearer auth + token store
 
@@ -123,8 +123,8 @@ Plus `policy.profiles`, `policy.profileBinding`, `policy.modelAllowlist`, `polic
 
 ## 4. Explicit non-scope (deferred to 0.7+)
 
-- OIDC/JWT providers (`@haechi/auth-oidc`, `@haechi/auth-jwt`) — 0.6 ships bearer + external-injection only.
-- Vault/AWS KMS reference adapter; external append-only audit sink; signed release artifacts; npm org `@haechi/*`.
+- OIDC/JWT providers (`haechi-auth-oidc`, `haechi-auth-jwt`) — 0.6 ships bearer + external-injection only.
+- Vault/AWS KMS reference adapter; external append-only audit sink; signed release artifacts; the `haechi-*` package family.
 - LLM token-budget limiting; distributed/shared rate state.
 - Dynamic npm loading of auth providers (1.0 plugin sandbox).
 

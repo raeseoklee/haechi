@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { evaluateSatellitePackaging, packSatellite } from "../scripts/check-satellite-packaging.mjs";
 
 const CLEAN = {
-  name: "@haechi/crypto-kms",
+  name: "haechi-crypto-kms",
   files: ["package.json", "index.mjs", "aws.mjs", "README.md"],
   manifest: {
-    name: "@haechi/crypto-kms",
+    name: "haechi-crypto-kms",
     version: "0.1.0",
     files: ["index.mjs", "aws.mjs", "README.md"],
     exports: { ".": "./index.mjs", "./aws": "./aws.mjs" },
@@ -53,10 +53,10 @@ test("FAILS when a test file leaks into the tarball", () => {
   assert.match(r.problems.join("\n"), /test files leaked/);
 });
 
-test("the real packed @haechi/crypto-kms tarball is clean", () => {
-  const { files, manifest } = packSatellite("@haechi/crypto-kms");
-  const r = evaluateSatellitePackaging({ name: "@haechi/crypto-kms", files, manifest });
-  assert.equal(manifest.name, "@haechi/crypto-kms");
+test("the real packed haechi-crypto-kms tarball is clean", () => {
+  const { files, manifest } = packSatellite("haechi-crypto-kms");
+  const r = evaluateSatellitePackaging({ name: "haechi-crypto-kms", files, manifest });
+  assert.equal(manifest.name, "haechi-crypto-kms");
   assert.equal(r.ok, true, r.problems.join("; "));
   assert.deepEqual(manifest.dependencies ?? {}, {}); // optional peer not promoted to a runtime dep
 });
