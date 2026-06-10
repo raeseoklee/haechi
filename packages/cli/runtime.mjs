@@ -63,7 +63,10 @@ export function defaultConfig() {
       provider: "local",
       path: ".haechi/token-vault.json",
       revealPolicy: "disabled",
-      retentionDays: 30
+      retentionDays: 30,
+      deterministic: false,
+      deterministicTypes: null,
+      detokenizeResponses: false
     },
     privacy: {
       profile: null
@@ -113,6 +116,8 @@ export function createRuntime(config, providers = {}) {
     cryptoProvider,
     revealPolicy: normalized.tokenVault.revealPolicy,
     retentionDays: normalized.tokenVault.retentionDays,
+    deterministic: normalized.tokenVault.deterministic,
+    deterministicTypes: normalized.tokenVault.deterministicTypes,
     auditSink
   });
   assertProvider("tokenVault", tokenVault, ["tokenize", "reveal", "purge"]);
@@ -232,6 +237,18 @@ export function normalizeConfig(config) {
   }
   if (typeof merged.tokenVault.retentionDays !== "number" || merged.tokenVault.retentionDays < 1) {
     throw new Error("tokenVault.retentionDays must be a positive number");
+  }
+  if (typeof merged.tokenVault.deterministic !== "boolean") {
+    throw new Error("tokenVault.deterministic must be boolean");
+  }
+  if (merged.tokenVault.deterministicTypes !== null
+    && (!Array.isArray(merged.tokenVault.deterministicTypes)
+      || merged.tokenVault.deterministicTypes.length === 0
+      || !merged.tokenVault.deterministicTypes.every((type) => typeof type === "string" && type.trim()))) {
+    throw new Error("tokenVault.deterministicTypes must be null or a non-empty array of type strings");
+  }
+  if (typeof merged.tokenVault.detokenizeResponses !== "boolean") {
+    throw new Error("tokenVault.detokenizeResponses must be boolean");
   }
   if (!Array.isArray(merged.mcp.allowedMethods) || merged.mcp.allowedMethods.length === 0) {
     throw new Error("mcp.allowedMethods must be a non-empty array");

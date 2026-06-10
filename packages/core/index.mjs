@@ -19,11 +19,15 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
 
     const enforced = !NO_ENFORCE_MODES.has(effectiveMode);
     const blocked = enforced && decisions.some((decision) => decision.action === "block");
+    // Tokens issued or reused while protecting THIS payload; the proxy uses
+    // this request-scoped set to restore only these tokens in the response.
+    const issuedTokens = new Set();
     const protectedPayload = blocked ? null : await transformPayload(payload, detections, decisions, {
       context,
       cryptoProvider,
       tokenVault,
-      enforced
+      enforced,
+      issuedTokens
     });
 
     const auditEvent = buildAuditEvent({
@@ -42,7 +46,8 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
       payload: protectedPayload,
       blocked,
       summary: summarize(detections, decisions),
-      auditEvent
+      auditEvent,
+      issuedTokens: [...issuedTokens]
     };
   }
 
@@ -127,7 +132,7 @@ export function summarize(detections, decisions) {
   };
 }
 
-async function transformPayload(payload, detections, decisions, { context, cryptoProvider, tokenVault, enforced }) {
+async function transformPayload(payload, detections, decisions, { context, cryptoProvider, tokenVault, enforced, issuedTokens = null }) {
   if (!enforced || detections.length === 0) {
     return structuredClone(payload);
   }
@@ -155,7 +160,7 @@ async function transformPayload(payload, detections, decisions, { context, crypt
       if (typeof original !== "number") {
         continue;
       }
-      const transformed = await transformString(String(original), items, { context, cryptoProvider, tokenVault });
+      const transformed = await transformString(String(original), items, { context, cryptoProvider, tokenVault, issuedTokens });
       if (transformed !== String(original)) {
         setByPath(output, path, transformed);
       }
@@ -164,7 +169,7 @@ async function transformPayload(payload, detections, decisions, { context, crypt
     if (typeof original !== "string") {
       continue;
     }
-    const transformed = await transformString(original, items, { context, cryptoProvider, tokenVault });
+    const transformed = await transformString(original, items, { context, cryptoProvider, tokenVault, issuedTokens });
     setByPath(output, path, transformed);
   }
 
@@ -179,7 +184,7 @@ async function transformPayload(payload, detections, decisions, { context, crypt
       || !Object.prototype.hasOwnProperty.call(parent, originalKey)) {
       continue;
     }
-    const transformedKey = await transformString(String(originalKey), items, { context, cryptoProvider, tokenVault });
+    const transformedKey = await transformString(String(originalKey), items, { context, cryptoProvider, tokenVault, issuedTokens });
     if (transformedKey === originalKey) {
       continue;
     }
@@ -197,7 +202,7 @@ async function transformPayload(payload, detections, decisions, { context, crypt
   return output;
 }
 
-async function transformString(value, items, { context, cryptoProvider, tokenVault }) {
+async function transformString(value, items, { context, cryptoProvider, tokenVault, issuedTokens = null }) {
   const sorted = items
     .filter(({ decision }) => decision.action !== "allow" && decision.action !== "block")
     .sort((left, right) => left.detection.start - right.detection.start);
@@ -212,7 +217,7 @@ async function transformString(value, items, { context, cryptoProvider, tokenVau
 
     output += value.slice(cursor, detection.start);
     const segment = value.slice(detection.start, detection.end);
-    output += await replacementFor(segment, detection, decision, { context, cryptoProvider, tokenVault });
+    output += await replacementFor(segment, detection, decision, { context, cryptoProvider, tokenVault, issuedTokens });
     cursor = detection.end;
   }
 
@@ -220,7 +225,7 @@ async function transformString(value, items, { context, cryptoProvider, tokenVau
   return output;
 }
 
-async function replacementFor(segment, detection, decision, { context, cryptoProvider, tokenVault }) {
+async function replacementFor(segment, detection, decision, { context, cryptoProvider, tokenVault, issuedTokens = null }) {
   switch (decision.action) {
     case "redact":
       return `[REDACTED:${detection.type}]`;
@@ -237,6 +242,7 @@ async function replacementFor(segment, detection, decision, { context, cryptoPro
             ruleId: detection.ruleId
           }
         });
+        issuedTokens?.add(result.token);
         return `[TOKEN:${result.token}]`;
       }
       return `[TOKEN:${detection.type}:${shortHash(segment)}]`;

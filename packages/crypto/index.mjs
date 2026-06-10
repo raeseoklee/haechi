@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 import { dirname } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
@@ -59,6 +59,18 @@ export function createLocalCryptoProvider({ keyFile }) {
         tag: tag.toString("base64url"),
         aadHash: sha256(aadBytes)
       };
+    },
+    // Keyed hash over a domain-separated derived key. The raw stored key is an
+    // AES-256-GCM key and must never be used for HMAC directly; every use case
+    // gets its own versioned domain string (e.g. deterministic tokenization,
+    // identity hashing). Uses the active key, so rotation changes outputs.
+    async hmac({ data, domain }) {
+      if (!domain || typeof domain !== "string") {
+        throw new Error("hmac requires a non-empty domain string");
+      }
+      const { active: { key } } = await loadKeys();
+      const derived = createHmac("sha256", key).update(domain).digest();
+      return createHmac("sha256", derived).update(data).digest("hex");
     },
     async decrypt({ envelope, aad }) {
       const { active, byKid } = await loadKeys();

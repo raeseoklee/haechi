@@ -3,12 +3,32 @@ import { dirname } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
-export function createLocalTokenVault({ path, cryptoProvider, revealPolicy = "disabled", retentionDays = 30, auditSink = null }) {
+const DETERMINISTIC_DOMAIN = "haechi:token-vault:deterministic:v1";
+
+export function createLocalTokenVault({
+  path,
+  cryptoProvider,
+  revealPolicy = "disabled",
+  retentionDays = 30,
+  auditSink = null,
+  deterministic = false,
+  deterministicTypes = null
+}) {
   if (!path) {
     throw new Error("Local token vault requires path");
   }
   if (!cryptoProvider) {
     throw new Error("Local token vault requires cryptoProvider");
+  }
+  if (deterministic && typeof cryptoProvider.hmac !== "function") {
+    throw new Error("Deterministic tokenization requires a cryptoProvider with hmac()");
+  }
+
+  function isDeterministicType(type) {
+    if (!deterministic) {
+      return false;
+    }
+    return !deterministicTypes || deterministicTypes.includes(type);
   }
 
   let mutationQueue = Promise.resolve();
@@ -62,10 +82,26 @@ export function createLocalTokenVault({ path, cryptoProvider, revealPolicy = "di
       revealPolicy
     },
     async tokenize({ plaintext, type, context = {}, metadata = {} }) {
+      // Deterministic tokens are derived outside the mutation lock (HMAC reads
+      // only the key file); the same (type, value) always maps to one token.
+      const token = isDeterministicType(type)
+        ? `tok_${type}_${(await cryptoProvider.hmac({
+          data: `${type}:${plaintext}`,
+          domain: DETERMINISTIC_DOMAIN
+        })).slice(0, 32)}`
+        : `tok_${type}_${shortHash(`${plaintext}:${randomBytes(16).toString("hex")}`)}`;
+
       return enqueueMutation(async () => {
         const vault = await readVault(path);
         pruneExpiredTokens(vault);
-        const token = `tok_${type}_${shortHash(`${plaintext}:${randomBytes(16).toString("hex")}`)}`;
+
+        const existing = vault.tokens[token];
+        if (existing) {
+          existing.expiresAt = addDays(new Date(), retentionDays).toISOString();
+          await writeVault(path, vault);
+          return { token, type, reused: true };
+        }
+
         const createdAt = new Date();
         const aad = {
           purpose: "token-vault",
@@ -126,6 +162,37 @@ export function createLocalTokenVault({ path, cryptoProvider, revealPolicy = "di
         });
         throw error;
       }
+    },
+    // Request-scoped response restoration. Deliberately NOT gated by
+    // revealPolicy: that governs manual/CLI reveal, while detokenize is only
+    // reachable through the proxy's explicit detokenizeResponses opt-in and is
+    // limited to the caller-supplied token set. Audited by count, no plaintext.
+    async detokenize({ tokens }) {
+      const vault = await readVault(path);
+      const values = new Map();
+      let skipped = 0;
+
+      for (const token of tokens) {
+        const record = vault.tokens[token];
+        if (!record || (record.expiresAt && Date.parse(record.expiresAt) < Date.now())) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          values.set(token, await cryptoProvider.decrypt({ envelope: record.envelope, aad: record.aad }));
+        } catch {
+          skipped += 1;
+        }
+      }
+
+      await recordVaultEvent({
+        operation: "token-vault:detokenize",
+        decision: "detokenize",
+        count: values.size,
+        reason: skipped > 0 ? `${skipped} tokens not restored` : null
+      });
+
+      return values;
     },
     async purge({ token }) {
       return enqueueMutation(async () => {
