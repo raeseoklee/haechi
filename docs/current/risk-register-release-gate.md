@@ -2,7 +2,7 @@
 
 - Status: Draft 0.3
 - Date: 2026-06-10
-- Target version: 0.3.2
+- Target version: 0.4.0
 - Branch: `main`
 
 ## 1. Current Assessment
@@ -126,7 +126,7 @@ All checklist items below were completed for 0.3.2 on 2026-06-10 except the prov
 
 | Version | Goal | Remaining scope |
 |---|---|---|
-| 0.4.0 | Token round-trip and adoption | Request-scoped response detokenization, deterministic tokenization (derived key), `haechi mcp-wrap` (bidirectional stdio), `haechi audit-verify`/`haechi status`, injection detection type (default allow), PII-safe `identity` field and `authProvider` contract reserved. See `docs/current/release-0.4-implementation-scope.md` |
+| 0.4.0 ✅ | Token round-trip and adoption | Shipped 2026-06-10: request-scoped response detokenization, deterministic tokenization (derived key), `haechi mcp-wrap`, `haechi audit-verify`/`haechi status`, injection detection type (default allow), `identity`/`authProvider` contracts reserved. See `docs/current/release-0.4-implementation-scope.md` |
 | 0.5.0 | Streaming hardening | SSE/NDJSON stream inspection, stream sequence AAD, replay cache, stronger remote deployment guide |
 | 0.6.0 | Auth and operational controls | Built-in bearer auth, per-client policy scope, model allowlist/rate budget, Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, npm org (`@haechi/*`) acquisition |
 | 0.7.0 | Observability | npm workspaces migration, `@haechi/dashboard` read-only audit viewer (hash chain integrity display, summary/search/timeline) |

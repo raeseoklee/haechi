@@ -2,7 +2,7 @@
 
 - Status: Draft 0.1
 - Date: 2026-06-10
-- Target version: 0.3.2
+- Target version: 0.4.0
 
 ## 1. Version Interpretation
 
@@ -11,8 +11,9 @@
 | Version range | Meaning |
 |---|---|
 | `0.3.x` | local inference/proxy safety patch line |
-| `0.4.x` | streaming/deployment hardening target |
-| `0.5.x` | key custody/audit hardening target |
+| `0.4.x` | token round-trip and adoption line |
+| `0.5.x` | streaming hardening target |
+| `0.6.x` | auth and operational controls target |
 | `1.0.0` | First stable candidate at which an API compatibility contract may be declared |
 
 ## 2. Change Policy
@@ -28,13 +29,18 @@
 
 ## 3. Experimental exports
 
-The following exports are treated as preview in 0.3.2.
+The following exports are treated as preview in 0.4.0.
 
 - `haechi/runtime`
 - `haechi/proxy`
 - `haechi/protocol-adapters`
 - `haechi/privacy-profiles`
 - `haechi/plugin`
+- `haechi/mcp-stdio` `wrapMcpChild`
+- `haechi/token-vault` `detokenize`, deterministic tokenization options
+- `injection` detection type and its heuristic rules
+- `identity` audit field and the `authProvider` contract (reserved in 0.4, implemented in 0.6 — shape may change until then)
+- `status` / `audit-verify` CLI output shapes
 
 ## 4. Migration note criteria
 

@@ -17,7 +17,7 @@ Local tokenization store (`packages/token-vault/index.mjs`): `tokenize` replaces
 
 Mutations serialize through an in-process queue + a `.lock` file (cross-process), with atomic temp-file-then-rename writes. Stale locks (>30s mtime) are stolen automatically (P1-OPS-007).
 
-## 0.4 direction ([[release-roadmap]])
+## Shipped in 0.4.0 ([[release-roadmap]])
 
 - **Deterministic tokenization** (opt-in): HMAC over a `haechi:token-vault:deterministic:v1` derived key ([[key-management]]) so equal values get equal tokens. Trade-off: linkability.
 - **Request-scoped response detokenization**: only tokens issued/reused during a request's protect phase are restored in its response — no session store; multi-turn works because resent history re-tokenizes deterministically. Decoupled from `revealPolicy` via a separate `detokenizeResponses` switch.

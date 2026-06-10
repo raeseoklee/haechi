@@ -2,7 +2,7 @@
 
 - Status: Draft 0.1
 - Date: 2026-06-10
-- Target version: 0.3.2
+- Target version: 0.4.0
 
 ## 1. Assets Under Protection
 
@@ -47,6 +47,8 @@ The primary assets Haechi protects are:
 | Hung upstream | Proxy connection exhaustion | `limits.upstreamTimeoutMs` default 120 s; 504 fail on timeout |
 | Signing/encryption key conflation | Key separation violation | Policy bundle signing key isolated as a domain-separated derived key |
 | JSON number / object key concealment | Undetected non-string leaves such as card numbers | Number leaves and object keys included in detection/transform scope |
+| Token round-trip restoring foreign tokens | Cross-client/request plaintext recovery | Detokenization is opt-in (`detokenizeResponses`) and request-scoped: only tokens issued while protecting the same request are restored |
+| Indirect prompt injection in tool results/responses | Agent manipulation via planted instructions | Response-direction heuristics, report-only by default (`injection` action `allow`); escalation is an explicit policy choice. Not a complete defense |
 
 ## 4. Explicit Exclusions
 

@@ -18,6 +18,9 @@ The current developer-preview scope focuses on local adoption:
 - `haechi protect`: inspect and protect an OpenAI-compatible JSON payload
 - `haechi report`: summarize audit events without raw payloads
 - `haechi proxy`: run a local HTTP JSON proxy for existing LLM calls
+- `haechi status`: show what is and is not protected under the current config
+- `haechi audit-verify`: verify the audit hash chain and print its head hash
+- `haechi mcp-wrap -- <command>`: wrap an MCP server with bidirectional stdio protection
 
 ## Install
 
@@ -87,6 +90,96 @@ Haechi 0.3 includes protocol adapter presets for OpenAI-compatible servers, vLLM
 
 Then point an OpenAI-compatible client at `http://127.0.0.1:1016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy.
 
+## Token Round-Trip
+
+With tokenization the model sees stable tokens while the caller gets plaintext back:
+
+```json
+{
+  "policy": { "mode": "enforce", "actions": { "email": "tokenize" } },
+  "responseProtection": { "enabled": true, "mode": "enforce" },
+  "tokenVault": {
+    "deterministic": true,
+    "detokenizeResponses": true
+  }
+}
+```
+
+- `tokenVault.deterministic` (default `false`): the same value always maps to the same token (HMAC over a domain-separated key derived from the local key — never the raw AES key). Required for multi-turn chats, since resent history re-tokenizes into the same tokens. **Trade-off:** equal values become linkable across requests. `deterministicTypes` (e.g. `["email"]`) limits determinism to selected types.
+- `tokenVault.detokenizeResponses` (default `false`): restores **only the tokens issued while protecting the same request** in that request's response. Tokens from other clients or requests are never restored. Independent of `revealPolicy`; every restoration is audited by count, never by value. Requires `responseProtection.enabled`.
+
+## MCP Wrap
+
+Wrap any stdio MCP server so its traffic is filtered in both directions — change only the command in your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "some-server": {
+      "command": "npx",
+      "args": ["-y", "haechi", "mcp-wrap", "--config", "/path/haechi.config.json", "--", "npx", "some-mcp-server"]
+    }
+  }
+}
+```
+
+Client→server requests pass the `mcp.allowedMethods` allowlist and params protection; server→client results get params/result protection plus injection heuristics (see below). Rejections are answered to the client and never reach the server; stderr and exit codes pass through.
+
+## Injection Detection (Preview)
+
+Response and tool-result text is screened with heuristic rules for indirect prompt injection (instruction overrides, role reassignment, prompt markers, conceal-from-user phrasing, covert tool induction). The `injection` type is **report-only by default**: detections are written to the audit log but nothing is modified or blocked. Escalate explicitly once you trust the signal:
+
+```json
+{ "policy": { "actions": { "injection": "block" } } }
+```
+
+These heuristics are not a complete defense against prompt injection; see `docs/current/threat-model.md`.
+
+## Configuration
+
+`haechi init` writes `haechi.config.json`; a non-secret template lives at `haechi.config.example.json`. All keys validate fail-closed — unknown or malformed values refuse to start.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mode` / `policy.mode` | `dry-run` | `dry-run` and `report-only` detect + audit only; `enforce` transforms/blocks. `policy.mode` wins over `mode` |
+| `target.type` / `target.adapter` | `llm-http` / `openai-compatible` | Upstream protocol: `openai-compatible`, `vllm-openai`, `ollama`, `llama-cpp`. Unknown types fail closed |
+| `target.upstream` | `http://127.0.0.1:9999` | The only upstream the proxy will forward to (absolute-URL request targets are rejected) |
+| `proxy.host` / `proxy.port` | `127.0.0.1` / `1016` | Proxy bind address. See remote binding below |
+| `responseProtection.enabled` | `false` | Inspect upstream JSON responses. `failureMode: fail-closed` rejects non-JSON/compressed/oversized responses |
+| `responseProtection.maxBytes` | `1048576` | Hard response size cap — enforced even in `failureMode: allow` |
+| `streaming.requestMode` | `block` | `stream: true` requests get 501 unless `pass-through` (uninspected, audited). Ollama chat/generate count as streaming unless `stream: false` |
+| `limits.maxRequestBytes` | `1048576` | Request body cap (413 over the limit) |
+| `limits.upstreamTimeoutMs` | `120000` | Upstream timeout (504 on expiry) |
+| `policy.presets` | `korean-pii`, `secrets-only`, `llm-redact` | Merged preset actions; merges can strengthen but never weaken |
+| `policy.actions` | `card: block` | Per-type action: `allow`/`redact`/`mask`/`tokenize`/`encrypt`/`block` |
+| `filters.customRules` | `[]` | Extra regex rules (ReDoS-screened: no nested quantifiers/backreferences) |
+| `keys.provider` / `keys.keyFile` | `local` / `.haechi/dev.keys.json` | Dev-only software keys (0600). `external` requires injecting a crypto provider programmatically |
+| `audit.path` | `.haechi/audit.jsonl` | Hash-chained JSONL audit log; verify with `haechi audit-verify` |
+| `tokenVault.revealPolicy` | `disabled` | Manual reveal gate (`local-dev` to enable; every decision is audited) |
+| `tokenVault.retentionDays` | `30` | Expired tokens are deleted on vault writes or `haechi token-purge --expired` |
+| `tokenVault.deterministic` / `deterministicTypes` / `detokenizeResponses` | `false` / `null` / `false` | Token round-trip (see above) |
+| `privacy.profile` | `null` | `kr-pipa`, `eu-gdpr`, `us-general` baseline actions (strengthen-only) |
+| `mcp.allowedMethods` | `initialize`, `tools/call`, `resources/read`, `prompts/get` | Client-callable method allowlist for `mcp-stdio`/`mcp-wrap` |
+
+Check the effective state at any time:
+
+```bash
+haechi status
+```
+
+### Binding beyond loopback (0.0.0.0)
+
+The proxy refuses non-loopback hosts unless the CLI flag is given explicitly — setting `proxy.host: "0.0.0.0"` in config alone will not start, by design (copying a config file must not silently expose the gateway):
+
+```bash
+haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
+```
+
+**The proxy has no client authentication yet** (planned for 0.6): anyone who can reach the port can use your upstream and the token round-trip path. Use `--allow-remote-bind` only behind explicit network controls:
+
+- **Containers**: binding `0.0.0.0` inside a container is the normal pattern — restrict exposure at the port mapping, e.g. `-p 127.0.0.1:1016:1016`
+- **LAN/remote**: put a firewall, VPN (e.g. Tailscale), or an authenticating reverse proxy in front
+
 ## Privacy Profiles
 
 Haechi includes baseline regional privacy profiles for local policy bootstrapping:
@@ -121,3 +214,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.3.1 adds release safety gates, response fail-closed behavior, audit hash chaining, token reveal governance, provider injection, privacy profiles, CI/SBOM/provenance workflow scaffolding, and dedicated threat/shared-responsibility/API-stability docs.
 
 0.3.2 is a security-hardening release and the first npm developer preview target: Ollama implicit-streaming fail-closed handling, audited token reveal/purge, retention purge, kid-based key rotation, domain-separated policy bundle signing, JSON number/object key detection, upstream timeouts, stale lock recovery, and non-enforcing-mode warnings. See `docs/current/release-0.3.2-hardening-scope.md`.
+
+0.4.0 adds the token round-trip (deterministic tokenization + request-scoped response detokenization), the `mcp-wrap` bidirectional MCP filter, `status` and `audit-verify` commands, report-only injection detection heuristics, and reserves the PII-safe `identity`/`authProvider` contracts for 0.6 auth. See `docs/current/release-0.4-implementation-scope.md`.

@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.3
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.2
+- 기준 버전: 0.4.0
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -126,7 +126,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 | 버전 | 목표 | 남은 범위 |
 |---|---|---|
-| 0.4.0 | token round-trip and adoption | 요청 스코프 response detokenization, deterministic tokenization(파생 키), `haechi mcp-wrap`(양방향 stdio), `haechi audit-verify`/`haechi status`, injection detection type(기본 allow), PII-safe `identity` 필드 및 `authProvider` 계약 예약. `docs/current/release-0.4-implementation-scope.md` 참조 |
+| 0.4.0 ✅ | token round-trip and adoption | 2026-06-10 구현 완료: 요청 스코프 response detokenization, deterministic tokenization(파생 키), `haechi mcp-wrap`, `haechi audit-verify`/`haechi status`, injection detection type(기본 allow), `identity`/`authProvider` 계약 예약. `docs/current/release-0.4-implementation-scope.md` 참조 |
 | 0.5.0 | streaming hardening | SSE/NDJSON stream inspection, stream sequence AAD, replay cache, stronger remote deployment guide |
 | 0.6.0 | auth and 운영 통제 | built-in bearer auth, client별 policy scope, model allowlist/rate budget, Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, npm org(`@haechi/*`) 확보 |
 | 0.7.0 | observability | npm workspaces 전환, `@haechi/dashboard` read-only audit viewer (hash chain 무결성 표시, 요약/검색/타임라인) |

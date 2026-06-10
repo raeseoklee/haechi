@@ -1,9 +1,10 @@
 # Haechi 0.4 Implementation Scope
 
-- Status: Draft 0.1
+- Status: Final
 - Date: 2026-06-10
 - Target version: 0.4.0 (after 0.3.2)
 - Type: token round-trip and adoption
+- Shipped: 2026-06-10 — PRs #7 (round-trip), #8 (audit-verify/status), #9 (mcp-wrap), #10 (injection + identity reservation)
 
 ## 1. Release Goals
 

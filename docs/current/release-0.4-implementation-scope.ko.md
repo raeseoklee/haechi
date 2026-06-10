@@ -1,9 +1,10 @@
 # Haechi 0.4 Implementation Scope
 
-- 문서 상태: Draft 0.1
+- 문서 상태: Final
 - 작성일: 2026-06-10
 - 기준 버전: 0.4.0 (0.3.2 이후)
 - 주제: token round-trip and adoption
+- 구현 완료: 2026-06-10 — PR #7 (round-trip), #8 (audit-verify/status), #9 (mcp-wrap), #10 (injection + identity 예약)
 
 ## 1. 릴리스 목표
 
