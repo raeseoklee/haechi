@@ -53,7 +53,7 @@ upstream JSON 응답을 검사한다(기본적으로 꺼져 있음 — 모델로
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
 | `responseProtection.enabled` | boolean | `false` | 마스터 스위치. `detokenizeResponses`가 작동하려면 반드시 활성화되어 있어야 한다. |
-| `responseProtection.mode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | 응답 방향의 집행 모드. |
+| `responseProtection.mode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | 응답 방향의 집행 모드. **실제 LLM upstream엔 `report-only` 권장:** envelope 메타데이터(id, unix 타임스탬프 `created`, 긴 숫자 필드)가 PII/secret 모양으로 보일 수 있어 `enforce`면 정상 완성 응답을 502로 막는다. `report-only`도 탐지·감사·`detokenizeResponses`는 그대로 동작. (Haechi는 응답에서 자체 `[TOKEN:…]`/`[HAECHI_ENC:…]` 마커를 제외하고 phone 규칙도 맨 타임스탬프를 무시하지만, Luhn 통과하는 긴 숫자는 여전히 `card` 매치 가능.) |
 | `responseProtection.failureMode` | `fail-closed` \| `allow` | `fail-closed` | *검사 불가능한* 응답(비JSON, 잘못된 JSON, 압축)에 대한 처리 방식. `fail-closed`는 502를 반환하고, `allow`는 통과시킨다(audit 기록됨). |
 | `responseProtection.allowNonJson` | boolean | `false` | 비JSON 응답을 검사 없이 통과시킨다. |
 | `responseProtection.allowCompressed` | boolean | `false` | 압축 응답을 검사 없이 통과시킨다. |

@@ -54,6 +54,8 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | audit에 원시 credentials/identity 노출 | audit 로그를 통한 token 또는 subject 유출 | Token은 keyed-HMAC 해시로만 저장; identity subject/issuer는 keyed HMAC 처리; `auth_denied` 레코드에 token 미포함 |
 | token round-trip의 타 토큰 복원 | 클라이언트/요청 간 평문 복구 | detokenization은 opt-in(`detokenizeResponses`)이며 요청 스코프: 같은 요청을 보호하며 발급된 토큰만 복원 |
 | tool result/응답 내 간접 prompt injection | 심어진 지시문에 의한 agent 조작 | 응답 방향 휴리스틱, 기본 report-only(`injection` action `allow`), 격상은 명시적 정책 선택. 완전 방어 아님 |
+| Haechi 자체 변환 마커 재탐지 | 모델이 echo한 토큰 왕복이 재탐지됨(예: `[TOKEN:…]`가 `secret`으로 차단) → response-enforce에서 `detokenizeResponses` 깨짐 | **응답 방향에서만** Haechi 마커(`[TOKEN:…]`, `[HAECHI_ENC:…]`, `[REDACTED:…]`) 탐지 제외. 요청 방향은 영향 없으므로 요청에 마커 모양 문자열로 secret을 숨겨 우회할 수 없음. **수용된 잔여:** 악의적 *upstream*이 누출 값을 가짜 응답 마커로 감싸 응답 방향 탐지를 회피할 수 있음 — 응답 검사는 2차 방어(모델은 semi-trusted)이고 제외는 positional(마커 구간만 건너뜀; 인접 값은 여전히 탐지됨) |
+| 응답 메타데이터 오탐 | `enforce` 응답 검사가 envelope 메타데이터를 PII/secret으로 오인해 정상 응답을 차단(예: unix 타임스탬프 `created`가 phone 규칙에 매치) | KR phone 규칙이 구분자·`0` 없는 맨 숫자열을 무시; `chatcmpl-…` 같은 id는 secret 모양 아님. **잔여:** Luhn 통과하는 긴 숫자 필드는 여전히 `card` 매치 가능. 실제 upstream엔 `responseProtection.mode: report-only`(탐지·감사만, 차단 없음) 권장 또는 응답 정책 튜닝 |
 
 ## 4. 명시적 제외
 

@@ -7,11 +7,14 @@ const DEFAULT_RULES = [
     confidence: 0.95
   },
   {
+    // KR mobile numbers (01[016789] prefixes); landlines are out of scope.
+    // krPhoneValid keeps a bare separator-less run from matching a timestamp/id.
     id: "kr-phone",
     type: "phone",
     pattern: "(?:\\+82[-\\s]?)?0?1[016789][-.\\s]?\\d{3,4}[-.\\s]?\\d{4}",
     flags: "g",
-    confidence: 0.9
+    confidence: 0.9,
+    validate: krPhoneValid
   },
   {
     id: "kr-rrn-like",
@@ -116,6 +119,14 @@ export function createDefaultFilterEngine({ customRules = [] } = {}) {
 
 export function detectEntry(entry, rules, context = {}) {
   const detections = [];
+  // On the RESPONSE direction only, skip Haechi's own transform markers so they
+  // aren't re-detected: a tokenized round-trip echoes `[TOKEN:tok_…]` back, which
+  // reads like a `token:<secret>` assignment — without this, Haechi blocks its
+  // own token. This is response-only on purpose: a REQUEST that contains a
+  // marker-shaped string is NOT Haechi output (Haechi hasn't transformed it yet),
+  // so it is scanned normally — otherwise an attacker could wrap a real secret in
+  // a fake `[TOKEN:…]` to evade request-side detection.
+  const markerSpans = context?.direction === "response" ? haechiMarkerSpans(entry.value) : [];
 
   for (const rule of rules) {
     // Direction-scoped rules (e.g. injection heuristics) only run on the
@@ -129,14 +140,19 @@ export function detectEntry(entry, rules, context = {}) {
       if (rule.validate && !rule.validate(value)) {
         continue;
       }
+      const start = match.index;
+      const end = match.index + value.length;
+      if (overlapsAny(start, end, markerSpans)) {
+        continue;
+      }
       detections.push({
         type: rule.type,
         ruleId: rule.id,
         path: entry.path,
         pathText: entry.pathText,
         kind: entry.kind ?? "value",
-        start: match.index,
-        end: match.index + value.length,
+        start,
+        end,
         confidence: rule.confidence,
         value
       });
@@ -144,6 +160,32 @@ export function detectEntry(entry, rules, context = {}) {
   }
 
   return removeOverlaps(detections);
+}
+
+// Spans of Haechi's own transform markers in a string, so detection can skip
+// them: `[TOKEN:…]`, `[HAECHI_ENC:…]`, `[REDACTED:…]`.
+function haechiMarkerSpans(text) {
+  const spans = [];
+  for (const m of text.matchAll(/\[(?:TOKEN|HAECHI_ENC|REDACTED):[^\]]*\]/g)) {
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+function overlapsAny(start, end, spans) {
+  return spans.some(([s, e]) => start < e && end > s);
+}
+
+// A bare digit run with no separators and no +82 country code is only treated as
+// a KR phone number when it starts with the trunk prefix 0 (e.g. 01012345678);
+// otherwise an ambiguous 10-digit value (a unix timestamp, an id, a counter)
+// merely looks phone-shaped. Separated/prefixed forms (010-1234-5678,
+// +82 10 1234 5678) always pass.
+function krPhoneValid(match) {
+  if (/[-.\s+]/.test(match)) {
+    return true;
+  }
+  return match.startsWith("0");
 }
 
 function normalizeCustomRule(rule) {
