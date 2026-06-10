@@ -4,7 +4,8 @@ import { readAuditSummary, verifyAuditChain } from "../../audit/index.mjs";
 import { DEFAULT_PROXY_PORT, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
-import { runMcpStdioFilter } from "../../mcp-stdio/index.mjs";
+import { runMcpStdioFilter, wrapMcpChild } from "../../mcp-stdio/index.mjs";
+import { spawn } from "node:child_process";
 import { DEFAULT_CONFIG_PATH, createRuntime, isValidPort, loadConfig, writeDefaultConfig } from "../runtime.mjs";
 
 const [command, ...argv] = process.argv.slice(2);
@@ -49,6 +50,9 @@ try {
       break;
     case "mcp-stdio":
       await mcpStdioCommand(argv);
+      break;
+    case "mcp-wrap":
+      await mcpWrapCommand(argv);
       break;
     case "help":
     case "--help":
@@ -398,6 +402,30 @@ async function mcpStdioCommand(argv) {
   await runMcpStdioFilter({ runtime });
 }
 
+async function mcpWrapCommand(argv) {
+  const separator = argv.indexOf("--");
+  if (separator === -1 || !argv[separator + 1]) {
+    throw new Error("mcp-wrap requires a child command after --, e.g. haechi mcp-wrap -- npx some-mcp-server");
+  }
+  const options = parseOptions(argv.slice(0, separator));
+  const command = argv[separator + 1];
+  const commandArgs = argv.slice(separator + 2);
+
+  const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+  const runtime = createRuntime(config);
+
+  const child = spawn(command, commandArgs, {
+    stdio: ["pipe", "pipe", "inherit"]
+  });
+
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => child.kill(signal));
+  }
+
+  const { code } = await wrapMcpChild({ runtime, child });
+  process.exitCode = code;
+}
+
 function parseOptions(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -453,6 +481,7 @@ Usage:
   haechi token-export [--config haechi.config.json] [--type email]
   haechi plugin-validate <plugin-manifest.json>
   haechi mcp-stdio [--config haechi.config.json]
+  haechi mcp-wrap [--config haechi.config.json] -- <command> [args...]
 
 The default policy mode is dry-run. Change policy.mode to enforce to mutate or block payloads.
 `);
