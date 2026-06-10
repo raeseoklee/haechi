@@ -1,6 +1,6 @@
 # `@haechi/crypto-kms`
 
-A KMS-backed `cryptoProvider` for Haechi's `keys.provider: external` path. It lives in the Haechi monorepo under `satellites/` and is published independently as `@haechi/crypto-kms`. Core (`haechi`) stays zero-runtime-dependency; this satellite carries any KMS-client dependency itself.
+A KMS-backed `cryptoProvider` for Haechi's `keys.provider: external` path. It lives in the Haechi monorepo under `satellites/` and is published independently as `@haechi/crypto-kms`. Core (`haechi`) stays zero-runtime-dependency, and so does this satellite by default: a KMS-client SDK (e.g. `@aws-sdk/client-kms`) is an **optional peer dependency**, installed only by consumers who use that backend.
 
 ## How it works
 
@@ -29,7 +29,36 @@ Inject any client implementing:
 }
 ```
 
-`createInMemoryKms()` is a process-local stand-in for examples/tests. A real deployment swaps in an AWS KMS / HashiCorp Vault client. (The real AWS KMS client backed by `@aws-sdk/client-kms` lands as a satellite-only dependency in a follow-up — it never touches core.)
+`createInMemoryKms()` is a process-local stand-in for examples/tests. For real custody, use the bundled AWS KMS client (below) or implement the same interface over another KMS / Vault.
+
+## AWS KMS (`@haechi/crypto-kms/aws`)
+
+```js
+import { createRuntime } from "haechi/runtime";
+import { createKmsCryptoProvider } from "@haechi/crypto-kms";
+import { createAwsKmsClient } from "@haechi/crypto-kms/aws";
+
+const kms = createAwsKmsClient({
+  keyId: "arn:aws:kms:us-east-1:123456789012:key/abcd…",
+  region: "us-east-1",
+  // Required ONLY if you tokenize/authenticate (i.e. need hmac): a base64url
+  // KMS-encrypted 32-byte root. Omit for encrypt-only use.
+  hmacRootCiphertext: process.env.HAECHI_HMAC_ROOT
+});
+const runtime = createRuntime({ keys: { provider: "external" }, /* ... */ }, {
+  cryptoProvider: createKmsCryptoProvider({ kms })
+});
+```
+
+The AWS client wraps a CSPRNG-generated 32-byte data key with KMS `Encrypt`/`Decrypt` (envelope encryption — the master key never leaves KMS) and derives per-domain HMAC keys with HKDF from a single KMS-decrypted root (deterministic, domain-separated, no per-token network call).
+
+**`@aws-sdk/client-kms` is an optional peer dependency.** Install it only if you use the AWS path:
+
+```sh
+npm install @haechi/crypto-kms @aws-sdk/client-kms
+```
+
+It is imported lazily, so consumers on the in-memory or an injected client never pull the SDK. For tests, inject `createAwsKmsClient({ keyId, client })` with a `{ encrypt, decrypt }` mock — no SDK or network required.
 
 ## Usage
 

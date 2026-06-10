@@ -63,12 +63,43 @@ npm audit signatures
 
 ## 4. GitHub Actions
 
-| Workflow | Purpose |
-|---|---|
-| `.github/workflows/ci.yml` | Tests, release preflight, SBOM artifact |
-| `.github/workflows/npm-publish.yml` | npm provenance publish + checksummed/attested release assets on GitHub release published |
+| Workflow | Publishes | Fires on tag | Purpose |
+|---|---|---|---|
+| `.github/workflows/ci.yml` | — | any push/PR | Tests, release preflight, SBOM artifact |
+| `.github/workflows/npm-publish.yml` | `haechi` | `v<semver>` | npm provenance publish + checksummed/attested release assets |
+| `.github/workflows/crypto-kms-publish.yml` | `@haechi/crypto-kms` | `crypto-kms-v<semver>` | satellite publish, same signed-artifacts path |
 
-## 5. Deployment block conditions
+Each publish workflow triggers on `release: published` but is **guarded** so the two never cross-fire: the core job runs only for tags starting `v` (and re-validates `^v[0-9]+\.[0-9]+\.[0-9]+$`); the satellite job runs only for `crypto-kms-v…` (and re-validates `^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$` **and** that the tag version equals the satellite's `package.json` version). The npmjs.com Trusted Publisher for each package is bound to its **specific workflow filename** — renaming a workflow file breaks its OIDC publish until the npm config is updated.
+
+## 5. Satellite packages (`@haechi/*`)
+
+Satellites live under `satellites/*` in the npm workspaces monorepo and publish **independently** of core (their own semver; a satellite patch never bumps `haechi`). They reuse the exact signed-artifacts path as core (pack → checksum → sigstore attest → OIDC publish → upload).
+
+**Per-satellite bootstrap order (first publish, chicken-and-egg):**
+
+1. Create/own the npm org **`@haechi`** (defends the namespace; required before any scoped publish).
+2. **Reserve** the package name in the org on npmjs.com — this claims the namespace without publishing a version.
+3. **Configure** the Trusted Publisher on the reserved package: link the `raeseoklee/haechi` repository and the satellite's **exact workflow filename** (e.g. `crypto-kms-publish.yml`).
+4. Push the prefixed tag and publish a GitHub Release (e.g. `crypto-kms-v0.1.0`) → the workflow's OIDC publish creates `0.1.0` with provenance.
+
+Steps 2–3 require org-owner access from step 1. No manual `npm publish` from a laptop is needed.
+
+**Tag → workflow → package mapping:**
+
+| Package | Tag pattern | Workflow file | npm version source |
+|---|---|---|---|
+| `@haechi/crypto-kms` | `crypto-kms-v<semver>` | `crypto-kms-publish.yml` | `satellites/crypto-kms/package.json` |
+
+**Verify a satellite release** (same anchors as core):
+
+```bash
+gh attestation verify haechi-crypto-kms-<version>.tgz --repo raeseoklee/haechi
+npm view @haechi/crypto-kms --json   # dist.attestations present; access "public"
+```
+
+**Dependency note:** `@haechi/crypto-kms` keeps core zero-dependency — `@aws-sdk/client-kms` is an **optional peer dependency**, imported lazily only when a real AWS client is used and not injected. Consumers who use the in-memory or an injected client never install the SDK.
+
+## 6. Deployment block conditions
 
 npm publish is not performed if any of the following fail.
 

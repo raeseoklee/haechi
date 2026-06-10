@@ -26,17 +26,25 @@
   ],
   "main": "index.mjs",
   "exports": {
-    ".": "./index.mjs"
+    ".": "./index.mjs",
+    "./aws": "./aws.mjs"
   },
   "files": [
     "index.mjs",
+    "aws.mjs",
     "README.md"
   ],
   "scripts": {
     "test": "node --test"
   },
   "peerDependencies": {
-    "haechi": ">=0.8.0 <1.0.0"
+    "haechi": ">=0.8.0 <1.0.0",
+    "@aws-sdk/client-kms": "^3"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-kms": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "haechi": "*"

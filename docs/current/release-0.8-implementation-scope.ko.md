@@ -49,9 +49,10 @@ Core(`haechi`, unscoped)는 **zero runtime dependency**를 유지한다. satelli
 
 ### 2.3 `@haechi/crypto-kms` (배포 + 실제 KMS 클라이언트)
 
-- 0.7 reference(`createKmsCryptoProvider` envelope 암호화 + `createInMemoryKms`)를 배포 패키지로 승격하며, 인라인 `canonicalize`를 `import { canonicalize } from "haechi/crypto"`(§2.1)로 전환한다.
-- **실제 KMS 클라이언트**를 satellite 자체 의존성으로 추가한다: `@aws-sdk/client-kms` 위의 `createAwsKmsClient({ keyId, region })`(`GenerateDataKey`/`Decrypt`, `deriveHmacKey`용 HKDF 포함). AWS SDK는 **satellite만의** 의존성이며 core의 SBOM에 절대 들어가지 않는다. in-memory 클라이언트는 테스트/예제용으로 남으며 SDK가 필요 없다. (Vault 클라이언트는 0.8을 실제 백엔드 하나로 유지하기 위해 명시적으로 0.9+.)
-- satellite CI는 in-memory 클라이언트와 **mocked** AWS 클라이언트(CI에서 실제 AWS 호출 없음)에 대해 `assertCryptoProviderConformance`(workspace 심링크로 `haechi/crypto`에서 import)를 실행한다. mock은 충실한 envelope여야 한다: `GenerateDataKey`는 `{ Plaintext, CiphertextBlob }`를 반환; `Decrypt`는 이 키가 wrap한 blob에 대해서만 원본 plaintext를 반환하고, 다른 키/리전이 wrap한 blob(cross-tenant 격리)과 손상/절단된 blob은 **거부**한다. 항상 성공하는 trivial stub은 불충분하며 conformance 스위트가 이 거부 경로를 반드시 실행해야 한다. sandbox KMS 키에 대한 실제 `createAwsKmsClient` 검증은 **CI 밖 통합 테스트**다(문서화, 게이팅 아님).
+- 0.7 reference(`createKmsCryptoProvider` envelope 암호화 + `createInMemoryKms`)를 배포 패키지로 승격하며, 인라인 `canonicalize`를 `import { canonicalize } from "haechi/crypto"`(§2.1)로 전환한다. 기존 `kms` 클라이언트 인터페이스(`keyId`/`wrap`/`unwrap`/`deriveHmacKey`)는 **변경하지 않으므로** 승격된 provider와 in-memory 클라이언트는 byte-for-byte 동일하고 0.7 테스트가 그대로 넘어온다.
+- **실제 AWS KMS 클라이언트**를 `@haechi/crypto-kms/aws`에 추가한다: `createAwsKmsClient({ keyId, region, client, hmacRootCiphertext })`. 동일한 `kms` 인터페이스를 구현한다: `wrap` = CSPRNG로 생성한 32바이트 data key를 KMS `Encrypt`, `unwrap` = KMS `Decrypt`(envelope 암호화 — master key는 KMS를 떠나지 않음); `deriveHmacKey(domain)` = 단일 KMS-`Decrypt`된 32바이트 root(`hmacRootCiphertext`, 캐시)에 대한 **HKDF-SHA256**, domain-separated — 결정적이고 토큰당 네트워크 호출 없음. `hmacRootCiphertext`가 없으면 `deriveHmacKey`는 throw하고 provider는 encrypt-only가 된다(`requireHmac:false`로 유효).
+- **`@aws-sdk/client-kms`는 hard dependency가 아니라 OPTIONAL peer dependency다**(2026-06-10 결정, 기존 "satellite 자체 의존성" 표현을 수정). `client` 미주입 시에만 **lazy import**되므로: 모노레포 `npm ci`/CI는 (대용량) AWS SDK를 절대 받지 않고; in-memory 또는 주입형 클라이언트를 쓰는 소비자는 설치하지 않으며; core는 자명하게 영향받지 않는다. 배포 satellite는 `peerDependencies` + `peerDependenciesMeta.optional`로 선언한다. 이로써 실제 백엔드를 제공하면서도 satellite를 의존성 가볍게 유지한다.
+- satellite CI는 in-memory 클라이언트 **그리고** KMS `encrypt`/`decrypt` ops의 **주입된 mock**(SDK·네트워크 없음)으로 구동되는 AWS 클라이언트에 대해 `assertCryptoProviderConformance`(workspace 심링크로 `haechi/crypto`에서 import)를 실행한다. mock은 충실한 envelope(per-mock master key의 AES-256-GCM)여야 한다: `Decrypt`는 이 키가 wrap한 blob에 대해서만 plaintext를 반환하고, 다른 키가 wrap한 blob(cross-key 격리)과 손상된 blob은 **거부**한다. 항상 성공하는 trivial stub은 불충분하며 스위트가 이 거부 경로와 HMAC 결정성/domain-separation을 실행한다. sandbox KMS 키에 대한 실제 `createAwsKmsClient` 검증은 **CI 밖 통합 테스트**다(문서화, 게이팅 아님).
 
 ### 2.4 `@haechi/auth-jwt` (JWKS bearer 검증, 의존성 최소)
 
@@ -120,8 +121,10 @@ Core 동작은 불변이다: 루트 패키지의 `exports`, `bin`, `files`, zero
 
 ### 6.2 PR2 — `@haechi/crypto-kms` (실제 AWS 클라이언트)
 
-- in-memory **및 mocked-AWS** 클라이언트가 cross-key/손상-blob **거부** 경로를 포함해 `assertCryptoProviderConformance`를 통과; `createRuntime`을 통한 end-to-end(암호화 + 토큰화 round-trip).
-- 배포 매니페스트가 `publishConfig.access: public`을 설정; satellite tarball은 `@aws-sdk/client-kms`를 **자체** 의존성으로 담고 core tarball은 zero-dep 유지.
+- in-memory **및 AWS** 클라이언트(AWS는 KMS `encrypt`/`decrypt` ops의 **주입된 mock**으로 구동 — SDK·네트워크 없음)가 cross-key/손상-blob **거부** 경로와 HMAC 결정성/domain-separation을 포함해 `assertCryptoProviderConformance`를 통과; `createRuntime`을 통한 end-to-end(암호화 + 토큰화 round-trip).
+- `createAwsKmsClient`는 `keyId` 없으면 throw; `hmacRootCiphertext` 없으면 `deriveHmacKey`가 throw하고 provider는 encrypt-only로 conformance 통과(`requireHmac:false`).
+- 배포 매니페스트가 `publishConfig.access: public`을 설정하고 `@aws-sdk/client-kms`를 `peerDependencies` + `peerDependenciesMeta.optional`로 선언(runtime `dependency` 아님); 배포 satellite tarball은 `dependencies: {}`이고 core tarball은 zero-dep 유지(§6.1 게이트 계속 통과).
+- satellite publish 워크플로(`crypto-kms-v<semver>`)가 0.7 서명 아티팩트 경로로 존재; core 워크플로는 satellite 릴리스 태그가 `haechi`를 발행하지 않도록 가드.
 
 ### 6.3 PR3 — `@haechi/auth-jwt` (보안 게이트)
 

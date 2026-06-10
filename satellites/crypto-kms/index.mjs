@@ -10,7 +10,7 @@
 // Inject it:  createRuntime(config, { cryptoProvider: createKmsCryptoProvider({ kms }) })
 // and set keys.provider: "external".
 
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes } from "node:crypto";
 // Import the canonical AAD form from core (resolved via the workspace symlink in
 // dev, the consumer's installed `haechi` in production) so this satellite's AAD
 // is byte-for-byte identical to the core provider's — no drift.
@@ -118,7 +118,11 @@ export function createInMemoryKms({ keyId = "kms-ref-local", masterKey = randomB
       return Buffer.concat([decipher.update(ct), decipher.final()]);
     },
     async deriveHmacKey(domain) {
-      return createHmac("sha256", masterKey).update(`${HMAC_KEY_DOMAIN}:${domain}`).digest();
+      // HKDF-SHA256, domain-separated — identical derivation to the AWS client
+      // (aws.mjs), so the two clients in this package are interchangeable: the
+      // same root + domain yields the same key. (Was HMAC-SHA256; aligned to the
+      // standard KDF for cross-backend parity.)
+      return Buffer.from(hkdfSync("sha256", masterKey, Buffer.alloc(0), `${HMAC_KEY_DOMAIN}:${domain}`, 32));
     }
   };
 }

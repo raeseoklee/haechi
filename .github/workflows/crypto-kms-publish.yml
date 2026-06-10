@@ -1,0 +1,71 @@
+name: Publish @haechi/crypto-kms
+
+# Triggered by publishing a GitHub Release whose tag is `crypto-kms-v<semver>`.
+# Core releases use `v<semver>` and are handled by npm-publish.yml; the `if:`
+# guard below keeps the two from cross-firing.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write       # upload signed artifacts to the GitHub release
+  id-token: write       # OIDC for npm trusted publishing + sigstore attestation
+  attestations: write   # sigstore build-provenance attestation of the tarball
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Only act on this satellite's prefixed tags; never fire for core `v*` tags.
+    if: startsWith(github.event.release.tag_name, 'crypto-kms-v')
+    steps:
+      - name: Validate satellite release tag and version
+        run: |
+          tag='${{ github.event.release.tag_name }}'
+          if [[ ! "$tag" =~ ^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '$tag' is not a crypto-kms-v<semver> tag; refusing to publish"
+            exit 1
+          fi
+      # actions/checkout v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      # actions/setup-node v6.4.0
+      # No registry-url: it writes an .npmrc authToken placeholder that breaks
+      # token-less OIDC publishes when NODE_AUTH_TOKEN is unset.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22.x"
+          package-manager-cache: false
+      # OIDC trusted publishing requires npm >= 11.5.1; Node 22 bundles npm 10.x.
+      - run: npm install -g npm@^11.5.1
+      - run: npm ci
+      # The published version must match the release tag (tag `crypto-kms-v0.1.0`
+      # → package version `0.1.0`), so a mistagged release can't ship.
+      - name: Verify tag matches package version
+        run: |
+          tag='${{ github.event.release.tag_name }}'
+          tag_version="${tag#crypto-kms-v}"
+          pkg_version=$(node -p "require('./satellites/crypto-kms/package.json').version")
+          if [[ "$tag_version" != "$pkg_version" ]]; then
+            echo "::error::tag version '$tag_version' != package version '$pkg_version'"
+            exit 1
+          fi
+      # Full repo gate (tests incl. the satellite's, types, packaging, core pack).
+      - run: npm run release:preflight
+      # Build and attest the satellite tarball BEFORE the irreversible publish.
+      - name: Pack and checksum
+        run: |
+          set -o pipefail
+          TARBALL=$(npm pack -w @haechi/crypto-kms --silent)
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          node scripts/release-checksums.mjs "$TARBALL" | tee SHA256SUMS
+      # Keyless sigstore attestation of the tarball.
+      # actions/attest-build-provenance v2.4.0
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: ${{ env.TARBALL }}
+      # Authenticates via the @haechi/crypto-kms Trusted Publisher link bound to
+      # this repo + workflow filename (no npm token). access:public + provenance.
+      - run: npm publish -w @haechi/crypto-kms --provenance --access public
+      - name: Upload release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "$TARBALL" SHA256SUMS --clobber
