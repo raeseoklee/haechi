@@ -27,6 +27,17 @@ npm run pack:dry                      # npm pack --dry-run (verify published fil
 
 There is **no build step and no lint step** — this is plain ESM (`"type": "module"`) targeting Node `>=22` with **zero runtime dependencies** (only `node:` builtins; `typescript`/`@types/node` are dev-only for LSP and `check:types`). The `node:test` runner is the only test framework. Editor LSP is configured by `jsconfig.json`; `checkJs` is off — opt files in with `// @ts-check`.
 
+## LLM Wiki (`wiki/`)
+
+`wiki/` is an LLM-maintained knowledge base following [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). Three layers: **raw sources** (the code, `docs/current/`, git/PR history — never restate them wholesale), **the wiki** (synthesized pages you own and maintain), and **this schema**.
+
+Operations:
+- **Ingest** — after significant work (a review, a design decision, a release), update the affected pages in one pass: revise content, fix cross-references, add new pages if a concept earned one. Always update `wiki/index.md` (every page must be listed with a one-line summary) and append to `wiki/log.md` (`## [YYYY-MM-DD] operation | Title`).
+- **Query** — when researching project history or rationale, consult `wiki/index.md` first before grepping the codebase.
+- **Lint** — periodically check for contradictions with current code, stale claims, orphaned pages, and missing cross-references.
+
+Conventions: English only (the wiki is working memory, exempt from the `.ko.md` pairing rule); Obsidian-style `[[page-name]]` wikilinks; one concept per page; frontmatter with `updated` and `tags`; cite repo paths and risk IDs rather than duplicating their content; never store secrets, PII, or payload values. The wiki is not published to npm (not in the `files` allowlist).
+
 ## Git workflow
 
 Follow `CONTRIBUTING.md`: branch off `main` with a type prefix (`feature/`, `fix/`, `docs/`, `chore/`, `release/`, `hotfix/`) — never personal-name prefixes. Commits use one-line imperative English subjects; non-trivial changes include Lore-style decision trailers when useful. Do not add attribution or generated-by footers (no `Co-Authored-By`). PRs target `main`, English body with Summary/Verification sections, no generated-with footers. Documentation is English-main with Korean `*.ko.md` siblings — update both.
