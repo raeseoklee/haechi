@@ -12,7 +12,8 @@ Single npm package `haechi` (unscoped), zero runtime dependencies, subpath expor
 ## Satellite package strategy (0.6–0.7)
 
 - Create npm org **`@haechi/*`** (also defends the namespace against squatting — a registered concern in the risk register).
-- Core keeps the unscoped `haechi` name; satellites: `@haechi/dashboard`, `@haechi/auth-oidc`, `@haechi/auth-jwt`, `@haechi/classifier-*`.
+- Core keeps the unscoped `haechi` name; satellites: `@haechi/crypto-kms`, `@haechi/dashboard`, `@haechi/auth-oidc`, `@haechi/auth-jwt`, `@haechi/classifier-*`.
+- **Reference-then-publish:** a satellite ships first as a repo example/source (e.g. `examples/crypto-kms-reference/` in 0.7), then is promoted to a published `@haechi/*` package once the org + workspaces land (0.8). This keeps core zero-dep while the adapter exists and is testable.
 - **Auth: contract in core, implementations as satellites** ([[identity-and-auth]]) — security-critical interfaces must be core-owned.
 - **Dashboard: fully separate.** Read-only consumer of the audit JSONL (reads files directly; no audit query API on the proxy — don't grow its attack surface). UI dependencies must not contaminate core's zero-dep posture. Shows [[audit-integrity]] chain status as a feature.
 - Monorepo conversion to npm workspaces happens when the second package actually ships (0.7), not before.
