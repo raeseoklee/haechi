@@ -4,12 +4,13 @@
 - 작성일: 2026-06-10
 - 기준 버전: 0.3.2
 - 성격: 보안 하드닝 릴리스, 첫 npm developer preview 배포 대상
+- 배포: 2026-06-10 — npm `haechi@0.3.2` (로컬 패스키 publish, provenance 이월), `v0.3.2` 태그, GitHub pre-release
 
 ## 1. 배경
 
 0.3.1 전체 코드 리뷰에서 식별된 16건의 리스크를 해소한 릴리스다. 상세 리스크 목록과 해소 증거는 `risk-register-release-gate.md` 5.2절(P0-SEC-016 ~ P2-DOC-005)을 따른다.
 
-npm에 한 번도 배포된 적이 없으므로 0.3.2가 첫 배포 버전이다. 첫 배포를 기능 릴리스(0.4.0)와 분리해 패키지 이름 소유권 확정과 publish 파이프라인(provenance, GitHub release workflow) 검증을 저위험 릴리스에서 먼저 통과시킨다.
+npm에 한 번도 배포된 적이 없었으므로 0.3.2가 첫 배포 버전이다. 첫 배포를 기능 릴리스(0.4.0)와 분리해 패키지 이름 소유권을 저위험 릴리스에서 확정했고, provenance 기반 GitHub Actions publish 경로는 후속 하드닝 항목으로 이월한다.
 
 ## 2. 변경 요약
 

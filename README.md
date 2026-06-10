@@ -1,5 +1,11 @@
 # Haechi
 
+[![npm](https://img.shields.io/npm/v/haechi)](https://www.npmjs.com/package/haechi)
+[![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
+[![status](https://img.shields.io/badge/status-developer%20preview-orange)](docs/current/risk-register-release-gate.md)
+
 Haechi is an experimental developer preview of a self-hosted AI context enforcement layer for protecting LLM, MCP, vLLM, Ollama, and agent payloads before they reach models, tools, logs, or proxies.
 
 The name comes from Haechi, a Korean guardian figure associated with discernment and protection.
@@ -13,7 +19,22 @@ The current developer-preview scope focuses on local adoption:
 - `haechi report`: summarize audit events without raw payloads
 - `haechi proxy`: run a local HTTP JSON proxy for existing LLM calls
 
+## Install
+
+```bash
+npm install -g haechi
+haechi init
+```
+
+Or run without installing:
+
+```bash
+npx haechi init
+```
+
 ## Quickstart
+
+From a clone of this repository:
 
 ```bash
 npm test

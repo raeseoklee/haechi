@@ -3,17 +3,17 @@
 - Status: Draft 0.3
 - Date: 2026-06-10
 - Target version: 0.3.2
-- Branch: `irae/risk-resolution`
+- Branch: `main`
 
 ## 1. Current Assessment
 
-0.3.2 resolves the additional security and operational risks identified during the full 0.3.1 code review, meeting the bar for developer preview. Publishing to GitHub and distributing on npm as a developer preview are permitted. Actual npm publish must pass the following external operator gates: npm account authentication, package ownership, and successful execution of the GitHub release workflow.
+0.3.2 resolves the additional security and operational risks identified during the full 0.3.1 code review, meeting the bar for developer preview. The external operator gates (npm account authentication, package ownership, GitHub tag/release) were passed on 2026-06-10: `haechi@0.3.2` is published to npm via local passkey authentication, tagged `v0.3.2`, and released as a GitHub pre-release. npm provenance remains deferred to the GitHub Actions trusted publishing path.
 
 | Category | Judgment | Rationale |
 |---|---|---|
 | GitHub public | Allowed | Security limitations, threat model, shared responsibility, and developer preview language are documented |
 | GitHub release/tag | Allowed | Must be presented as developer preview, not production-ready |
-| npm developer preview | Conditionally allowed | Requires passing `npm run release:preflight`, then running `release:preflight:npm` and a provenance publish from an authenticated account |
+| npm developer preview | Allowed (published) | `haechi@0.3.2` published from an authenticated account on 2026-06-10; provenance deferred to trusted publishing |
 | npm stable | On hold | Stable label prohibited until 1.0 API stability, production KMS/HSM/Vault reference adapter, and stream-aware enforcement are in place |
 | Production use | Prohibited | 0.3.2 is a self-hosted developer preview; production auth/authz/key custody is the user's responsibility |
 
@@ -23,14 +23,14 @@
 |---|---|---|---|
 | G0 | GitHub source publication | Tests pass, security limitations documented, no plaintext audit leak | Pass |
 | G1 | GitHub pre-release | P0 code risks resolved, no production-ready language | Pass |
-| G2 | npm developer preview | P0 resolved, preflight/SBOM/provenance paths ready, npm auth confirmed | Conditional Pass |
+| G2 | npm developer preview | P0 resolved, preflight/SBOM/provenance paths ready, npm auth confirmed | Pass (`haechi@0.3.2` published 2026-06-10) |
 | G3 | npm stable | P1 production reference, stream-aware enforcement, API stability hardened | Blocked |
 
 ## 3. P0 Distribution-Blocking Risk Status
 
 | ID | Risk | Status | Resolution evidence |
 |---|---|---|---|
-| P0-REL-001 | npm authentication/authorization unresolved | External Gate | Gated via `release:preflight:npm`, GitHub release workflow, and `npm publish --provenance --access public`. Actual authentication requires an operator |
+| P0-REL-001 | npm authentication/authorization unresolved | Resolved | `haechi@0.3.2` published via local passkey authentication on 2026-06-10; npm authentication and package ownership confirmed |
 | P0-REL-002 | Proxy exposed to external network | Resolved | Non-loopback bind fails by default; `--allow-remote-bind` must be specified explicitly |
 | P0-REL-003 | Streaming request handling unclear | Resolved | `stream: true` defaults to 501 fail-closed; `streaming.requestMode: "pass-through"` must be set explicitly |
 | P0-REL-004 | `responseProtection` failure mode unclear | Resolved | Non-JSON, invalid JSON, compressed, and oversized responses are fail-closed; explicit allow policies are separated |
@@ -58,7 +58,7 @@
 | P1-OPS-002 | No SBOM/provenance | Resolved | `npm run sbom`, `.github/workflows/npm-publish.yml`, `publishConfig.provenance` |
 | P1-OPS-003 | No real vLLM/Ollama/llama.cpp integration tests | Resolved for preview | Env-gated optional local inference integration tests added. CI skips when no external model server is present |
 | P1-OPS-004 | Performance/large payload not measured | Resolved for preview | Request/response byte limits, `npm run bench:payload` |
-| P1-OPS-005 | npm ownership unconfirmed | External Gate | `npm run release:preflight:npm` from an authenticated npm account required; post-publish `npm view haechi version` needed |
+| P1-OPS-005 | npm ownership unconfirmed | Resolved | `npm view haechi version` returns `0.3.2`; ownership confirmed by the first successful publish |
 
 ## 5.1 Additional Security Review Risk Resolution Status
 
@@ -107,12 +107,12 @@ Base64/encoded-value decode inspection, query-string inspection, and audit tail 
 
 ## 7. npm Developer Preview Pre-Distribution Checklist
 
-Current external npm gate check results:
+External npm gate check results (2026-06-10, post-publish):
 
 - `npm whoami`: `raeseoklee`
-- `npm view haechi version`: `E404 Not Found`
+- `npm view haechi version`: `0.3.2`
 
-The `haechi` name appears to be available, but package ownership is confirmed only after the first successful publish from an authenticated account. `release:preflight:npm` verifies authentication and blocks duplicate publish of `haechi@<current version>`; E404 before the first publish is treated as a passing condition.
+All checklist items below were completed for 0.3.2 on 2026-06-10 except the provenance publish path, which is deferred to GitHub Actions trusted publishing (`v0.3.2` tag and GitHub pre-release were completed). The checklist remains the template for future releases.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
