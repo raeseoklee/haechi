@@ -48,7 +48,7 @@ const PRESETS = {
 };
 
 const VALID_ACTIONS = new Set(["allow", "redact", "mask", "tokenize", "encrypt", "block"]);
-const ACTION_STRENGTH = {
+export const ACTION_STRENGTH = {
   allow: 0,
   redact: 1,
   mask: 1,

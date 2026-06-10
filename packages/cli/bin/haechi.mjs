@@ -87,18 +87,25 @@ async function protectCommand(argv) {
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
   const input = JSON.parse(await readFile(inputPath, "utf8"));
+  const effectiveMode = config.policy.mode ?? config.mode;
   const result = await runtime.haechi.protectJson(input, {
     protocol: config.target.type,
     operation: "cli protect",
-    mode: config.policy.mode ?? config.mode
+    mode: effectiveMode
   });
 
+  const enforced = !["dry-run", "report-only"].includes(effectiveMode);
   writeJson({
     ok: !result.blocked,
+    mode: effectiveMode,
+    enforced,
     blocked: result.blocked,
     auditId: result.auditEvent.id,
     summary: result.summary,
-    payload: result.payload
+    payload: result.payload,
+    warnings: enforced ? [] : [
+      `policy mode is ${effectiveMode}: detections were audited but the payload was NOT modified or blocked. Set policy.mode to "enforce" to protect payloads.`
+    ]
   });
 
   if (result.blocked) {
@@ -126,11 +133,18 @@ async function proxyCommand(argv) {
   const proxy = createHaechiProxy({ runtime, port, host, allowRemoteBind });
   const address = await proxy.listen();
 
+  const effectiveMode = config.policy.mode ?? config.mode;
   console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
   console.log(`Upstream: ${config.target.upstream}`);
-  console.log(`Mode: ${config.policy.mode ?? config.mode}`);
+  console.log(`Mode: ${effectiveMode}`);
   if (allowRemoteBind) {
     console.error("warning: --allow-remote-bind exposes the proxy beyond loopback. Put Haechi behind explicit network access controls.");
+  }
+  if (effectiveMode !== "enforce") {
+    console.error(`warning: policy mode is ${effectiveMode}. Payloads are inspected and audited but NOT modified or blocked. Set policy.mode to "enforce" to protect traffic.`);
+  }
+  if (!config.responseProtection.enabled) {
+    console.error("warning: responseProtection.enabled is false. Upstream responses are forwarded without inspection.");
   }
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -202,11 +216,26 @@ async function tokenRevealCommand(argv) {
 }
 
 async function tokenPurgeCommand(argv) {
-  const [token, ...rest] = argv;
-  if (!token || token.startsWith("--")) {
-    throw new Error("token-purge requires a token");
+  const options = parseOptions(argv);
+
+  if (options.expired) {
+    const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
+    const runtime = createRuntime(config);
+    if (typeof runtime.tokenVault.purgeExpired !== "function") {
+      throw new Error("Configured token vault provider does not support purgeExpired");
+    }
+    writeJson({
+      ok: true,
+      command: "token-purge",
+      result: await runtime.tokenVault.purgeExpired()
+    });
+    return;
   }
-  const options = parseOptions(rest);
+
+  const [token] = argv;
+  if (!token || token.startsWith("--")) {
+    throw new Error("token-purge requires a token or --expired");
+  }
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
   writeJson({
@@ -288,6 +317,7 @@ Usage:
   haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
   haechi token-reveal <token> [--config haechi.config.json] [--allow-dev-reveal]
   haechi token-purge <token> [--config haechi.config.json]
+  haechi token-purge --expired [--config haechi.config.json]
   haechi token-export [--config haechi.config.json] [--type email]
   haechi plugin-validate <plugin-manifest.json>
   haechi mcp-stdio [--config haechi.config.json]

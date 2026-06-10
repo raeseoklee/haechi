@@ -33,12 +33,17 @@ const ADAPTERS = {
     id: "ollama",
     protocol: "ollama",
     routes: [
-      route("/api/chat", "chat"),
-      route("/api/generate", "generate"),
+      // Ollama streams /api/chat and /api/generate unless the request sets stream:false.
+      route("/api/chat", "chat", { streamingDefault: true }),
+      route("/api/generate", "generate", { streamingDefault: true }),
       route("/api/embed", "embed"),
       route("/api/embeddings", "embeddings")
     ]
   }
+};
+
+const TARGET_TYPE_ALIASES = {
+  "llm-http": "openai-compatible"
 };
 
 export function createProtocolAdapter(target = {}) {
@@ -65,7 +70,8 @@ export function createProtocolAdapter(target = {}) {
         path: pathname,
         operation,
         protectRequest: matched?.protectRequest ?? true,
-        protectResponse: matched?.protectResponse ?? true
+        protectResponse: matched?.protectResponse ?? true,
+        streamingByDefault: matched?.streamingDefault ?? false
       };
     }
   };
@@ -79,7 +85,10 @@ function adapterFromTargetType(type = "llm-http") {
   if (ADAPTERS[type]) {
     return type;
   }
-  return "openai-compatible";
+  if (TARGET_TYPE_ALIASES[type]) {
+    return TARGET_TYPE_ALIASES[type];
+  }
+  throw new Error(`Unknown target.type: ${type}. Known types: ${["llm-http", ...Object.keys(ADAPTERS)].join(", ")}`);
 }
 
 function route(path, operation, options = {}) {
@@ -88,7 +97,8 @@ function route(path, operation, options = {}) {
     path,
     operation,
     protectRequest: options.protectRequest ?? true,
-    protectResponse: options.protectResponse ?? true
+    protectResponse: options.protectResponse ?? true,
+    streamingDefault: options.streamingDefault ?? false
   };
 }
 

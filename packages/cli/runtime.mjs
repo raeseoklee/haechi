@@ -32,7 +32,8 @@ export function defaultConfig() {
       requestMode: "block"
     },
     limits: {
-      maxRequestBytes: 1048576
+      maxRequestBytes: 1048576,
+      upstreamTimeoutMs: 120000
     },
     policy: {
       mode: "dry-run",
@@ -100,11 +101,14 @@ export function createRuntime(config, providers = {}) {
   const normalized = normalizeConfig(config);
   const cryptoProvider = providers.cryptoProvider ?? createConfiguredCryptoProvider(normalized);
   assertProvider("cryptoProvider", cryptoProvider, ["encrypt", "decrypt"]);
+  const auditSink = providers.auditSink ?? createJsonlAuditSink({ path: normalized.audit.path });
+  assertProvider("auditSink", auditSink, ["record"]);
   const tokenVault = providers.tokenVault ?? createLocalTokenVault({
     path: normalized.tokenVault.path,
     cryptoProvider,
     revealPolicy: normalized.tokenVault.revealPolicy,
-    retentionDays: normalized.tokenVault.retentionDays
+    retentionDays: normalized.tokenVault.retentionDays,
+    auditSink
   });
   assertProvider("tokenVault", tokenVault, ["tokenize", "reveal", "purge"]);
   const policySource = normalized.policy.bundlePath
@@ -127,12 +131,11 @@ export function createRuntime(config, providers = {}) {
   assertProvider("filterEngine", filterEngine, ["detect"]);
   const policyEngine = providers.policyEngine ?? createPolicyEngine(policy);
   assertProvider("policyEngine", policyEngine, ["decide"]);
-  const auditSink = providers.auditSink ?? createJsonlAuditSink({ path: normalized.audit.path });
-  assertProvider("auditSink", auditSink, ["record"]);
 
   return {
     config: normalized,
     tokenVault,
+    auditSink,
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
@@ -218,6 +221,9 @@ export function normalizeConfig(config) {
   if (!Array.isArray(merged.mcp.allowedMethods) || merged.mcp.allowedMethods.length === 0) {
     throw new Error("mcp.allowedMethods must be a non-empty array");
   }
+  if (!merged.mcp.allowedMethods.every((method) => typeof method === "string" && method.trim())) {
+    throw new Error("mcp.allowedMethods must contain only non-empty strings");
+  }
   if (typeof merged.mcp.protectParams !== "boolean" || typeof merged.mcp.protectResults !== "boolean") {
     throw new Error("mcp.protectParams and mcp.protectResults must be boolean");
   }
@@ -238,6 +244,9 @@ export function normalizeConfig(config) {
   }
   if (typeof merged.limits.maxRequestBytes !== "number" || merged.limits.maxRequestBytes < 1) {
     throw new Error("limits.maxRequestBytes must be a positive number");
+  }
+  if (typeof merged.limits.upstreamTimeoutMs !== "number" || merged.limits.upstreamTimeoutMs < 1) {
+    throw new Error("limits.upstreamTimeoutMs must be a positive number");
   }
   createProtocolAdapter(merged.target);
   return merged;

@@ -17,7 +17,8 @@
     "requestMode": "block"
   },
   "limits": {
-    "maxRequestBytes": 1048576
+    "maxRequestBytes": 1048576,
+    "upstreamTimeoutMs": 120000
   },
   "policy": {
     "mode": "dry-run",

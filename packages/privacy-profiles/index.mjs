@@ -1,3 +1,5 @@
+import { ACTION_STRENGTH } from "../policy/index.mjs";
+
 const PROFILES = {
   "kr-pipa": {
     id: "kr-pipa",
@@ -71,12 +73,20 @@ export function getPrivacyProfile(id) {
 
 export function applyPrivacyProfile(policy = {}, profileId) {
   const profile = getPrivacyProfile(profileId);
+  const actions = { ...(policy.actions ?? {}) };
+
+  // Profiles are baseline defaults: they may strengthen an action but must
+  // never silently weaken an explicitly stricter user setting.
+  for (const [type, action] of Object.entries(profile.policy.actions)) {
+    const existing = actions[type];
+    if (!existing || ACTION_STRENGTH[action] > ACTION_STRENGTH[existing]) {
+      actions[type] = action;
+    }
+  }
+
   return {
     ...policy,
     privacyProfile: profile.id,
-    actions: {
-      ...(policy.actions ?? {}),
-      ...profile.policy.actions
-    }
+    actions
   };
 }

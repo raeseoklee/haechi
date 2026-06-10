@@ -38,6 +38,10 @@ The proxy binds to loopback by default. Binding to `0.0.0.0`, `::`, or another n
 
 Streaming requests with `stream: true` are blocked by default. Haechi 0.3.x does not inspect SSE or NDJSON streams. Set `streaming.requestMode` to `pass-through` only when the caller explicitly accepts that streaming payloads are not protected by Haechi.
 
+Ollama `/api/chat` and `/api/generate` stream by default when the `stream` field is omitted, so the proxy treats those requests as streaming unless `stream: false` is explicitly set.
+
+Upstream requests time out after `limits.upstreamTimeoutMs` (default 120000) and fail with `504 haechi_upstream_timeout`.
+
 ## Local Inference Servers
 
 Haechi 0.3 includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ollama, and llama.cpp.
@@ -79,6 +83,10 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 - Audit events must not contain raw prompt, tool result, secret, or PII values.
 - Unknown or invalid policy/config errors should fail closed in enforcement paths.
 - Response protection fails closed for non-JSON, invalid JSON, compressed, or oversized responses unless an explicit allow policy is configured.
+- Token reveal and purge decisions are written to the audit log (token ids and decisions only, never plaintext). Expired tokens are removed on vault mutations or via `haechi token-purge --expired`.
+- `haechi init --force` rotates the local key: prior keys are kept as `retired` so existing envelopes and token vault records stay decryptable by `kid`.
+- Privacy profiles can strengthen but never weaken an explicitly stricter user action.
+- Detection scans string values, JSON numbers (e.g. card numbers), and object key names. Base64/URL-encoded values and URL query strings are NOT inspected.
 - The package is a developer preview. Do not expose it as an internet-facing production LLM gateway.
 
 ## Current Scope

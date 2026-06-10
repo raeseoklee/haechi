@@ -60,6 +60,42 @@
 | P1-OPS-004 | 성능/대용량 payload 미측정 | Resolved for preview | request/response byte limit, `npm run bench:payload` |
 | P1-OPS-005 | npm ownership 미확정 | External Gate | 인증된 npm 계정에서 `npm run release:preflight:npm`, publish 후 `npm view haechi version` 필요 |
 
+## 5.1 추가 보안 검토 리스크 해소 상태
+
+| ID | 추가 검출 리스크 | 상태 | 해소 증거 |
+|---|---|---|---|
+| P1-SEC-009 | proxy absolute-form request target으로 upstream 우회/SSRF 가능 | Resolved | absolute/protocol-relative request target을 `haechi_invalid_proxy_target`으로 거부하고, upstream URL은 path/search만 고정 upstream에 결합 |
+| P1-SEC-010 | `responseProtection.maxBytes`가 full buffer 이후 검사되어 메모리 DoS 가능 | Resolved | upstream body를 stream reader로 제한 읽기하고 초과 즉시 cancel/fail-closed. `failureMode: "allow"`도 hard byte cap은 우회 불가 |
+| P1-SEC-011 | audit hash chain이 동시 기록에서 sequence/previousHash 충돌 가능 | Resolved | JSONL audit sink 단위 write queue와 lock file로 hash-chain record build와 append를 직렬화 |
+| P1-SEC-012 | JSON object key에 포함된 PII/secret이 audit path 또는 token metadata에 노출 가능 | Resolved | detection `pathText`를 raw key 대신 `key_<hash>` 구조 path로 기록 |
+| P1-SEC-013 | local TokenVault 동시 tokenization/purge에서 update lost 가능 | Resolved | vault mutation queue, lock file, temp-file 후 rename 방식의 atomic write 적용 |
+| P1-SEC-014 | `streaming.requestMode: "pass-through"` 및 `responseProtection.failureMode: "allow"` 우회 결정 audit 부재 | Resolved | raw payload 없이 `streaming_request_pass_through`, `response_unprotected_allowed/blocked` decision audit 기록 |
+| P1-SEC-015 | MCP `allowedMethods` 원소 타입 검증 부족 | Resolved | non-empty string만 허용하도록 config validation 강화 |
+| P1-OPS-006 | GitHub Actions major tag pinning으로 supply-chain drift 가능 | Resolved | `checkout`, `setup-node`, `upload-artifact`를 확인된 commit SHA로 고정 |
+
+## 5.2 2차 전체 코드 리뷰 리스크 해소 상태
+
+| ID | 검출 리스크 | 상태 | 해소 증거 |
+|---|---|---|---|
+| P0-SEC-016 | Ollama `/api/chat`·`/api/generate`는 `stream` 생략 시 기본 streaming이라 streaming 차단 우회 가능 | Resolved | protocol adapter에 `streamingDefault` 도입, `stream: false` 명시 없으면 streaming으로 간주해 기본 501 fail-closed |
+| P1-SEC-017 | token reveal/purge가 audit 미기록 | Resolved | local TokenVault에 auditSink 주입, `reveal_allowed/denied/failed`, `purge`, `purge_expired` decision audit (plaintext 비포함) |
+| P1-SEC-018 | privacy profile이 사용자 명시 정책을 조용히 약화 가능 | Resolved | `applyPrivacyProfile`이 ACTION_STRENGTH 비교로 강화만 허용 |
+| P1-SEC-019 | decrypt가 envelope `kid` 무시, `init --force` 시 기존 키 파기로 vault/암호문 영구 손실 | Resolved | kid 기반 키 선택, `--force`는 기존 키를 `retired`로 보존하는 rotation으로 변경 |
+| P1-SEC-020 | policy bundle 서명이 AES 암호화 키를 HMAC 키로 재사용 (key separation 위반) | Resolved | `haechi:policy-bundle:signing:v1` domain-separated 파생 서명 키 적용 |
+| P1-SEC-021 | `retentionDays`가 reveal만 차단하고 만료 데이터 미삭제 | Resolved | vault mutation 시 만료 토큰 자동 prune, `purgeExpired()` 및 `haechi token-purge --expired` 추가 |
+| P1-SEC-022 | upstream fetch 타임아웃 부재로 연결 고갈 가능 | Resolved | `limits.upstreamTimeoutMs`(기본 120000) + `504 haechi_upstream_timeout` |
+| P1-SEC-023 | JSON number(카드번호)와 object key 내 PII/secret 미탐지 전달 | Resolved | number leaf와 object key를 detection/transform 대상에 포함 (key는 enforce 시 rename) |
+| P1-OPS-007 | stale lock file 잔존 시 audit/vault 기록 영구 실패 | Resolved | 30초 초과 stale lock 자동 탈취 후 재획득 |
+| P1-OPS-008 | audit append가 매 기록마다 전체 파일 재읽기 (O(n²)) | Resolved | 파일 tail-chunk 읽기로 O(1) append |
+| P2-SEC-024 | unknown `target.type`이 openai-compatible로 silent fallback | Resolved | 알 수 없는 type은 config 검증 단계에서 fail-closed |
+| P2-SEC-025 | 짧은 값 mask 시 대부분 노출 (5자 중 4자) | Resolved | 8자 이하 전체 마스킹 |
+| P2-SEC-026 | assignment-secret redaction이 key 이름까지 제거 | Resolved | lookbehind 패턴으로 secret 값만 치환 |
+| P2-SEC-027 | MCP notification에 JSON-RPC 스펙 위반 error 응답, batch 비명시 처리 | Resolved | notification은 drop, batch는 명시적 fail-closed 거부 |
+| P2-SEC-028 | proxy 내부 오류 메시지가 클라이언트에 노출 | Resolved | 예기치 못한 오류는 일반화된 메시지 반환, 상세는 stderr |
+| P2-DOC-005 | dry-run + responseProtection off 기본값에서 "보호 중" 오인 가능 | Resolved | proxy 기동/`protect` 출력에 비집행 경고 명시 |
+
+base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncation 탐지는 명시적 제외로 threat model에 문서화했다 (0.4+ backlog).
+
 ## 6. P2 제품/문서 리스크 상태
 
 | ID | 기존 리스크 | 상태 | 해소 증거 |

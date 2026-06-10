@@ -46,7 +46,9 @@ const DEFAULT_RULES = [
   {
     id: "assignment-secret",
     type: "secret",
-    pattern: "\\b(?:api[_-]?key|secret|token|password)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9._~+/-]{12,}",
+    // Lookbehind keeps the key name out of the match so transforms replace
+    // only the secret value, not the assignment prefix.
+    pattern: "(?<=\\b(?:api[_-]?key|secret|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
     flags: "gi",
     confidence: 0.85
   }
@@ -83,6 +85,7 @@ export function detectEntry(entry, rules) {
         ruleId: rule.id,
         path: entry.path,
         pathText: entry.pathText,
+        kind: entry.kind ?? "value",
         start: match.index,
         end: match.index + value.length,
         confidence: rule.confidence,

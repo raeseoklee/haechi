@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
-import { createRuntime } from "../packages/cli/runtime.mjs";
+import { createRuntime, normalizeConfig } from "../packages/cli/runtime.mjs";
 import { protectMcpJsonRpcMessage } from "../packages/mcp-stdio/index.mjs";
 
 test("MCP stdio JSON-RPC params are protected", async () => {
@@ -59,4 +59,15 @@ test("MCP stdio rejects methods outside allowlist", async () => {
   }, runtime);
 
   assert.equal(message.error.message, "haechi_mcp_method_not_allowed");
+});
+
+test("MCP allowedMethods must contain only method strings", () => {
+  assert.throws(
+    () => normalizeConfig({
+      mcp: {
+        allowedMethods: ["tools/call", 7]
+      }
+    }),
+    /mcp.allowedMethods/
+  );
 });
