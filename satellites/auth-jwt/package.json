@@ -1,0 +1,48 @@
+{
+  "name": "@haechi/auth-jwt",
+  "version": "0.1.0",
+  "description": "Headless JWKS bearer (JWT) authProvider satellite for Haechi — node: builtins only, PII-safe identity.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raeseoklee/haechi.git",
+    "directory": "satellites/auth-jwt"
+  },
+  "homepage": "https://github.com/raeseoklee/haechi/tree/main/satellites/auth-jwt#readme",
+  "bugs": {
+    "url": "https://github.com/raeseoklee/haechi/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "haechi",
+    "jwt",
+    "jwks",
+    "auth-provider",
+    "bearer",
+    "oidc"
+  ],
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "haechi": ">=0.8.0 <1.0.0"
+  },
+  "devDependencies": {
+    "haechi": "*"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

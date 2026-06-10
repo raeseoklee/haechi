@@ -117,6 +117,51 @@ export async function buildIdentity(record, cryptoProvider) {
   };
 }
 
+// PII-safe identity builder for EXTERNAL auth providers (e.g. the @haechi/auth-jwt
+// satellite). Core owns identity construction so the keyed-HMAC domain and the
+// identity shape stay authoritative here — a satellite supplies raw claims and
+// never sees or stores the IDENTITY_DOMAIN. subject/issuer become keyed HMACs;
+// the raw values are never returned. Throws (fail-closed) on a missing
+// cryptoProvider.hmac, an empty subject/issuer, an invalid type, bad scopes, or
+// a disallowed label.
+export async function buildExternalIdentity(
+  { provider, subject, issuer, type = "user", scopes = [], labels = {}, allowedLabelKeys = DEFAULT_ALLOWED_LABEL_KEYS },
+  cryptoProvider
+) {
+  if (typeof cryptoProvider?.hmac !== "function") {
+    throw new Error("buildExternalIdentity requires a cryptoProvider with hmac()");
+  }
+  if (!provider || typeof provider !== "string") {
+    throw new Error("identity requires a non-empty provider string");
+  }
+  if (!subject || typeof subject !== "string") {
+    throw new Error("identity requires a non-empty subject");
+  }
+  if (!issuer || typeof issuer !== "string") {
+    throw new Error("identity requires a non-empty issuer");
+  }
+  if (!VALID_IDENTITY_TYPES.has(type)) {
+    throw new Error(`Invalid identity type: ${type} (expected user | service | agent)`);
+  }
+  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string" && scope.trim())) {
+    throw new Error("scopes must be an array of non-empty strings");
+  }
+  validateLabels(labels, allowedLabelKeys);
+
+  const subjectHash = await cryptoProvider.hmac({ data: subject, domain: IDENTITY_DOMAIN });
+  const issuerHash = await cryptoProvider.hmac({ data: issuer, domain: IDENTITY_DOMAIN });
+  return {
+    // Non-PII, stable per subject: derived from the keyed subject hash.
+    id: `${provider}:${subjectHash.slice(0, 16)}`,
+    type,
+    subjectHash,
+    issuerHash,
+    provider,
+    scopes,
+    labels
+  };
+}
+
 function bearerTokenFromRequest(request) {
   const header = request?.headers?.authorization ?? request?.headers?.Authorization;
   if (typeof header !== "string") {

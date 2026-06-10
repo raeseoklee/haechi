@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRuntime, normalizeConfig } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile, createLocalCryptoProvider } from "../packages/crypto/index.mjs";
-import { addToken, createBearerAuthProvider, buildIdentity, readAuthStore } from "../packages/auth/index.mjs";
+import { addToken, createBearerAuthProvider, buildIdentity, buildExternalIdentity, readAuthStore } from "../packages/auth/index.mjs";
 
 const CLI = fileURLToPath(new URL("../packages/cli/bin/haechi.mjs", import.meta.url));
 
@@ -150,4 +150,38 @@ test("auth CLI add/list/revoke round-trips without leaking the token", async () 
   // The store file never contains the plaintext token.
   const raw = await readFile(join(dir, ".haechi", "auth.json"), "utf8");
   assert.doesNotMatch(raw, new RegExp(add.json.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("buildExternalIdentity is PII-safe and fails closed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-extid-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const cryptoProvider = createLocalCryptoProvider({ keyFile });
+
+  const id = await buildExternalIdentity(
+    { provider: "jwt", subject: "user-42", issuer: "https://idp.example.com", type: "service", scopes: ["read"], labels: { team: "core" } },
+    cryptoProvider
+  );
+  assert.equal(id.provider, "jwt");
+  assert.equal(id.type, "service");
+  assert.match(id.subjectHash, /^[a-f0-9]{64}$/);
+  assert.match(id.issuerHash, /^[a-f0-9]{64}$/);
+  assert.ok(id.id.startsWith("jwt:"));
+  // no raw subject/issuer anywhere in the identity
+  const s = JSON.stringify(id);
+  assert.doesNotMatch(s, /user-42/);
+  assert.doesNotMatch(s, /idp\.example\.com/);
+  // same subject is stable; different subject differs
+  const id2 = await buildExternalIdentity({ provider: "jwt", subject: "user-42", issuer: "https://idp.example.com" }, cryptoProvider);
+  const id3 = await buildExternalIdentity({ provider: "jwt", subject: "other", issuer: "https://idp.example.com" }, cryptoProvider);
+  assert.equal(id.subjectHash, id2.subjectHash);
+  assert.notEqual(id.subjectHash, id3.subjectHash);
+
+  // fail closed: missing hmac, empty subject/issuer, bad type, bad scopes, disallowed label
+  await assert.rejects(() => buildExternalIdentity({ provider: "jwt", subject: "s", issuer: "i" }, {}), /hmac/);
+  await assert.rejects(() => buildExternalIdentity({ provider: "jwt", subject: "", issuer: "i" }, cryptoProvider), /subject/);
+  await assert.rejects(() => buildExternalIdentity({ provider: "jwt", subject: "s", issuer: "" }, cryptoProvider), /issuer/);
+  await assert.rejects(() => buildExternalIdentity({ provider: "jwt", subject: "s", issuer: "i", type: "root" }, cryptoProvider), /type/);
+  await assert.rejects(() => buildExternalIdentity({ provider: "jwt", subject: "s", issuer: "i", scopes: [1] }, cryptoProvider), /scopes/);
+  await assert.rejects(() => buildExternalIdentity({ provider: "jwt", subject: "s", issuer: "i", labels: { secret: "x" } }, cryptoProvider), /Label key/);
 });

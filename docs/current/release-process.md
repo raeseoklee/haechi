@@ -68,6 +68,7 @@ npm audit signatures
 | `.github/workflows/ci.yml` | — | any push/PR | Tests, release preflight, SBOM artifact |
 | `.github/workflows/npm-publish.yml` | `haechi` | `v<semver>` | npm provenance publish + checksummed/attested release assets |
 | `.github/workflows/crypto-kms-publish.yml` | `@haechi/crypto-kms` | `crypto-kms-v<semver>` | satellite publish, same signed-artifacts path |
+| `.github/workflows/auth-jwt-publish.yml` | `@haechi/auth-jwt` | `auth-jwt-v<semver>` | satellite publish, same signed-artifacts path |
 
 Each publish workflow triggers on `release: published` but is **guarded** so the two never cross-fire: the core job runs only for tags starting `v` (and re-validates `^v[0-9]+\.[0-9]+\.[0-9]+$`); the satellite job runs only for `crypto-kms-v…` (and re-validates `^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$` **and** that the tag version equals the satellite's `package.json` version). The npmjs.com Trusted Publisher for each package is bound to its **specific workflow filename** — renaming a workflow file breaks its OIDC publish until the npm config is updated.
 
@@ -89,6 +90,7 @@ Steps 2–3 require org-owner access from step 1. No manual `npm publish` from a
 | Package | Tag pattern | Workflow file | npm version source |
 |---|---|---|---|
 | `@haechi/crypto-kms` | `crypto-kms-v<semver>` | `crypto-kms-publish.yml` | `satellites/crypto-kms/package.json` |
+| `@haechi/auth-jwt` | `auth-jwt-v<semver>` | `auth-jwt-publish.yml` | `satellites/auth-jwt/package.json` |
 
 **Verify a satellite release** (same anchors as core):
 
