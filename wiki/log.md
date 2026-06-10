@@ -13,3 +13,7 @@ Corrected `[[packaging-and-distribution]]` to record that `haechi@0.3.2` was pub
 ## [2026-06-10] lint | Sweep remaining provenance claims and record the trusted-publishing gate
 
 Fixed `[[release-roadmap]]` ("validate provenance publish" → local passkey, `--provenance=false`) and rewrote `docs/current/release-process.md` §2 (EN/KO) to document the actual state, the npmjs.com Trusted Publisher + workflow runbook, and a new deployment block condition: no npm publish without trusted publishing configured or an explicit provenance-gap note in the release notes.
+
+## [2026-06-10] ingest | Trusted publishing configured
+
+Maintainer linked the npm Trusted Publisher for `raeseoklee/haechi` + `npm-publish.yml`; the workflow now authenticates via OIDC (no `NODE_AUTH_TOKEN`, no `registry-url` npmrc placeholder, npm CLI `>= 11.5.1` in the runner). Runbook steps 1–2 complete; step 3 (attestation verification) waits for the next release. Updated `[[release-roadmap]]` and `release-process.md` §2 accordingly.

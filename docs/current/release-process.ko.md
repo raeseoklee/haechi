@@ -24,11 +24,11 @@ npm run release:preflight:npm
 
 의도된 publish 경로는 GitHub Actions trusted publishing이다: npm이 release workflow를 OIDC로 인증하고 provenance 증명을 자동 생성한다. 공식 npm 요구사항에 따라 GitHub-hosted runner, `id-token: write`, 연결된 workflow에서의 publish가 필요하다.
 
-**현재 상태: trusted publishing은 아직 구성되지 않았다.** `haechi@0.3.2`는 로컬 머신에서 패스키 인증과 `--provenance=false`로 배포되어 해당 버전의 provenance 증명이 존재하지 않는다. 다음 npm publish 전에 이 갭을 닫아야 한다.
+**현재 상태: trusted publishing 구성 완료, 첫 증명 릴리스 대기.** `haechi@0.3.2`는 로컬 머신에서 패스키 인증과 `--provenance=false`로 배포되어 해당 버전의 provenance 증명이 존재하지 않는다. 활성화 runbook과 진행 상태:
 
-1. npmjs.com에서: package settings → Trusted Publisher → `raeseoklee/haechi` 저장소와 `npm-publish.yml` workflow 연결.
-2. `.github/workflows/npm-publish.yml`을 OIDC 인증으로 변경 (`NODE_AUTH_TOKEN` secret 제거, runner의 npm CLI가 trusted publishing을 지원하는 버전인지 확인).
-3. 다음 릴리스 후 `npm view haechi --json`(`dist.attestations`)으로 증명을 확인.
+1. ✅ npmjs.com에서: package settings → Trusted Publisher → `raeseoklee/haechi` 저장소와 `npm-publish.yml` workflow 연결 (2026-06-10).
+2. ✅ `.github/workflows/npm-publish.yml` OIDC 인증 전환 (2026-06-10): `NODE_AUTH_TOKEN`과 `registry-url` 제거, runner의 npm CLI를 `>= 11.5.1`로 업그레이드.
+3. ⏳ 다음 릴리스 후 `npm view haechi --json`(`dist.attestations`)으로 증명을 확인. OIDC 경로는 아직 실제 publish를 수행한 적이 없으며, 잘못 구성된 경우 publish 시점에 fail-closed로 실패한다.
 
 provenance 없이 수행한 publish는 release note에 갭을 명시적으로 기록해야 한다(`CONTRIBUTING.md` 참조).
 

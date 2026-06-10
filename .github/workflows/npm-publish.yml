@@ -15,13 +15,16 @@ jobs:
       # actions/checkout v6
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       # actions/setup-node v6.4.0
+      # No registry-url: it writes an .npmrc authToken placeholder that breaks
+      # token-less OIDC publishes when NODE_AUTH_TOKEN is unset.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "22.x"
-          registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
+      # OIDC trusted publishing requires npm >= 11.5.1; Node 22 bundles npm 10.x.
+      - run: npm install -g npm@^11.5.1
       - run: npm ci
       - run: npm run release:preflight
+      # Authenticates via the npmjs.com Trusted Publisher link for this repo and
+      # workflow (no npm token). Fails closed if the OIDC exchange is unavailable.
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
