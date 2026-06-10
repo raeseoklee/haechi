@@ -13,9 +13,9 @@ JSONL sink (`packages/audit/index.mjs`) with three guarantees and one documented
 2. **Tamper evidence.** Each record embeds `auditIntegrity` (sequence, previousHash, eventHash over canonicalized JSON) — a SHA-256 hash chain verifiable with `verifyAuditChain()` (detects modification, reordering, sequence gaps). A `haechi audit-verify` CLI is planned for 0.4.
 3. **Concurrent safety.** Per-sink write queue + lock file serialize chain building; appends read only the file tail (O(1), P1-OPS-008); stale locks are stolen after 30s.
 
-## Known limitation: tail truncation
+## Tail truncation (mitigated in 0.7)
 
-Deleting the last N records is undetectable from the file alone — the shortened chain still verifies. Documented in `threat-model.md` §4. Mitigation path: anchor the chain head hash externally (`audit-verify` outputs it; periodic anchoring is 0.6+ [[release-roadmap]]).
+Deleting the last N records is undetectable from the chain alone — the shortened chain still verifies. **0.7 closes this** with built-in head-hash anchoring (`audit.anchor.mode: file|stdout`): each record's chain head is appended to a separate append-only stream, and `verifyAuditChain(path, { anchorPath })` flags a chain shorter than the last anchor as truncated. Bounded: detection reaches back only to the last anchor (one record with `everyRecords: 1`). Design: `release-0.7-implementation-scope.md`.
 
 ## Event vocabulary
 
