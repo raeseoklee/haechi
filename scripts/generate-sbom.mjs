@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 
-const result = spawnSync("npm", ["sbom", "--sbom-format", "cyclonedx"], {
+const result = spawnSync("npm", ["sbom", "--sbom-format", "cyclonedx", "--omit", "dev"], {
   encoding: "utf8"
 });
 

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const requireNpmAuth = process.argv.includes("--require-npm-auth");
 const checks = [
   ["npm", ["test"]],
+  ["npm", ["run", "check:types"]],
   ["npm", ["run", "scan:stale-names"]],
   ["npm", ["pack", "--dry-run"]]
 ];
