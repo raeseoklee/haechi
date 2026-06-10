@@ -9,7 +9,26 @@
     "noEmit": true,
     "strict": false,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "haechi": ["./packages/core/index.mjs"],
+      "haechi/audit": ["./packages/audit/index.mjs"],
+      "haechi/core": ["./packages/core/index.mjs"],
+      "haechi/crypto": ["./packages/crypto/index.mjs"],
+      "haechi/filter": ["./packages/filter/index.mjs"],
+      "haechi/mcp-stdio": ["./packages/mcp-stdio/index.mjs"],
+      "haechi/plugin": ["./packages/plugin/index.mjs"],
+      "haechi/policy": ["./packages/policy/index.mjs"],
+      "haechi/policy-bundle": ["./packages/policy-bundle/index.mjs"],
+      "haechi/privacy-profiles": ["./packages/privacy-profiles/index.mjs"],
+      "haechi/protocol-adapters": ["./packages/protocol-adapters/index.mjs"],
+      "haechi/proxy": ["./packages/proxy/index.mjs"],
+      "haechi/runtime": ["./packages/cli/runtime.mjs"],
+      "haechi/token-vault": ["./packages/token-vault/index.mjs"],
+      "haechi/stream-filter": ["./packages/stream-filter/index.mjs"],
+      "haechi/auth": ["./packages/auth/index.mjs"]
+    }
   },
-  "include": ["packages/**/*.mjs", "scripts/**/*.mjs", "tests/**/*.mjs"]
+  "include": ["packages/**/*.mjs", "scripts/**/*.mjs", "tests/**/*.mjs", "satellites/**/*.mjs"]
 }

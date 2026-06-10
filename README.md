@@ -244,7 +244,7 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 - Privacy profiles can strengthen but never weaken an explicitly stricter user action.
 - Detection scans string values, JSON numbers (e.g. card numbers), and object key names. Base64/URL-encoded values and URL query strings are NOT inspected.
 - Audit tail truncation: set `audit.anchor.mode: file` (on append-only/separate media) so `haechi audit-verify --anchor` detects deletion of trailing records back to the last anchor. On the same writable filesystem an attacker can truncate both files together.
-- Key custody: `keys.provider: external` accepts an injected `cryptoProvider`; validate adapters with `assertCryptoProviderConformance`. See `examples/crypto-kms-reference/` for an envelope-encryption KMS adapter.
+- Key custody: `keys.provider: external` accepts an injected `cryptoProvider`; validate adapters with `assertCryptoProviderConformance`. The `@haechi/crypto-kms` satellite (`satellites/crypto-kms/`) provides an envelope-encryption KMS adapter.
 - Release integrity: published tarballs carry an npm provenance attestation; GitHub release assets add a sigstore attestation and `SHA256SUMS` (verify with `gh attestation verify` and `node scripts/release-checksums.mjs --check`).
 - The package is a developer preview. Do not expose it as an internet-facing production LLM gateway.
 

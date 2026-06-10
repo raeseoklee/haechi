@@ -1,9 +1,13 @@
 {
   "name": "haechi",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Experimental developer preview for self-hosted AI context enforcement across LLM, MCP, vLLM, Ollama, and agent traffic.",
   "license": "Apache-2.0",
   "type": "module",
+  "workspaces": [
+    ".",
+    "satellites/*"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/raeseoklee/haechi.git"
@@ -63,6 +67,7 @@
     "check:types": "tsc -p jsconfig.json --noEmit",
     "pack:dry": "npm pack --dry-run",
     "scan:stale-names": "node scripts/stale-name-scan.mjs",
+    "check:packaging": "node scripts/check-core-packaging.mjs",
     "sbom": "node scripts/generate-sbom.mjs",
     "checksums": "node scripts/release-checksums.mjs",
     "bench:payload": "node scripts/bench-payload.mjs",

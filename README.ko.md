@@ -244,7 +244,7 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 - Privacy profile은 명시적으로 더 엄격한 사용자 action을 강화할 수는 있지만 약화할 수는 없다.
 - 탐지는 문자열 값, JSON 숫자(예: 카드 번호), 객체 키 이름을 검사한다. Base64/URL 인코딩된 값과 URL 쿼리 스트링은 검사되지 않는다.
 - Audit tail truncation: `audit.anchor.mode: file`을 설정하면(추가 전용/별도 미디어에서) `haechi audit-verify --anchor`가 마지막 anchor 이후 꼬리 레코드 삭제를 탐지한다. 동일한 쓰기 가능 파일시스템에서는 공격자가 두 파일을 함께 잘라낼 수 있다.
-- Key custody: `keys.provider: external`은 주입된 `cryptoProvider`를 허용한다; `assertCryptoProviderConformance`로 adapter를 검증한다. envelope 암호화 KMS adapter는 `examples/crypto-kms-reference/`를 참고한다.
+- Key custody: `keys.provider: external`은 주입된 `cryptoProvider`를 허용한다; `assertCryptoProviderConformance`로 adapter를 검증한다. envelope 암호화 KMS adapter는 `@haechi/crypto-kms` satellite(`satellites/crypto-kms/`)가 제공한다.
 - Release integrity: 배포된 tarball에는 npm provenance attestation이 포함되며, GitHub release asset에는 sigstore attestation과 `SHA256SUMS`가 추가된다(`gh attestation verify`와 `node scripts/release-checksums.mjs --check`로 검증한다).
 - 이 패키지는 개발자 프리뷰이다. 인터넷에 노출된 운영 LLM 게이트웨이로 사용하지 않는다.
 

@@ -7,6 +7,7 @@ const checks = [
   ["npm", ["test"]],
   ["npm", ["run", "check:types"]],
   ["npm", ["run", "scan:stale-names"]],
+  ["npm", ["run", "check:packaging"]],
   ["npm", ["pack", "--dry-run"]]
 ];
 

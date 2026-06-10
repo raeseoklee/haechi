@@ -3,13 +3,17 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+// Imported by NAME (not relative path): proves the satellite resolves core
+// through the npm workspace symlink (node_modules/haechi → repo root), exactly
+// as a published consumer resolves its installed `haechi` peer.
 import {
   createLocalCryptoProvider,
   initLocalKeyFile,
-  assertCryptoProviderConformance
-} from "../packages/crypto/index.mjs";
-import { createRuntime } from "../packages/cli/runtime.mjs";
-import { createKmsCryptoProvider, createInMemoryKms } from "../examples/crypto-kms-reference/index.mjs";
+  assertCryptoProviderConformance,
+  canonicalize
+} from "haechi/crypto";
+import { createRuntime } from "haechi/runtime";
+import { createKmsCryptoProvider, createInMemoryKms } from "./index.mjs";
 
 test("the local provider passes conformance", async () => {
   const dir = await mkdtemp(join(tmpdir(), "haechi-conf-local-"));
@@ -23,6 +27,29 @@ test("the reference KMS provider passes conformance", async () => {
   const provider = createKmsCryptoProvider({ kms: createInMemoryKms() });
   const result = await assertCryptoProviderConformance(provider);
   assert.equal(result.ok, true);
+});
+
+test("the satellite binds AAD identically to core's own local provider (cross-impl parity)", async () => {
+  // NOT tautological: the KMS satellite and core's local provider are SEPARATE
+  // implementations. Both derive aadHash from core's canonicalize, so for the
+  // same AAD their aadHash must be equal — a re-inlined or divergent canonicalize
+  // in the satellite would break this. We also pin the exact expected value.
+  const { createHash } = await import("node:crypto");
+  const dir = await mkdtemp(join(tmpdir(), "haechi-parity-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const local = createLocalCryptoProvider({ keyFile });
+  const kms = createKmsCryptoProvider({ kms: createInMemoryKms() });
+
+  const aad = { purpose: "tokenize", path: "messages[1].content", type: "email", nested: { b: 2, a: [3, 1] } };
+  const localEnv = await local.encrypt({ plaintext: "drift@example.com", aad });
+  const kmsEnv = await kms.encrypt({ plaintext: "drift@example.com", aad });
+
+  // cross-implementation parity
+  assert.equal(kmsEnv.aadHash, localEnv.aadHash);
+  // and the exact canonical value
+  const expected = createHash("sha256").update(Buffer.from(canonicalize(aad), "utf8")).digest("base64url");
+  assert.equal(kmsEnv.aadHash, expected);
 });
 
 test("conformance flags a provider missing hmac (and passes with requireHmac:false)", async () => {
