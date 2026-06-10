@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.4.0
+- 기준 버전: 0.5.0
 
 ## 1. 보호 대상
 
@@ -24,7 +24,7 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | CLI local process | 개발자 로컬 신뢰 | dev key 경고, dry-run 기본값 |
 | HTTP proxy listener | 비신뢰 client 입력 | loopback bind 기본, remote bind 명시 플래그 |
 | Upstream model/tool server | 비신뢰 또는 부분 신뢰 | request/response protection, uninspectable response fail-closed |
-| Streaming response | 현재 비검사 영역 | `stream: true` 기본 차단 |
+| Streaming response | 검사(bounded) 또는 차단 | `inspect` 모드는 bounded cross-frame 버퍼로 SSE/NDJSON을 stream-filter함; `block`(기본값)은 거부 |
 | MCP stdio peer | 부분 신뢰 | JSON-RPC 2.0 요구, method allowlist |
 | Local filesystem | 부분 신뢰 | local key/token vault 0600, audit hash chain |
 | External provider/plugin | 비신뢰 | provider method contract, plugin manifest-only gate |
@@ -34,7 +34,7 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | 위협 | 영향 | 현재 통제 |
 |---|---|---|
 | 인터넷 노출 proxy | 인증 없는 LLM gateway | non-loopback bind 기본 실패 |
-| streaming 우회 | SSE/NDJSON 평문 유출 | streaming request 기본 실패 |
+| streaming 우회 | SSE/NDJSON 평문 유출 | `inspect` 모드는 SSE/NDJSON을 stream-filter함; `block`(기본값)은 거부; `pass-through`는 명시적으로 감사된 opt-out |
 | Ollama 암묵 streaming 우회 | `stream` 생략 시 NDJSON 평문 유출 | `/api/chat`·`/api/generate`는 `stream: false` 명시 없으면 streaming으로 간주해 기본 차단 |
 | 비JSON/압축/대용량 응답 | responseProtection 우회 | fail-closed response policy |
 | token reveal 남용 | tokenized PII 복원 | revealPolicy 기본 disabled, reveal/purge 결정 audit 기록 |
@@ -56,7 +56,9 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 
 - 운영 KMS/HSM/Vault adapter 자체 제공
 - internet-facing gateway 인증/인가
-- SSE/NDJSON stream inspection
+- `streaming.maxMatchBytes`보다 긴 cross-frame 매칭(스트림 프레임에 걸쳐 분할될 수 있음)
+- `block`이 발동되기 전에 이미 방출된 스트림 바이트의 회수
+- 스트림에서 choice별(`n > 1`) cross-frame 버퍼링(보조 choice는 프레임 내 보호만 적용)
 - 법적 컴플라이언스 인증
 - 모델 hallucination, prompt injection 완전 방어
 - 외부 MCP server의 OAuth/resource binding 검증

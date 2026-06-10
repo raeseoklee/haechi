@@ -62,7 +62,7 @@ node packages/cli/bin/haechi.mjs proxy --config haechi.config.json
 
 proxy는 기본적으로 loopback에 바인드된다. `0.0.0.0`, `::`, 또는 다른 non-loopback 호스트에 바인딩하려면 `--allow-remote-bind`를 명시적으로 제공해야 한다. 이 플래그는 명시적인 네트워크 접근 통제 하에서만 사용한다.
 
-`stream: true`인 스트리밍 요청은 기본적으로 차단된다. Haechi 0.3.x는 SSE 또는 NDJSON 스트림을 검사하지 않는다. 호출자가 스트리밍 payload가 Haechi에 의해 보호되지 않음을 명시적으로 인정하는 경우에만 `streaming.requestMode`를 `pass-through`로 설정한다.
+`stream: true`인 스트리밍 요청은 기본적으로 차단된다. `streaming.requestMode`를 `inspect`로 설정하면 SSE/NDJSON 응답을 stream-filter한다(bounded sliding buffer가 프레임에 걸쳐 쪼개진 PII도 잡는다; `streaming.maxMatchBytes` 참고). 또는 호출자가 보호되지 않는 스트리밍을 명시적으로 인정하는 경우에만 `pass-through`로 설정한다.
 
 Ollama의 `/api/chat`과 `/api/generate`는 `stream` 필드가 생략되면 기본적으로 스트리밍하므로, proxy는 `stream: false`가 명시적으로 설정되지 않으면 해당 요청을 스트리밍으로 간주한다.
 
@@ -149,7 +149,9 @@ stdio MCP 서버를 래핑하여 양방향 트래픽을 필터링한다 — MCP 
 | `proxy.host` / `proxy.port` | `127.0.0.1` / `1016` | proxy 바인드 주소. 아래의 remote 바인딩 참고 |
 | `responseProtection.enabled` | `false` | upstream JSON 응답을 검사한다. `failureMode: fail-closed`는 비JSON/압축/대용량 응답을 거부한다 |
 | `responseProtection.maxBytes` | `1048576` | 응답 크기의 상한 — `failureMode: allow` 상태에서도 적용된다 |
-| `streaming.requestMode` | `block` | `stream: true` 요청은 `pass-through`가 아닌 경우 501을 받는다(검사 없이 전달되며 audit 기록됨). Ollama chat/generate는 `stream: false`가 없으면 스트리밍으로 간주된다 |
+| `streaming.requestMode` | `block` | `block`은 스트리밍을 501 차단; `inspect`는 SSE/NDJSON 응답을 stream-filter; `pass-through`는 검사 없이 전달(audit 기록). Ollama chat/generate는 `stream: false`가 없으면 스트리밍으로 간주된다 |
+| `streaming.responseMode` | `enforce` | 검사된 스트림에 적용되는 enforcement 모드(`dry-run`/`report-only`/`enforce`) |
+| `streaming.maxMatchBytes` | `256` | cross-frame 매칭 윈도우; 이보다 긴 단일 매치는 프레임에 걸쳐 쪼개질 수 있음 |
 | `limits.maxRequestBytes` | `1048576` | 요청 바디 상한 (한도 초과 시 413) |
 | `limits.upstreamTimeoutMs` | `120000` | upstream 타임아웃 (만료 시 504) |
 | `policy.presets` | `korean-pii`, `secrets-only`, `llm-redact` | 병합되는 프리셋 action; 병합은 강화는 가능하지만 약화는 불가 |
@@ -221,3 +223,5 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 0.3.2는 보안 강화 릴리스이자 첫 번째 npm 개발자 프리뷰 대상이다: Ollama 암묵적 스트리밍 fail-closed 처리, 감사된 token reveal/purge, 보존 기간 purge, kid 기반 키 교체, 도메인 분리 policy bundle 서명, JSON 숫자/객체 키 탐지, upstream 타임아웃, stale lock 복구, 그리고 non-enforcing 모드 경고. `docs/current/release-0.3.2-hardening-scope.md` 참고.
 
 0.4.0은 token round-trip(deterministic tokenization + 요청 스코프 응답 detokenization), `mcp-wrap` 양방향 MCP 필터, `status` 및 `audit-verify` 커맨드, report-only injection detection 휴리스틱을 추가하고, 0.6 인증을 위한 PII-safe `identity`/`authProvider` 계약을 예약한다. `docs/current/release-0.4-implementation-scope.md` 참고.
+
+0.5.0은 SSE/NDJSON 스트리밍 응답 검사를 추가한다: `streaming.requestMode: "inspect"`가 bounded sliding buffer로 응답을 stream-filter하여 프레임에 걸쳐 쪼개진 PII도 잡는다(`streaming.maxMatchBytes`). `docs/current/release-0.5-implementation-scope.md` 참고.

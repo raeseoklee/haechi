@@ -62,7 +62,7 @@ Point an existing HTTP JSON client at `http://localhost:1016` and set `target.up
 
 The proxy binds to loopback by default. Binding to `0.0.0.0`, `::`, or another non-loopback host fails unless `--allow-remote-bind` is provided. Use that flag only behind explicit network access controls.
 
-Streaming requests with `stream: true` are blocked by default. Haechi 0.3.x does not inspect SSE or NDJSON streams. Set `streaming.requestMode` to `pass-through` only when the caller explicitly accepts that streaming payloads are not protected by Haechi.
+Streaming requests with `stream: true` are blocked by default. Set `streaming.requestMode` to `inspect` to stream-filter SSE/NDJSON responses (a bounded sliding buffer catches PII split across frames; see `streaming.maxMatchBytes`), or to `pass-through` only when the caller explicitly accepts unprotected streaming.
 
 Ollama `/api/chat` and `/api/generate` stream by default when the `stream` field is omitted, so the proxy treats those requests as streaming unless `stream: false` is explicitly set.
 
@@ -149,7 +149,9 @@ These heuristics are not a complete defense against prompt injection; see `docs/
 | `proxy.host` / `proxy.port` | `127.0.0.1` / `1016` | Proxy bind address. See remote binding below |
 | `responseProtection.enabled` | `false` | Inspect upstream JSON responses. `failureMode: fail-closed` rejects non-JSON/compressed/oversized responses |
 | `responseProtection.maxBytes` | `1048576` | Hard response size cap — enforced even in `failureMode: allow` |
-| `streaming.requestMode` | `block` | `stream: true` requests get 501 unless `pass-through` (uninspected, audited). Ollama chat/generate count as streaming unless `stream: false` |
+| `streaming.requestMode` | `block` | `block` 501s streaming; `inspect` stream-filters SSE/NDJSON responses; `pass-through` forwards uninspected (audited). Ollama chat/generate count as streaming unless `stream: false` |
+| `streaming.responseMode` | `enforce` | Enforcement mode for inspected streams (`dry-run`/`report-only`/`enforce`) |
+| `streaming.maxMatchBytes` | `256` | Cross-frame match window; a single match longer than this may split across frames |
 | `limits.maxRequestBytes` | `1048576` | Request body cap (413 over the limit) |
 | `limits.upstreamTimeoutMs` | `120000` | Upstream timeout (504 on expiry) |
 | `policy.presets` | `korean-pii`, `secrets-only`, `llm-redact` | Merged preset actions; merges can strengthen but never weaken |
@@ -221,3 +223,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.3.2 is a security-hardening release and the first npm developer preview target: Ollama implicit-streaming fail-closed handling, audited token reveal/purge, retention purge, kid-based key rotation, domain-separated policy bundle signing, JSON number/object key detection, upstream timeouts, stale lock recovery, and non-enforcing-mode warnings. See `docs/current/release-0.3.2-hardening-scope.md`.
 
 0.4.0 adds the token round-trip (deterministic tokenization + request-scoped response detokenization), the `mcp-wrap` bidirectional MCP filter, `status` and `audit-verify` commands, report-only injection detection heuristics, and reserves the PII-safe `identity`/`authProvider` contracts for 0.6 auth. See `docs/current/release-0.4-implementation-scope.md`.
+
+0.5.0 adds SSE/NDJSON streaming response inspection: `streaming.requestMode: "inspect"` stream-filters responses with a bounded sliding buffer that catches PII split across frames (`streaming.maxMatchBytes`). See `docs/current/release-0.5-implementation-scope.md`.

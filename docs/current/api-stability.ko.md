@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.4.0
+- 기준 버전: 0.5.0
 
 ## 1. 버전 해석
 
@@ -41,6 +41,7 @@
 - `injection` detection type과 휴리스틱 룰
 - `identity` audit 필드와 `authProvider` 계약 (0.4 예약, 0.6 구현 — 그 전까지 형태 변경 가능)
 - `status` / `audit-verify` CLI 출력 형태
+- `haechi/stream-filter` (`inspectResponseStream`, path helpers) 및 `createStreamProtector` (스트리밍 검사 내부 구현)
 
 ## 4. Migration note 기준
 

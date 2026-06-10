@@ -1,7 +1,7 @@
 # Haechi 설정 레퍼런스
 
 - 문서 상태: Living document
-- 기준 버전: 0.4.0
+- 기준 버전: 0.5.0
 
 `haechi init`은 `haechi.config.json`을 생성하며, 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에 있다. 모든 커맨드는 `--config <path>`로 설정 파일을 읽는다(기본값: `haechi.config.json`). 설정은 **fail-closed 방식으로 검증**된다: 알 수 없는 provider, 범위를 벗어난 숫자, 잘못된 형식의 값은 자동으로 무시되지 않고 로드 시점에 오류를 발생시킨다. `haechi config`는 이 레퍼런스를 출력하며, `haechi status`는 특정 설정 파일의 *실제 적용* 상태를 출력한다.
 
@@ -63,7 +63,9 @@ upstream JSON 응답을 검사한다(기본적으로 꺼져 있음 — 모델로
 
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
-| `streaming.requestMode` | `block` \| `pass-through` | `block` | `stream: true` 요청은 `pass-through`가 아닌 경우 `501`을 반환한다(pass-through 시 검사 없이 전달되며 audit 결정이 기록된다). Ollama의 `/api/chat`과 `/api/generate`는 `stream: false`가 명시되지 않으면 streaming으로 간주된다. Haechi는 현재 SSE/NDJSON을 검사하지 않는다(0.5 계획). |
+| `streaming.requestMode` | `block` \| `pass-through` \| `inspect` | `block` | `block`은 스트리밍 요청에 `501`을 반환한다; `inspect`는 bounded cross-frame 버퍼로 SSE/NDJSON 응답을 stream-filter한다; `pass-through`는 검사 없이 전달한다(감사됨). Ollama의 `/api/chat`과 `/api/generate`는 `stream: false`가 명시되지 않으면 streaming으로 간주된다. |
+| `streaming.responseMode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | 검사된 스트림에 적용되는 집행 모드(요청 방향과 독립적). |
+| `streaming.maxMatchBytes` | 양의 정수 | `256` | inspect 시 cross-frame 매칭 윈도우. 이 크기의 tail을 보유하여 프레임에 걸친 탐지를 방출 전에 포착할 수 있다; 이 값보다 긴 단일 매칭은 프레임에 걸쳐 분할될 수 있다. |
 
 ## `limits`
 
@@ -205,4 +207,4 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## 검증 요약
 
-다음은 로드 시 오류(fail-closed)를 발생시킨다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; 잘못된 `streaming.requestMode`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도.
+다음은 로드 시 오류(fail-closed)를 발생시킨다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도.
