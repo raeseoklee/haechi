@@ -167,7 +167,7 @@ haechi auth revoke <id>
 - **Rate limit**: identity별 분당 요청 수 → `429` (인메모리, 프로세스별).
 - Audit 이벤트는 **PII-safe** `identity`(keyed-HMAC subject/issuer, 원시 값 아님)와 resolve된 `profile`을 포함하며, `auth_denied` / `model_not_allowed` / `rate_limited` 결정에는 credentials가 포함되지 않는다. `/__haechi/health`는 인증 없이 접근 가능하다.
 
-OIDC/JWT provider와 KMS 기반 key custody는 0.7+ 위성 패키지이다.
+JWT/JWKS 인증과 KMS 기반 key custody는 `@haechi/*` 위성 패키지로 제공된다(0.8): [`@haechi/auth-jwt`](satellites/auth-jwt/)(헤드리스 JWKS bearer 검증)와 [`@haechi/crypto-kms`](satellites/crypto-kms/)(실제 AWS KMS 클라이언트 기반 envelope 암호화). 둘 다 기본 `node:` 전용이며 core를 zero-dependency로 유지한다; 대화형 OIDC와 대시보드는 0.9.
 
 ## 설정
 
@@ -267,3 +267,5 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 0.6.0은 인증과 클라이언트별 통제를 추가한다: 해시 기반 token 저장소와 `haechi auth` CLI를 갖춘 내장 bearer auth, identity scope/label로 바인딩되는 named policy profile, model allowlisting, 그리고 identity별 rate limiting — audit 로그에는 PII-safe identity가 기록된다. `docs/current/release-0.6-implementation-scope.md` 참고.
 
 0.7.0은 운영 강화(ops-hardening) 릴리스이다: 꼬리 절단을 탐지하는 audit head-hash anchoring(`audit.anchor`), `assertCryptoProviderConformance`와 reference KMS adapter를 포함한 강화된 외부 `cryptoProvider` 계약, 그리고 서명/체크섬된 GitHub release artifact. `docs/current/release-0.7-implementation-scope.md` 참고.
+
+0.8.0은 `@haechi/*` 에코시스템을 세운다: npm workspaces 모노레포(core는 unscoped `haechi` 유지, zero runtime dependency, 패킹 매니페스트 CI 게이트로 강제) + 첫 두 위성 — [`@haechi/crypto-kms`](satellites/crypto-kms/)(실제 AWS KMS 클라이언트 기반 envelope 암호화; AWS SDK는 optional peer)와 [`@haechi/auth-jwt`](satellites/auth-jwt/)(헤드리스 JWKS bearer 검증, `node:` 전용). 각각 자체 provenance + sigstore attest 워크플로로 독립 발행한다. `docs/current/release-0.8-implementation-scope.md` 참고.

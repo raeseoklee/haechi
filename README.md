@@ -167,7 +167,7 @@ haechi auth revoke <id>
 - **Rate limit**: per-identity requests-per-minute → `429` (in-memory, per-process).
 - Audit events carry the **PII-safe** `identity` (keyed-HMAC subject/issuer, never raw values) and the resolved `profile`; `auth_denied` / `model_not_allowed` / `rate_limited` decisions never include credentials. `/__haechi/health` stays unauthenticated.
 
-OIDC/JWT providers and KMS-backed key custody are 0.7+ satellite packages.
+JWT/JWKS auth and KMS-backed key custody ship as `@haechi/*` satellite packages (0.8): [`@haechi/auth-jwt`](satellites/auth-jwt/) (headless JWKS bearer verification) and [`@haechi/crypto-kms`](satellites/crypto-kms/) (envelope encryption with a real AWS KMS client). Both are `node:`-only by default and keep core zero-dependency; interactive OIDC and a dashboard are 0.9.
 
 ## Configuration
 
@@ -267,3 +267,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.6.0 adds authentication and per-client controls: built-in bearer auth with a hashed token store and `haechi auth` CLI, named policy profiles bound by identity scope/label, model allowlisting, and per-identity rate limiting — with PII-safe identity in the audit log. See `docs/current/release-0.6-implementation-scope.md`.
 
 0.7.0 is operational hardening: audit head-hash anchoring (`audit.anchor`) that detects tail truncation, a hardened external `cryptoProvider` contract with `assertCryptoProviderConformance` and a reference KMS adapter, and signed/checksummed GitHub release artifacts. See `docs/current/release-0.7-implementation-scope.md`.
+
+0.8.0 stands up the `@haechi/*` ecosystem: an npm workspaces monorepo (core stays the unscoped `haechi`, zero runtime dependency, gated by a packed-manifest CI check) plus the first two satellites — [`@haechi/crypto-kms`](satellites/crypto-kms/) (envelope encryption with a real AWS KMS client; the AWS SDK is an optional peer) and [`@haechi/auth-jwt`](satellites/auth-jwt/) (headless JWKS bearer verification, `node:`-only). Each publishes independently with its own provenance + sigstore-attested workflow. See `docs/current/release-0.8-implementation-scope.md`.
