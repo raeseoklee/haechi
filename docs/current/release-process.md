@@ -24,11 +24,11 @@ Before the first publish, it is normal for `npm view <package> version` to retur
 
 The intended publish path is GitHub Actions trusted publishing: npm authenticates the release workflow via OIDC and generates a provenance statement automatically. Per the official npm requirements this needs a GitHub-hosted runner, `id-token: write`, and a publish from the linked workflow.
 
-**Current state: trusted publishing is configured; first attested release pending.** `haechi@0.3.2` was published from a local machine using passkey authentication with `--provenance=false`, so no provenance attestation exists for that version. The enablement runbook and its status:
+**Current state: trusted publishing is configured and verified.** `haechi@0.3.2` was published from a local machine using passkey authentication with `--provenance=false`, so no provenance attestation exists for that version. The enablement runbook and its status:
 
 1. ✅ On npmjs.com: package settings → Trusted Publisher → linked the `raeseoklee/haechi` repository and the `npm-publish.yml` workflow (2026-06-10).
 2. ✅ `.github/workflows/npm-publish.yml` authenticates via OIDC (2026-06-10): `NODE_AUTH_TOKEN` and `registry-url` removed, npm CLI upgraded to `>= 11.5.1` in the runner.
-3. ⏳ After the next release, verify the attestation with `npm view haechi --json` (`dist.attestations`). The OIDC path has not carried a real publish yet; if misconfigured it fails closed at publish time.
+3. ✅ Verified with `haechi@0.4.0` (2026-06-10): `npm view haechi --json` shows `dist.attestations` with a SLSA provenance v1 predicate. Only `haechi@0.3.2` remains unattested (published via local passkey).
 
 Any publish performed without provenance must record the gap explicitly in the release notes (see `CONTRIBUTING.md`).
 
