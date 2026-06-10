@@ -1,9 +1,10 @@
 # Haechi 0.7 Implementation Scope
 
-- Status: Draft 0.1 (design — not yet implemented)
+- Status: Final
 - Date: 2026-06-10
 - Target version: 0.7.0 (after 0.6.0)
 - Type: ops hardening
+- Shipped: 2026-06-10 — PRs #22 (audit anchoring), #23 (cryptoProvider contract + reference KMS), #24 (signed release artifacts)
 
 ## 1. Release Goal
 

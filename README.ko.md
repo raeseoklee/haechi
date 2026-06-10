@@ -243,6 +243,9 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 - `haechi init --force`는 로컬 키를 교체한다: 기존 키는 `retired` 상태로 보관되어 기존 암호문과 token vault 레코드를 `kid`로 복호화할 수 있다.
 - Privacy profile은 명시적으로 더 엄격한 사용자 action을 강화할 수는 있지만 약화할 수는 없다.
 - 탐지는 문자열 값, JSON 숫자(예: 카드 번호), 객체 키 이름을 검사한다. Base64/URL 인코딩된 값과 URL 쿼리 스트링은 검사되지 않는다.
+- Audit tail truncation: `audit.anchor.mode: file`을 설정하면(추가 전용/별도 미디어에서) `haechi audit-verify --anchor`가 마지막 anchor 이후 꼬리 레코드 삭제를 탐지한다. 동일한 쓰기 가능 파일시스템에서는 공격자가 두 파일을 함께 잘라낼 수 있다.
+- Key custody: `keys.provider: external`은 주입된 `cryptoProvider`를 허용한다; `assertCryptoProviderConformance`로 adapter를 검증한다. envelope 암호화 KMS adapter는 `examples/crypto-kms-reference/`를 참고한다.
+- Release integrity: 배포된 tarball에는 npm provenance attestation이 포함되며, GitHub release asset에는 sigstore attestation과 `SHA256SUMS`가 추가된다(`gh attestation verify`와 `node scripts/release-checksums.mjs --check`로 검증한다).
 - 이 패키지는 개발자 프리뷰이다. 인터넷에 노출된 운영 LLM 게이트웨이로 사용하지 않는다.
 
 ## 현재 범위
@@ -262,3 +265,5 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 0.5.0은 SSE/NDJSON 스트리밍 응답 검사를 추가한다: `streaming.requestMode: "inspect"`가 bounded sliding buffer로 응답을 stream-filter하여 프레임에 걸쳐 쪼개진 PII도 잡는다(`streaming.maxMatchBytes`). `docs/current/release-0.5-implementation-scope.md` 참고.
 
 0.6.0은 인증과 클라이언트별 통제를 추가한다: 해시 기반 token 저장소와 `haechi auth` CLI를 갖춘 내장 bearer auth, identity scope/label로 바인딩되는 named policy profile, model allowlisting, 그리고 identity별 rate limiting — audit 로그에는 PII-safe identity가 기록된다. `docs/current/release-0.6-implementation-scope.md` 참고.
+
+0.7.0은 운영 강화(ops-hardening) 릴리스이다: 꼬리 절단을 탐지하는 audit head-hash anchoring(`audit.anchor`), `assertCryptoProviderConformance`와 reference KMS adapter를 포함한 강화된 외부 `cryptoProvider` 계약, 그리고 서명/체크섬된 GitHub release artifact. `docs/current/release-0.7-implementation-scope.md` 참고.

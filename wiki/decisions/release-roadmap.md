@@ -13,7 +13,7 @@ Agreed 2026-06-10 between maintainer and assistant; recorded in `risk-register-r
 | 0.4.0 ✅ | Token round-trip and adoption | Shipped 2026-06-10 (PRs #7–#10). [[token-vault]] round-trip, `mcp-wrap`, `audit-verify`/`status`, report-only injection heuristics, `identity`/`authProvider` reserved. Its GitHub release is the first attested (trusted-publishing) npm publish |
 | 0.5.0 ✅ | Streaming hardening | Shipped 2026-06-10 (PR #14): SSE/NDJSON [[streaming-protection-gap|streaming inspection]] with bounded cross-frame buffer. Stream sequence AAD / replay cache deferred to 0.6+ |
 | 0.6.0 ✅ | Auth + per-client controls | Shipped 2026-06-10 (PRs #17–#19): bearer auth, named policy profiles, model allowlist, request rate limit, PII-safe identity in audit ([[identity-and-auth]]). Heavier ops items in 0.7 |
-| 0.7.0 | Ops hardening | Audit head-hash anchoring (closes tail-truncation, [[audit-integrity]]) + external sink contract, cryptoProvider contract hardening + reference KMS adapter, signed/checksummed release artifacts. Design: `release-0.7-implementation-scope.md` |
+| 0.7.0 ✅ | Ops hardening | Shipped 2026-06-10 (PRs #22–#24): audit head-hash anchoring ([[audit-integrity]]) + external sink contract, cryptoProvider contract hardening + `assertCryptoProviderConformance` + reference KMS adapter, signed/checksummed release artifacts |
 | 0.8.0 | Ecosystem + observability | npm org `@haechi/*`, publish `@haechi/crypto-kms` / `@haechi/auth-oidc`, npm workspaces, `@haechi/dashboard` read-only audit viewer ([[packaging-and-distribution]]) |
 | 1.0.0 | Stable API + plugin sandbox | Only then: dynamic loading of external packages |
 
