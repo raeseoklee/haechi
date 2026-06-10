@@ -7,12 +7,46 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const FORBIDDEN_KEYS = new Set(["value", "plaintext", "payload", "content", "message", "prompt", "secret"]);
 
-export function createJsonlAuditSink({ path }) {
+export function createJsonlAuditSink({ path, anchor = null }) {
   if (!path) {
     throw new Error("JSONL audit sink requires path");
   }
+  const anchorMode = anchor?.mode ?? "none";
+  const anchorPath = anchor?.path ?? null;
+  const everyRecords = anchor?.everyRecords ?? 1;
+  if (!["none", "file", "stdout"].includes(anchorMode)) {
+    throw new Error(`Invalid audit anchor mode: ${anchorMode}`);
+  }
+  if (anchorMode === "file" && !anchorPath) {
+    throw new Error("audit anchor mode 'file' requires an anchor path");
+  }
+  // The sink is a public export reachable via auditSink injection, so it
+  // validates everyRecords itself rather than trusting normalizeConfig.
+  if (!Number.isInteger(everyRecords) || everyRecords < 1) {
+    throw new Error("audit anchor everyRecords must be a positive integer");
+  }
 
   let writeQueue = Promise.resolve();
+
+  async function writeAnchor(record) {
+    const { sequence, eventHash } = record.auditIntegrity;
+    // Tamper-evidence against tail truncation: the chain head is appended to a
+    // separate append-only stream, so deleting trailing records leaves the
+    // chain shorter than the last anchored sequence.
+    if (anchorMode === "none" || sequence % everyRecords !== 0) {
+      return;
+    }
+    const line = `${JSON.stringify({ sequence, eventHash, timestamp: record.timestamp })}\n`;
+    if (anchorMode === "stdout") {
+      process.stdout.write(line);
+    } else {
+      await mkdir(dirname(anchorPath), { recursive: true });
+      // 0600 on creation, like the key/lock files. Note this only matters for
+      // confidentiality of the timeline — tamper-evidence still requires the
+      // anchor to live on append-only/separate media (see docs).
+      await appendFile(anchorPath, line, { mode: 0o600 });
+    }
+  }
 
   return {
     id: "haechi.audit.jsonl",
@@ -20,7 +54,8 @@ export function createJsonlAuditSink({ path }) {
     capabilities: {
       writesAudit: true,
       writesPlaintext: false,
-      integrity: "sha256-hash-chain"
+      appendOnly: true,
+      integrity: anchorMode === "none" ? "sha256-hash-chain" : "sha256-hash-chain+anchor"
     },
     async record(event) {
       const write = writeQueue.then(async () => {
@@ -28,6 +63,7 @@ export function createJsonlAuditSink({ path }) {
         await withFileLock(`${path}.lock`, async () => {
           const record = await buildIntegrityRecord(path, sanitizeAudit(event));
           await appendFile(path, `${JSON.stringify(record)}\n`, "utf8");
+          await writeAnchor(record);
         });
       });
       writeQueue = write.catch(() => {});
@@ -87,7 +123,12 @@ export function sanitizeAudit(value) {
   return value;
 }
 
-export async function verifyAuditChain(path) {
+export async function verifyAuditChain(path, { anchorPath = null } = {}) {
+  // The anchor stream (if provided) records the chain head at past points; a
+  // chain shorter than the last anchor, or a hash that disagrees with an
+  // anchor, is tail truncation / tampering the chain alone cannot catch.
+  const anchors = anchorPath ? await readAnchors(anchorPath) : null;
+
   const lines = createInterface({
     input: createReadStream(path, { encoding: "utf8" }),
     crlfDelay: Infinity
@@ -122,14 +163,66 @@ export async function verifyAuditChain(path) {
       return { valid: false, records, reason: "event hash mismatch" };
     }
 
+    if (anchors && anchors.bySequence.has(expectedSequence)
+      && anchors.bySequence.get(expectedSequence) !== eventHash) {
+      return { valid: false, records, reason: `anchor hash mismatch at sequence ${expectedSequence}` };
+    }
+
     expectedPreviousHash = eventHash;
     expectedSequence += 1;
     records += 1;
   }
 
-  // headHash anchors the chain externally: publishing it out-of-band is the
-  // only defense against tail truncation, which the chain alone cannot detect.
-  return { valid: true, records, headHash: expectedPreviousHash };
+  if (anchors && anchors.lastSequence > records) {
+    return {
+      valid: false,
+      records,
+      reason: `tail truncation: chain has ${records} records but anchor attests sequence ${anchors.lastSequence}`
+    };
+  }
+
+  // headHash anchors the chain externally. With anchorPath, truncation back to
+  // the last anchor is now detected; the residual gap is records written after
+  // the last anchor.
+  const result = { valid: true, records, headHash: expectedPreviousHash };
+  if (anchors) {
+    result.anchored = { count: anchors.bySequence.size, lastSequence: anchors.lastSequence };
+  }
+  return result;
+}
+
+async function readAnchors(anchorPath) {
+  const bySequence = new Map();
+  let lastSequence = 0;
+  try {
+    const lines = createInterface({
+      input: createReadStream(anchorPath, { encoding: "utf8" }),
+      crlfDelay: Infinity
+    });
+    for await (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+      // A crash can leave a partial trailing anchor line; tolerate it (skip)
+      // rather than failing the whole verification. The chain check plus the
+      // remaining valid anchors still bound truncation detection.
+      let anchor;
+      try {
+        anchor = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof anchor.sequence === "number" && typeof anchor.eventHash === "string") {
+        bySequence.set(anchor.sequence, anchor.eventHash);
+        lastSequence = Math.max(lastSequence, anchor.sequence);
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  return { bySequence, lastSequence };
 }
 
 async function buildIntegrityRecord(path, event) {

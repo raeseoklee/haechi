@@ -47,7 +47,12 @@
   },
   "audit": {
     "sink": "jsonl",
-    "path": ".haechi/audit.jsonl"
+    "path": ".haechi/audit.jsonl",
+    "anchor": {
+      "mode": "none",
+      "path": ".haechi/audit.anchor.jsonl",
+      "everyRecords": 1
+    }
   },
   "tokenVault": {
     "provider": "local",

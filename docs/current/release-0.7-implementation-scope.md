@@ -22,11 +22,12 @@ The audit hash chain detects tampering and reordering but **not** deletion of th
 - After appending, the JSONL sink writes the current chain head to a separate **append-only anchor stream**: one JSON line `{ sequence, eventHash, timestamp }`.
 - Config `audit.anchor`:
   - `mode`: `none` (default — current behavior) | `file` | `stdout`.
-  - `path`: anchor file when `mode: file` (recommended on a different medium / append-only-flagged path).
+  - `path`: anchor file when `mode: file` (created `0600`). `stdout` writes anchor lines to stdout for capture by a long-running command's supervisor — not for JSON-emitting commands, whose output it would interleave.
   - `everyRecords`: anchor cadence (default `1` — anchor every record; raise to batch). Anchor lines are tiny.
-- `verifyAuditChain(path, { anchorPath })` cross-checks: the latest anchor's `sequence` must not exceed the chain length, and the chain record at the anchored `sequence` must hash to the anchored `eventHash`. A chain shorter than the latest anchor → **truncation detected** (records after the last anchor were removed).
+- `verifyAuditChain(path, { anchorPath })` cross-checks: the latest anchor's `sequence` must not exceed the chain length, and the chain record at the anchored `sequence` must hash to the anchored `eventHash`. A chain shorter than the latest anchor → **truncation detected** (records after the last anchor were removed). A partial trailing anchor line (from a crash) is tolerated.
 - `haechi audit-verify --anchor <path>` surfaces this; `haechi status` reports anchor mode + last anchored sequence.
-- **Bounded guarantee:** truncation is detected only back to the **last anchor**; records written after the last anchor and before truncation can still be lost silently. With `everyRecords: 1` that window is one record. Documented.
+- **Threat-model boundary (required, not optional):** the anchor adds tamper-evidence **only when it lives on append-only or physically separate media** (append-only-flagged FS, S3/GCS object-lock, syslog, a different host). On the **same writable filesystem** an attacker who truncates `audit.jsonl` can truncate `audit.anchor.jsonl` to match and verification passes — so file-mode on the same disk is a convenience, not a guarantee. The CLI (`status`, `audit-verify`, `config`) states this explicitly.
+- **Bounded guarantee:** even on proper media, truncation is detected only back to the **last anchor**; records written after the last anchor and before truncation can still be lost silently. With `everyRecords: 1` that window is one record. Documented.
 
 ### 2.2 External append-only audit sink contract
 
