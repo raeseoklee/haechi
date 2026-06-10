@@ -3,17 +3,17 @@
 - 문서 상태: Draft 0.3
 - 작성일: 2026-06-10
 - 기준 버전: 0.3.2
-- 기준 브랜치: `irae/risk-resolution`
+- 기준 브랜치: `main`
 
 ## 1. 현재 판단
 
-0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했다. GitHub 공개와 npm developer preview 배포는 허용 가능하다. 단, 실제 npm publish는 npm 계정 인증, package ownership, GitHub release workflow 실행이라는 외부 운영자 게이트를 통과해야 한다.
+0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했다. 외부 운영자 게이트(npm 계정 인증, package ownership, GitHub release workflow)는 2026-06-10에 통과했다: `haechi@0.3.2`가 provenance와 함께 npm에 배포되었고, `v0.3.2` 태그와 GitHub pre-release가 생성되었다.
 
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility, developer preview 문구가 문서화됨 |
 | GitHub release/tag | 허용 | production-ready가 아닌 developer preview로 표현해야 함 |
-| npm developer preview | 조건부 허용 | `npm run release:preflight` 통과 후, 인증된 계정에서 `release:preflight:npm` 및 provenance publish 필요 |
+| npm developer preview | 허용 (배포 완료) | 2026-06-10 인증된 계정에서 `haechi@0.3.2` provenance publish 완료 |
 | npm stable | 보류 | 1.0 API 안정성, 운영 KMS/HSM/Vault reference adapter, stream-aware enforcement 전까지 stable 표현 금지 |
 | production use | 금지 | 0.3.2는 self-hosted developer preview이며 운영 인증/인가/key custody는 사용자 책임 |
 
@@ -23,14 +23,14 @@
 |---|---|---|---|
 | G0 | GitHub source 공개 | 테스트 통과, 보안 한계 문서화, 평문 audit leak 없음 | Pass |
 | G1 | GitHub pre-release | P0 코드 리스크 해결, production-ready 표현 없음 | Pass |
-| G2 | npm developer preview | P0 해결, preflight/SBOM/provenance 경로 준비, npm auth 확인 | Conditional Pass |
+| G2 | npm developer preview | P0 해결, preflight/SBOM/provenance 경로 준비, npm auth 확인 | Pass (`haechi@0.3.2` 2026-06-10 배포) |
 | G3 | npm stable | P1 운영 reference, stream-aware enforcement, API stability 강화 | Blocked |
 
 ## 3. P0 배포 차단 리스크 상태
 
 | ID | 기존 리스크 | 상태 | 해소 증거 |
 |---|---|---|---|
-| P0-REL-001 | npm 인증/권한 미해결 | External Gate | `release:preflight:npm`, GitHub release workflow, `npm publish --provenance --access public`로 게이트화. 실제 인증은 운영자 필요 |
+| P0-REL-001 | npm 인증/권한 미해결 | Resolved | 2026-06-10 GitHub release workflow로 `haechi@0.3.2` provenance publish 성공, npm 인증·package ownership 확정 |
 | P0-REL-002 | proxy 외부 노출 위험 | Resolved | non-loopback bind는 기본 실패, `--allow-remote-bind` 필요 |
 | P0-REL-003 | streaming 요청 처리 불명확 | Resolved | `stream: true` 기본 501 fail-closed, `streaming.requestMode: "pass-through"` 명시 필요 |
 | P0-REL-004 | responseProtection 실패 모드 불명확 | Resolved | 비JSON/invalid JSON/압축/대용량 응답 fail-closed, 명시 allow 정책 분리 |
@@ -58,7 +58,7 @@
 | P1-OPS-002 | SBOM/provenance 부재 | Resolved | `npm run sbom`, `.github/workflows/npm-publish.yml`, `publishConfig.provenance` |
 | P1-OPS-003 | 실제 vLLM/Ollama/llama.cpp 통합 테스트 부재 | Resolved for preview | env-gated optional local inference integration tests 추가. CI는 외부 모델 서버 없이 skip |
 | P1-OPS-004 | 성능/대용량 payload 미측정 | Resolved for preview | request/response byte limit, `npm run bench:payload` |
-| P1-OPS-005 | npm ownership 미확정 | External Gate | 인증된 npm 계정에서 `npm run release:preflight:npm`, publish 후 `npm view haechi version` 필요 |
+| P1-OPS-005 | npm ownership 미확정 | Resolved | `npm view haechi version`이 `0.3.2` 반환, 최초 publish 성공으로 ownership 확정 |
 
 ## 5.1 추가 보안 검토 리스크 해소 상태
 
@@ -110,9 +110,9 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 현재 외부 npm 게이트 확인 결과:
 
 - `npm whoami`: `raeseoklee`
-- `npm view haechi version`: `E404 Not Found`
+- `npm view haechi version`: `0.3.2`
 
-`haechi` 이름은 비어 있어 보이나, package ownership은 인증된 계정에서 최초 publish가 성공해야 확정된다. `release:preflight:npm`은 인증 확인 후 `haechi@<현재 버전>`의 중복 publish를 차단하고, 첫 publish 전 package E404는 통과 조건으로 처리한다.
+아래 체크리스트는 2026-06-10 0.3.2 배포에서 전부 완료되었다(`v0.3.2` 태그, GitHub pre-release, provenance publish). 체크리스트는 이후 릴리스의 템플릿으로 유지한다.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
