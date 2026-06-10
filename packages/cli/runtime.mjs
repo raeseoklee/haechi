@@ -34,7 +34,9 @@ export function defaultConfig() {
       maxBytes: 1048576
     },
     streaming: {
-      requestMode: "block"
+      requestMode: "block",
+      responseMode: "enforce",
+      maxMatchBytes: 256
     },
     limits: {
       maxRequestBytes: 1048576,
@@ -271,8 +273,14 @@ export function normalizeConfig(config) {
   if (typeof merged.responseProtection.maxBytes !== "number" || merged.responseProtection.maxBytes < 1) {
     throw new Error("responseProtection.maxBytes must be a positive number");
   }
-  if (!["block", "pass-through"].includes(merged.streaming.requestMode)) {
+  if (!["block", "pass-through", "inspect"].includes(merged.streaming.requestMode)) {
     throw new Error(`Invalid streaming.requestMode: ${merged.streaming.requestMode}`);
+  }
+  if (!["dry-run", "report-only", "enforce"].includes(merged.streaming.responseMode)) {
+    throw new Error(`Invalid streaming.responseMode: ${merged.streaming.responseMode}`);
+  }
+  if (typeof merged.streaming.maxMatchBytes !== "number" || merged.streaming.maxMatchBytes < 1) {
+    throw new Error("streaming.maxMatchBytes must be a positive number");
   }
   if (typeof merged.limits.maxRequestBytes !== "number" || merged.limits.maxRequestBytes < 1) {
     throw new Error("limits.maxRequestBytes must be a positive number");

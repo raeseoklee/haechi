@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
+import { inspectResponseStream } from "../stream-filter/index.mjs";
 
 export const DEFAULT_PROXY_PORT = 1016;
 
@@ -22,6 +23,11 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       const json = parseJsonBody(body);
 
       if (isStreamingRequest(json, routeContext)) {
+        if (config.streaming.requestMode === "inspect") {
+          await handleInspectedStream({ runtime, request, response, routeContext, json });
+          return;
+        }
+
         if (config.streaming.requestMode === "pass-through") {
           await recordProxyDecision({
             runtime,
@@ -45,7 +51,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
 
         writeJson(response, 501, {
           error: "haechi_streaming_unsupported",
-          message: "Streaming requests are blocked unless streaming.requestMode is explicitly set to pass-through"
+          message: "Streaming requests are blocked unless streaming.requestMode is set to pass-through or inspect"
         });
         return;
       }
@@ -112,6 +118,107 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       });
     }
   };
+}
+
+async function handleInspectedStream({ runtime, request, response, routeContext, json }) {
+  const { haechi, config } = runtime;
+
+  // Inspection needs to know the wire format and delta channel for this route.
+  if (!routeContext.streaming) {
+    writeJson(response, 501, {
+      error: "haechi_streaming_uninspectable_route",
+      message: `streaming.requestMode is "inspect" but route ${routeContext.routeId} has no known streaming format`
+    });
+    return;
+  }
+
+  // The request body is ordinary JSON even when the response streams, so it is
+  // protected like any other request.
+  const requestResult = routeContext.protectRequest
+    ? await haechi.protectJson(json, {
+      ...routeContext,
+      operation: `request:${routeContext.operation}`,
+      direction: "request",
+      mode: config.policy.mode ?? config.mode
+    })
+    : { payload: json, blocked: false };
+
+  if (requestResult.blocked) {
+    writeJson(response, 403, {
+      error: "haechi_policy_block",
+      summary: requestResult.summary,
+      auditId: requestResult.auditEvent.id
+    });
+    return;
+  }
+
+  const upstreamResponse = await forward({
+    upstream: config.target.upstream,
+    request,
+    body: JSON.stringify(requestResult.payload),
+    timeoutMs: config.limits.upstreamTimeoutMs
+  });
+
+  const streamMode = config.streaming.responseMode ?? config.responseProtection.mode ?? config.policy.mode ?? config.mode;
+  const protector = haechi.createStreamProtector({
+    ...routeContext,
+    operation: `response-stream:${routeContext.operation}`,
+    direction: "response",
+    mode: streamMode,
+    maxMatchBytes: config.streaming.maxMatchBytes
+  });
+
+  response.writeHead(upstreamResponse.status, streamingResponseHeaders(upstreamResponse));
+
+  const { blocked, summary } = await inspectResponseStream({
+    source: upstreamResponse.body ?? emptyAsyncIterable(),
+    sink: nodeResponseSink(response),
+    streaming: routeContext.streaming,
+    protector
+  });
+
+  await recordStreamDecision({ runtime, routeContext, blocked, summary, mode: streamMode });
+  response.end();
+}
+
+function streamingResponseHeaders(upstreamResponse) {
+  const headers = Object.fromEntries(upstreamResponse.headers.entries());
+  delete headers["content-length"];
+  delete headers["content-encoding"];
+  return headers;
+}
+
+function nodeResponseSink(response) {
+  return {
+    write(text) {
+      response.write(text);
+    }
+  };
+}
+
+async function* emptyAsyncIterable() {
+  // No upstream body to inspect.
+}
+
+async function recordStreamDecision({ runtime, routeContext, blocked, summary, mode }) {
+  if (typeof runtime.auditSink?.record !== "function") {
+    return;
+  }
+  await runtime.auditSink.record({
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    protocol: routeContext?.protocol ?? "proxy",
+    operation: `response-stream:${routeContext?.operation ?? "unknown"}`,
+    mode,
+    identity: null,
+    enforced: !["dry-run", "report-only"].includes(mode),
+    blocked,
+    decision: blocked ? "stream_blocked" : "stream_inspected",
+    reason: blocked ? "stream_policy_block" : "stream_inspected",
+    routeId: routeContext?.routeId ?? "unknown",
+    pathHash: routeContext?.path ? shortHash(routeContext.path) : null,
+    summary
+  });
 }
 
 async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, issuedTokens = [] }) {
