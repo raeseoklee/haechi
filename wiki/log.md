@@ -33,3 +33,7 @@ Added `docs/current/configuration.md` (+`.ko.md`): full per-key reference, prese
 ## [2026-06-10] ingest | 0.5.0 streaming inspection shipped
 
 PR #14 added SSE/NDJSON streaming response inspection (`streaming.requestMode: "inspect"`): new `packages/stream-filter`, `core.createStreamProtector` with a bounded sliding buffer for cross-frame matches, per-adapter `{ format, deltaPath }`, and a fix where a specific `target.type` now beats a default-merged `target.adapter`. Rewrote `[[streaming-protection-gap]]` from gap to shipped design, marked the roadmap row, and recorded the bounded limits (`maxMatchBytes`, emitted-bytes-on-block, n>1 choices) as threat-model exclusions.
+
+## [2026-06-10] design | 0.6 auth design finalized
+
+Detailed-design pass for 0.6 (no code). Decisions: auth-core-focused scope (KMS/audit-sink/signed-artifacts/npm-org -> 0.7), named policy profiles for per-client policy (byScope->byLabel->default, fail-closed), bearer tokens in a separate `.haechi/auth.json` + `haechi auth` CLI with keyed-HMAC hashes. Wrote `release-0.6-implementation-scope.md` (+KO), updated `[[identity-and-auth]]`, split the roadmap into 0.6 (auth core) and a new 0.7 (ops hardening + ecosystem).
