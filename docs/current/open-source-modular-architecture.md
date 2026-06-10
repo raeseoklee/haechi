@@ -83,7 +83,7 @@ For the initial public release, `core`, `crypto`, `policy`, `filter`, `audit`, `
 
 | Mode | Scope of change | When to use | Example |
 |---|---|---|---|
-| Local proxy | Almost no code changes | Quickly protect LLM HTTP or MCP Streamable HTTP | Change base URL to `http://localhost:8787` |
+| Local proxy | Almost no code changes | Quickly protect LLM HTTP or MCP Streamable HTTP | Change base URL to `http://localhost:1016` |
 | SDK wrapper | Small code changes | Pass more precise in-app context | `haechi.protectMessage(...)` |
 | Middleware | Insert into web/API server | Gateways like Express/Fastify/FastAPI | request/response hook |
 | Sidecar | Deploy alongside self-hosted service | Container/server runtime environments | app -> sidecar -> provider |

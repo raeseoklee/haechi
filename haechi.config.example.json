@@ -5,6 +5,10 @@
     "adapter": "openai-compatible",
     "upstream": "http://127.0.0.1:9999"
   },
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 1016
+  },
   "responseProtection": {
     "enabled": false,
     "mode": "enforce",

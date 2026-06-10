@@ -17,7 +17,7 @@ npm run demo:init                     # haechi init --force (writes haechi.confi
 npm run demo:protect                  # protect a sample payload
 npm run demo:report                   # summarize audit events
 
-npm run haechi -- <cmd>               # run the CLI (e.g. npm run haechi -- proxy --port 8787)
+npm run haechi -- <cmd>               # run the CLI (e.g. npm run haechi -- proxy)
 npm run release:preflight             # pre-release gate checks
 npm run scan:stale-names              # guard against stale naming in publishable files
 npm run sbom                          # regenerate sbom.cdx.json

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { readAuditSummary } from "../../audit/index.mjs";
-import { createHaechiProxy } from "../../proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
 import { runMcpStdioFilter } from "../../mcp-stdio/index.mjs";
-import { DEFAULT_CONFIG_PATH, createRuntime, loadConfig, writeDefaultConfig } from "../runtime.mjs";
+import { DEFAULT_CONFIG_PATH, createRuntime, isValidPort, loadConfig, writeDefaultConfig } from "../runtime.mjs";
 
 const [command, ...argv] = process.argv.slice(2);
 
@@ -127,8 +127,8 @@ async function proxyCommand(argv) {
   const options = parseOptions(argv);
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
-  const port = Number(options.port ?? 8787);
-  const host = options.host ?? "127.0.0.1";
+  const port = parsePort(options.port ?? config.proxy.port);
+  const host = options.host ?? config.proxy.host;
   const allowRemoteBind = Boolean(options["allow-remote-bind"]);
   const proxy = createHaechiProxy({ runtime, port, host, allowRemoteBind });
   const address = await proxy.listen();
@@ -305,6 +305,20 @@ function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function parsePort(value) {
+  if (typeof value === "boolean") {
+    throw new Error("proxy port must be an integer from 0 to 65535");
+  }
+  if (typeof value === "string" && !/^\d+$/.test(value.trim())) {
+    throw new Error("proxy port must be an integer from 0 to 65535");
+  }
+  const port = typeof value === "number" ? value : Number(value);
+  if (!isValidPort(port)) {
+    throw new Error("proxy port must be an integer from 0 to 65535");
+  }
+  return port;
+}
+
 function printHelp() {
   console.log(`Haechi MVP CLI
 
@@ -312,7 +326,7 @@ Usage:
   haechi init [--config haechi.config.json] [--force]
   haechi protect <input.json> [--config haechi.config.json]
   haechi report [--audit .haechi/audit.jsonl]
-  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port 8787] [--allow-remote-bind]
+  haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]
   haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
   haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
   haechi token-reveal <token> [--config haechi.config.json] [--allow-dev-reveal]

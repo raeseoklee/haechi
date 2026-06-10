@@ -9,6 +9,7 @@ import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
 import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
+import { DEFAULT_PROXY_PORT } from "../proxy/index.mjs";
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
@@ -19,6 +20,10 @@ export function defaultConfig() {
       type: "llm-http",
       adapter: "openai-compatible",
       upstream: "http://127.0.0.1:9999"
+    },
+    proxy: {
+      host: "127.0.0.1",
+      port: DEFAULT_PROXY_PORT
     },
     responseProtection: {
       enabled: false,
@@ -156,6 +161,10 @@ export function normalizeConfig(config) {
       ...defaultConfig().target,
       ...(config.target ?? {})
     },
+    proxy: {
+      ...defaultConfig().proxy,
+      ...(config.proxy ?? {})
+    },
     responseProtection: {
       ...defaultConfig().responseProtection,
       ...(config.responseProtection ?? {})
@@ -206,6 +215,12 @@ export function normalizeConfig(config) {
   if (!["local", "external"].includes(merged.keys.provider)) {
     throw new Error(`Unsupported key provider: ${merged.keys.provider}`);
   }
+  if (typeof merged.proxy.host !== "string" || !merged.proxy.host.trim()) {
+    throw new Error("proxy.host must be a non-empty string");
+  }
+  if (!isValidPort(merged.proxy.port)) {
+    throw new Error("proxy.port must be an integer from 0 to 65535");
+  }
   if (merged.audit.sink !== "jsonl") {
     throw new Error("Current implementation only supports jsonl audit sink");
   }
@@ -250,6 +265,10 @@ export function normalizeConfig(config) {
   }
   createProtocolAdapter(merged.target);
   return merged;
+}
+
+export function isValidPort(port) {
+  return Number.isInteger(port) && port >= 0 && port <= 65535;
 }
 
 function createConfiguredCryptoProvider(config) {

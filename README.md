@@ -29,10 +29,10 @@ The default config runs in `dry-run` mode. It detects sensitive values and write
 ## Local Proxy
 
 ```bash
-node packages/cli/bin/haechi.mjs proxy --config haechi.config.json --port 8787
+node packages/cli/bin/haechi.mjs proxy --config haechi.config.json
 ```
 
-Point an existing HTTP JSON client at `http://localhost:8787` and set `target.upstream` in `haechi.config.json`.
+Point an existing HTTP JSON client at `http://localhost:1016` and set `target.upstream` in `haechi.config.json`. Change `proxy.port` in the config or pass `--port` to use a different local port.
 
 The proxy binds to loopback by default. Binding to `0.0.0.0`, `::`, or another non-loopback host fails unless `--allow-remote-bind` is provided. Use that flag only behind explicit network access controls.
 
@@ -64,7 +64,7 @@ Haechi 0.3 includes protocol adapter presets for OpenAI-compatible servers, vLLM
 }
 ```
 
-Then point an OpenAI-compatible client at `http://127.0.0.1:8787/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy.
+Then point an OpenAI-compatible client at `http://127.0.0.1:1016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy.
 
 ## Privacy Profiles
 

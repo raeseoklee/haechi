@@ -4,9 +4,9 @@ import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createRuntime } from "../packages/cli/runtime.mjs";
+import { createRuntime, defaultConfig, normalizeConfig } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
-import { assertSafeProxyBind, createHaechiProxy } from "../packages/proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, assertSafeProxyBind, createHaechiProxy } from "../packages/proxy/index.mjs";
 
 test("vLLM-compatible proxy protects request and JSON response", async () => {
   const upstream = createServer(async (request, response) => {
@@ -91,6 +91,32 @@ test("proxy refuses non-loopback bind unless explicitly allowed", () => {
   );
 
   assert.doesNotThrow(() => assertSafeProxyBind({ host: "0.0.0.0", allowRemoteBind: true }));
+});
+
+test("proxy listen options are configurable with a safe default port", () => {
+  assert.equal(DEFAULT_PROXY_PORT, 1016);
+  assert.deepEqual(defaultConfig().proxy, {
+    host: "127.0.0.1",
+    port: 1016
+  });
+  assert.deepEqual(normalizeConfig({
+    proxy: {
+      host: "127.0.0.1",
+      port: 21016
+    }
+  }).proxy, {
+    host: "127.0.0.1",
+    port: 21016
+  });
+});
+
+test("proxy port config rejects invalid TCP port numbers", () => {
+  for (const port of [-1, 65536, 211016, 1.5, "1016"]) {
+    assert.throws(
+      () => normalizeConfig({ proxy: { port } }),
+      /proxy\.port must be an integer from 0 to 65535/
+    );
+  }
 });
 
 test("proxy rejects absolute-form request targets before forwarding", async () => {

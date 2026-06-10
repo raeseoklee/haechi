@@ -53,7 +53,7 @@ npm test
 node packages/cli/bin/haechi.mjs init --force
 node packages/cli/bin/haechi.mjs protect examples/llm-prompt-filtering/input.json --config haechi.config.json
 node packages/cli/bin/haechi.mjs report --audit .haechi/audit.jsonl
-node packages/cli/bin/haechi.mjs proxy --config haechi.config.json --port 8787
+node packages/cli/bin/haechi.mjs proxy --config haechi.config.json
 ```
 
 ## 5. 구현 원칙

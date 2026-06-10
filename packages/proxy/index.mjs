@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 
-export function createHaechiProxy({ runtime, port = 8787, host = "127.0.0.1", allowRemoteBind = false }) {
+export const DEFAULT_PROXY_PORT = 1016;
+
+export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "127.0.0.1", allowRemoteBind = false }) {
   assertSafeProxyBind({ host, allowRemoteBind });
   const { haechi, config, protocolAdapter } = runtime;
 
@@ -382,7 +384,7 @@ async function unprotectedResponseDecision({
 async function readUpstreamBody(upstreamResponse, { maxBytes = null } = {}) {
   const contentLength = parseContentLength(upstreamResponse.headers.get("content-length"));
   if (maxBytes && contentLength !== null && contentLength > maxBytes) {
-    await cancelUpstreamBody(upstreamResponse);
+    void cancelUpstreamBody(upstreamResponse);
     return {
       body: Buffer.alloc(0),
       tooLarge: true,
@@ -414,7 +416,7 @@ async function readUpstreamBody(upstreamResponse, { maxBytes = null } = {}) {
 
     receivedBytes += value.byteLength;
     if (maxBytes && receivedBytes > maxBytes) {
-      await cancelReader(reader);
+      void cancelReader(reader);
       return {
         body: Buffer.concat(chunks),
         tooLarge: true,
