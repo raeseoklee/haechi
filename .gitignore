@@ -8,3 +8,6 @@ coverage/
 sbom.cdx.json
 *.log
 tmp/
+
+# npm pack artifacts
+*.tgz

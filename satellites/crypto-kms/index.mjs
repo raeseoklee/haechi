@@ -1,29 +1,20 @@
-// Reference KMS-backed cryptoProvider for Haechi (keys.provider: external).
+// KMS-backed cryptoProvider for Haechi (keys.provider: external).
 //
-// This is the *shape* a published @haechi/crypto-kms satellite (0.8) takes. It
-// uses envelope encryption: a fresh data key per record encrypts the plaintext
-// locally with AES-256-GCM, and the data key is wrapped by the KMS. The master
-// key never leaves the KMS. The `kms` client is injected, so this file has zero
-// real dependencies — a real adapter swaps createInMemoryKms() for an AWS KMS /
-// HashiCorp Vault client implementing the same small interface.
+// Published as @haechi/crypto-kms. It uses envelope encryption: a fresh data key
+// per record encrypts the plaintext locally with AES-256-GCM, and the data key
+// is wrapped by the KMS. The master key never leaves the KMS. The `kms` client is
+// injected, so this package adds no runtime dependency to core — a real adapter
+// swaps createInMemoryKms() for an AWS KMS / HashiCorp Vault client implementing
+// the same small interface.
 //
 // Inject it:  createRuntime(config, { cryptoProvider: createKmsCryptoProvider({ kms }) })
 // and set keys.provider: "external".
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
-
-// The published @haechi/crypto-kms satellite imports this from `haechi/crypto`;
-// it is inlined here so the reference example is fully self-contained (no
-// cross-package import) and matches Haechi's canonical AAD exactly.
-function canonicalize(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalize(item)).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+// Import the canonical AAD form from core (resolved via the workspace symlink in
+// dev, the consumer's installed `haechi` in production) so this satellite's AAD
+// is byte-for-byte identical to the core provider's — no drift.
+import { canonicalize } from "haechi/crypto";
 
 const ALG = "AES-256-GCM";
 const HMAC_KEY_DOMAIN = "haechi:crypto-kms:hmac-root:v1";
