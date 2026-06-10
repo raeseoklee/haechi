@@ -7,9 +7,9 @@
 
 ## 1. Release Goal
 
-Stand up the `@haechi/*` package ecosystem: convert the repo to an npm workspaces monorepo, create the npm org, and publish the first two satellites — `@haechi/crypto-kms` (promoting the 0.7 reference) and `@haechi/auth-jwt` (JWKS bearer verification). This realizes operational key custody as an installable package and grows the auth ecosystem without touching core's zero-dependency posture.
+Stand up the `haechi-*` package ecosystem: convert the repo to an npm workspaces monorepo and publish the first two satellites — `haechi-crypto-kms` (promoting the 0.7 reference) and `haechi-auth-jwt` (JWKS bearer verification), both unscoped (the `@haechi` scope is taken; no org needed). This realizes operational key custody as an installable package and grows the auth ecosystem without touching core's zero-dependency posture.
 
-**Scope decision (2026-06-10):** 0.8 is the **packaging foundation + satellites**. The `@haechi/dashboard` read-only audit viewer (a UI build) and full interactive `@haechi/auth-oidc` move to **0.9** so 0.8 stays code-light and focused on the monorepo + two headless-friendly adapters.
+**Scope decision (2026-06-10):** 0.8 is the **packaging foundation + satellites**. The `haechi-dashboard` read-only audit viewer (a UI build) and full interactive `haechi-auth-oidc` move to **0.9** so 0.8 stays code-light and focused on the monorepo + two headless-friendly adapters.
 
 Core (`haechi`, unscoped) stays **zero runtime dependency**. Satellite dependencies (e.g. an AWS SDK) live in the satellite's own `package.json` only and never enter core's tarball or SBOM.
 
@@ -31,30 +31,30 @@ The verified working layout:
 - `examples/crypto-kms-reference/` is **promoted** to `satellites/crypto-kms/`. The reference example inlined `canonicalize` because its nested `package.json` could not self-resolve `haechi/crypto` pre-workspaces; **under workspaces that import resolves**, so the satellite imports `canonicalize` from `haechi/crypto` rather than carrying a copy (avoiding AAD-canonicalization drift between core and satellite). The old `examples/` directory keeps a short README pointing at the published package. A conformance test asserts the satellite's AAD canonicalization is **byte-for-byte identical** to `haechi/crypto` (not merely semantically equivalent).
 - **Lock file:** converting to workspaces regenerates `package-lock.json` with workspace-resolved entries (including the root self-member). The regenerated lock file is committed; CI uses `npm ci` (which fails on a stale/missing lock), so the conversion PR must commit the fresh lock.
 
-**CI strategy (avoid double-runs):** root CI runs `node --test` directly from the root, which discovers `satellites/**/*.test.mjs` automatically (workspace symlinks make their `haechi/*` imports resolve). CI does **not** use `npm test --workspaces` (which would recurse into the root self-member and re-run the suite). Each satellite keeps its own `test` script for isolated local runs (`npm test -w @haechi/crypto-kms`) only. Verified: root `node --test` runs core + satellite tests once, and the `node_modules/haechi → ..` symlink cycle does not hang the runner (node skips `node_modules`).
+**CI strategy (avoid double-runs):** root CI runs `node --test` directly from the root, which discovers `satellites/**/*.test.mjs` automatically (workspace symlinks make their `haechi/*` imports resolve). CI does **not** use `npm test --workspaces` (which would recurse into the root self-member and re-run the suite). Each satellite keeps its own `test` script for isolated local runs (`npm test -w haechi-crypto-kms`) only. Verified: root `node --test` runs core + satellite tests once, and the `node_modules/haechi → ..` symlink cycle does not hang the runner (node skips `node_modules`).
 
 **Honest packaging note (was a "byte-stable" claim):** the root tarball is **not** byte-identical to 0.7.0 — `package.json` gains the `workspaces` field and the version bumps, which is expected for any release. The defensible, tested claim is narrower and is enforced by a CI gate (see §6.1): **(a) no satellite files appear in the `haechi` tarball, and (b) the `haechi` tarball's own `package.json` declares zero runtime `dependencies`.** The gate inspects the **packed manifest** (extract `package.json` from `npm pack` output and assert `dependencies` is empty/undefined) — not the installed `node_modules` SBOM, which would pass vacuously today and miss a future runtime-dep leak.
 
-### 2.2 npm org `@haechi/*` + per-package trusted publishing
+### 2.2 Unscoped `haechi-*` names + per-package trusted publishing
 
-- Create the npm org **`@haechi`** (also defends the namespace).
+- **Naming (decision 2026-06-10):** the `@haechi` npm org/scope is already taken by a third party, so satellites are published as **unscoped `haechi-*`** names — `haechi-crypto-kms`, `haechi-auth-jwt` (both verified free on npm). This needs **no npm org**, matches the unscoped core `haechi`, and each name is reserved + Trusted-Publisher-bound individually. (Trade-off vs a scope: no namespace grouping/defence; the `haechi-` prefix is the convention.)
 - Each satellite is published with the **same OIDC trusted-publishing + sigstore + SHA256SUMS** path proven in 0.7 — its own npmjs.com Trusted Publisher link and a tag-triggered publish workflow.
-- **Satellite `package.json` requirements (do not inherit from root):** each satellite must set its own `"publishConfig": { "access": "public", "provenance": true }` — scoped packages default to restricted access, and workspace members do not inherit the root's `publishConfig`. Omitting it risks an accidental private publish. Post-publish, the runbook verifies `npm view @haechi/<pkg> access` reports `public`.
+- **Satellite `package.json` requirements (do not inherit from root):** each satellite still sets its own `"publishConfig": { "access": "public", "provenance": true }`. Unscoped packages are public by default, so `access: public` is belt-and-suspenders; `provenance: true` and not inheriting the root's `publishConfig` are the load-bearing parts. Post-publish, the runbook verifies `npm view haechi-<pkg> access` reports `public`.
 - **Tag namespacing + workflow guards (avoid mis-triggers and collisions):**
   - Core release tags: `v<semver>` (e.g. `v0.8.0`). The root publish workflow triggers on `push: tags: ['v[0-9]*.[0-9]*.[0-9]*']`. Because GitHub's tag glob treats `.` literally and `[0-9]*` loosely (it would also match `v1.2.3.4` or `v1a.2.3`), the workflow **re-validates** the tag against a strict `^v[0-9]+\.[0-9]+\.[0-9]+$` regex in a pre-publish step and fails closed on a non-match.
   - Satellite tags are **prefixed**: `crypto-kms-v<semver>`, `auth-jwt-v<semver>`. Each satellite workflow triggers only on its own prefix glob and likewise re-validates against `^<prefix>-v[0-9]+\.[0-9]+\.[0-9]+$`.
   - Each workflow re-asserts the package directory it publishes (`npm publish -w <dir>`) so a mistagged push can't publish the wrong package. The Trusted Publisher on npmjs.com is bound to a **specific workflow filename** — renaming the workflow without updating the npm config breaks OIDC auth (documented as a failure mode in the runbook, with a package→workflow-filename→tag-glob mapping table).
-- **Independent semver** per satellite (a satellite patch never bumps core). Satellites start at `0.1.0`. **Pre-1.0 contract:** satellites follow standard npm semver where a `0.x` **minor** bump may carry breaking changes; consumers should pin `major.minor` (e.g. `@haechi/crypto-kms@~0.1`). Satellites are pre-stable until their own `1.0.0`.
-- **Bootstrapping the first publish (chicken-and-egg):** order per satellite — (1) create/own the `@haechi` org; (2) **reserve** the package name within the org on npmjs.com (claims the namespace without publishing a version); (3) **configure** the Trusted Publisher linking the repo + exact workflow filename to that reserved name; (4) push the satellite's first tag → the workflow's OIDC publish creates `0.1.0` with provenance. No manual `npm publish` from a laptop is required (matches the 0.7 trusted-publishing posture). Steps (2) and (3) require org-owner access from step (1).
+- **Independent semver** per satellite (a satellite patch never bumps core). Satellites start at `0.1.0`. **Pre-1.0 contract:** satellites follow standard npm semver where a `0.x` **minor** bump may carry breaking changes; consumers should pin `major.minor` (e.g. `haechi-crypto-kms@~0.1`). Satellites are pre-stable until their own `1.0.0`.
+- **Bootstrapping the first publish (no org needed):** order per satellite — (1) on npmjs.com, **configure the Trusted Publisher** for the (not-yet-published) unscoped name, linking the repo + exact workflow filename; (2) push the satellite's first tag → the workflow's OIDC publish creates `0.1.0` with provenance and **claims the name** on first publish. No manual `npm publish` from a laptop is required (matches the 0.7 trusted-publishing posture). Because the names are unscoped and currently free, there is no org-membership prerequisite.
 
-### 2.3 `@haechi/crypto-kms` (publish + real KMS client)
+### 2.3 `haechi-crypto-kms` (publish + real KMS client)
 
 - Promote the 0.7 reference (`createKmsCryptoProvider` envelope encryption + `createInMemoryKms`) into the published package, switching its inlined `canonicalize` to `import { canonicalize } from "haechi/crypto"` (§2.1). The existing `kms` client interface (`keyId` / `wrap` / `unwrap` / `deriveHmacKey`) is **unchanged**, so the promoted provider and in-memory client stay byte-for-byte and their 0.7 tests carry over.
-- Add a **real AWS KMS client** at `@haechi/crypto-kms/aws`: `createAwsKmsClient({ keyId, region, client, hmacRootCiphertext })`. It implements the same `kms` interface: `wrap` = KMS `Encrypt` of a CSPRNG-generated 32-byte data key, `unwrap` = KMS `Decrypt` (envelope encryption — the master key never leaves KMS); `deriveHmacKey(domain)` = **HKDF-SHA256** over a single KMS-`Decrypt`ed 32-byte root (`hmacRootCiphertext`, cached), domain-separated — deterministic with no per-token network call. With no `hmacRootCiphertext`, `deriveHmacKey` throws and the provider is encrypt-only (valid via `requireHmac:false`).
+- Add a **real AWS KMS client** at `haechi-crypto-kms/aws`: `createAwsKmsClient({ keyId, region, client, hmacRootCiphertext })`. It implements the same `kms` interface: `wrap` = KMS `Encrypt` of a CSPRNG-generated 32-byte data key, `unwrap` = KMS `Decrypt` (envelope encryption — the master key never leaves KMS); `deriveHmacKey(domain)` = **HKDF-SHA256** over a single KMS-`Decrypt`ed 32-byte root (`hmacRootCiphertext`, cached), domain-separated — deterministic with no per-token network call. With no `hmacRootCiphertext`, `deriveHmacKey` throws and the provider is encrypt-only (valid via `requireHmac:false`).
 - **`@aws-sdk/client-kms` is an OPTIONAL peer dependency, not a hard dependency** (decision 2026-06-10, revising the earlier "satellite's own dependency" wording). It is imported **lazily** only when no `client` is injected, so: the monorepo `npm ci`/CI never pulls the (large) AWS SDK; consumers on the in-memory or an injected client never install it; and `core` is trivially unaffected. The published satellite declares it under `peerDependencies` + `peerDependenciesMeta.optional`. This keeps the satellite dependency-light while still offering a real backend.
 - The satellite's CI runs `assertCryptoProviderConformance` (imported from `haechi/crypto` via the workspace symlink) against the in-memory client **and** the AWS client driven by an **injected mock** of the two KMS ops (`encrypt`/`decrypt`) — **no SDK, no network**. The mock is a faithful envelope (AES-256-GCM under a per-mock master key): `Decrypt` returns the plaintext only for a blob this key wrapped and **rejects** a blob wrapped by a different key (cross-key isolation) or a corrupted blob. A trivial always-succeeds stub is insufficient; the suite exercises these rejection paths plus HMAC determinism/domain-separation. Live `createAwsKmsClient` validation against a sandbox KMS key is an **out-of-CI integration test** (documented, not gating).
 
-### 2.4 `@haechi/auth-jwt` (JWKS bearer verification, dependency-light)
+### 2.4 `haechi-auth-jwt` (JWKS bearer verification, dependency-light)
 
 `createJwtAuthProvider({ issuer, audience, jwksUri, cryptoProvider, algorithms, clockSkewSeconds, claimMappings })` implements the `authProvider` contract for a **headless** gateway. It is implementable with `node:` builtins only (no `jose`): JWKS fetched via global `fetch`, JWK→key via `crypto.createPublicKey({ key: jwk, format: "jwk" })`, signatures verified via `crypto.verify`.
 
@@ -93,14 +93,14 @@ Wired via **injection** (`createRuntime(config, { authProvider: createJwtAuthPro
 
 ## 3. Explicit non-scope (deferred to 0.9+)
 
-- `@haechi/dashboard` read-only audit viewer (UI build, its own tech-stack decision).
-- `@haechi/auth-oidc` full interactive OIDC (authorization-code flow) — `@haechi/auth-jwt` covers the headless case first.
-- `@haechi/auth-jwt` multi-origin/CDN-fronted JWKS (issuer host ≠ JWKS host).
-- `@haechi/classifier-*` ML/heuristic classifier plugins.
-- `@haechi/crypto-kms` Vault/GCP/Azure backends (AWS only in 0.8).
+- `haechi-dashboard` read-only audit viewer (UI build, its own tech-stack decision).
+- `haechi-auth-oidc` full interactive OIDC (authorization-code flow) — `haechi-auth-jwt` covers the headless case first.
+- `haechi-auth-jwt` multi-origin/CDN-fronted JWKS (issuer host ≠ JWKS host).
+- `haechi-classifier-*` ML/heuristic classifier plugins.
+- `haechi-crypto-kms` Vault/GCP/Azure backends (AWS only in 0.8).
 - Dynamic loading of satellites (1.0 plugin sandbox).
 
-The risk-register and roadmap are updated to move `@haechi/auth-oidc` and `@haechi/dashboard` out of the 0.8 row and into a new **0.9** row, so the public docs match this scope.
+The risk-register and roadmap are updated to move `haechi-auth-oidc` and `haechi-dashboard` out of the 0.8 row and into a new **0.9** row, so the public docs match this scope.
 
 ## 4. Backward compatibility
 
@@ -108,7 +108,7 @@ Core behavior is unchanged: the root package's `exports`, `bin`, `files`, and ze
 
 ## 5. 1.0 relationship
 
-0.8 does not itself close a 1.0 blocker, but it **realizes operational key custody as an installable, attested package** (`@haechi/crypto-kms`) and proves the satellite model end-to-end. The remaining 1.0 gates stay: API-stability freeze and plugin sandbox + real-environment validation.
+0.8 does not itself close a 1.0 blocker, but it **realizes operational key custody as an installable, attested package** (`haechi-crypto-kms`) and proves the satellite model end-to-end. The remaining 1.0 gates stay: API-stability freeze and plugin sandbox + real-environment validation.
 
 ## 6. Test criteria (mapped to the PR breakdown)
 
@@ -119,14 +119,14 @@ Core behavior is unchanged: the root package's `exports`, `bin`, `files`, and ze
 - **No-leak + zero-dep gate:** core `npm pack --dry-run` contains **no `satellites/` paths**; the **packed** `haechi` `package.json` (extracted from the tarball) has empty/undefined `dependencies`. The gate is **negatively tested**: temporarily adding `satellites/` to core's `files`, or a runtime dep to core's `package.json`, makes the gate fail with a clear error (so the gate isn't a vacuous pass).
 - In-memory crypto provider (promoted 0.7 code) passes `assertCryptoProviderConformance` through the workspace symlink, including the byte-for-byte `canonicalize` parity check vs `haechi/crypto`.
 
-### 6.2 PR2 — `@haechi/crypto-kms` (real AWS client)
+### 6.2 PR2 — `haechi-crypto-kms` (real AWS client)
 
 - In-memory **and AWS** clients (the AWS one driven by an **injected mock** of the KMS `encrypt`/`decrypt` ops — no SDK, no network) pass `assertCryptoProviderConformance`, including the cross-key/corrupted-blob **rejection** paths and HMAC determinism/domain-separation; end-to-end through `createRuntime` (encrypt + tokenization round-trip).
 - `createAwsKmsClient` without a `keyId` throws; with no `hmacRootCiphertext`, `deriveHmacKey` throws and the provider passes conformance as encrypt-only (`requireHmac:false`).
 - The published manifest sets `publishConfig.access: public` and declares `@aws-sdk/client-kms` under `peerDependencies` + `peerDependenciesMeta.optional` (NOT a runtime `dependency`); the published satellite tarball has `dependencies: {}`, and core's tarball stays zero-dep (the §6.1 gate still passes).
 - A satellite publish workflow (`crypto-kms-v<semver>`) exists with the 0.7 signed-artifacts path; the core workflow is guarded so a satellite release tag never publishes `haechi`.
 
-### 6.3 PR3 — `@haechi/auth-jwt` (security gates)
+### 6.3 PR3 — `haechi-auth-jwt` (security gates)
 
 - A valid RS256/ES256 JWT (test-key-signed, stub JWKS) authenticates into a PII-safe identity with **no raw `sub` in the audit**; `subjectHash`/`issuerHash` are 64-hex-char HMAC-SHA-256.
 - Each of the following is **denied**: `alg:"none"`; an `HS256` token forged with the RSA public key (alg-confusion); a JWE/`typ` mismatch; expired (`exp`); not-yet-valid (`nbf`); missing `exp`; missing/empty `sub`; wrong-`aud` (string and array forms); wrong-`iss`; unknown-`kid`; bad-signature; an RSA JWK `< 2048` bits; a JWK with `use:"enc"`/`key_ops:["encrypt"]`.
@@ -140,6 +140,6 @@ Core behavior is unchanged: the root package's `exports`, `bin`, `files`, and ze
 ## 7. Suggested PR breakdown (stacked)
 
 1. **Workspaces conversion** (no new published package): root `workspaces: [".", "satellites/*"]`, bump root to **0.8.0**, move `crypto-kms` to `satellites/crypto-kms/` with `peer + dev` core deps, switch the inlined `canonicalize` to `haechi/crypto` (+ parity test), repoint tests, commit the regenerated `package-lock.json`, add the **no-leak + zero-dep CI gate** (with negative tests), root CI runs all workspace tests via root `node --test`. → §6.1
-2. **`@haechi/crypto-kms`:** real AWS KMS client (satellite-only `@aws-sdk/client-kms` dep) + faithful mocked-AWS conformance CI + `publishConfig` + prefixed-tag publish workflow (strict regex guard) + Trusted Publisher bootstrap. → §6.2
-3. **`@haechi/auth-jwt`:** JWKS verification provider implementing the full §2.4 security spec + identity mapping + the §6.3 security-gate tests + `publishConfig` + prefixed-tag publish workflow. → §6.3
+2. **`haechi-crypto-kms`:** real AWS KMS client (satellite-only `@aws-sdk/client-kms` dep) + faithful mocked-AWS conformance CI + `publishConfig` + prefixed-tag publish workflow (strict regex guard) + Trusted Publisher bootstrap. → §6.2
+3. **`haechi-auth-jwt`:** JWKS verification provider implementing the full §2.4 security spec + identity mapping + the §6.3 security-gate tests + `publishConfig` + prefixed-tag publish workflow. → §6.3
 4. **0.8.0 release cut:** docs EN/KO, packaging/roadmap/risk-register (move OIDC+dashboard to 0.9)/api-stability, wiki, npm org / Trusted Publisher runbook (mapping table + bootstrap order + failure modes).

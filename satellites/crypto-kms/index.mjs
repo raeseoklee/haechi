@@ -1,6 +1,6 @@
 // KMS-backed cryptoProvider for Haechi (keys.provider: external).
 //
-// Published as @haechi/crypto-kms. It uses envelope encryption: a fresh data key
+// Published as haechi-crypto-kms. It uses envelope encryption: a fresh data key
 // per record encrypts the plaintext locally with AES-256-GCM, and the data key
 // is wrapped by the KMS. The master key never leaves the KMS. The `kms` client is
 // injected, so this package adds no runtime dependency to core — a real adapter

@@ -1,4 +1,4 @@
-// @haechi/auth-jwt — headless JWKS bearer verification for Haechi.
+// haechi-auth-jwt — headless JWKS bearer verification for Haechi.
 //
 // createJwtAuthProvider(...) implements the authProvider contract
 // (authenticate(request) -> identity | null, fail-closed) using node: builtins

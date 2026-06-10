@@ -1,4 +1,4 @@
-name: Publish @haechi/crypto-kms
+name: Publish haechi-crypto-kms
 
 # Triggered by publishing a GitHub Release whose tag is `crypto-kms-v<semver>`.
 # Core releases use `v<semver>` and are handled by npm-publish.yml; the `if:`
@@ -54,7 +54,7 @@ jobs:
       - name: Pack and checksum
         run: |
           set -o pipefail
-          TARBALL=$(npm pack -w @haechi/crypto-kms --silent)
+          TARBALL=$(npm pack -w haechi-crypto-kms --silent)
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           node scripts/release-checksums.mjs "$TARBALL" | tee SHA256SUMS
       # Keyless sigstore attestation of the tarball.
@@ -62,9 +62,9 @@ jobs:
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: ${{ env.TARBALL }}
-      # Authenticates via the @haechi/crypto-kms Trusted Publisher link bound to
+      # Authenticates via the haechi-crypto-kms Trusted Publisher link bound to
       # this repo + workflow filename (no npm token). access:public + provenance.
-      - run: npm publish -w @haechi/crypto-kms --provenance --access public
+      - run: npm publish -w haechi-crypto-kms --provenance --access public
       - name: Upload release artifacts
         env:
           GH_TOKEN: ${{ github.token }}

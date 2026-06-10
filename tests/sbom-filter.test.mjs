@@ -2,20 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { refIsSatellite, stripSatellites } from "../scripts/generate-sbom.mjs";
 
-const SATS = new Set(["@haechi/crypto-kms"]);
+const SATS = new Set(["haechi-crypto-kms"]);
 
 test("refIsSatellite matches the bom-ref and purl forms of a satellite", () => {
-  assert.equal(refIsSatellite("@haechi/crypto-kms@0.1.0", SATS), true);
-  assert.equal(refIsSatellite("pkg:npm/%40haechi/crypto-kms@0.1.0", SATS), true);
-  assert.equal(refIsSatellite("pkg:npm/%40haechi/crypto-kms@0.1.0?type=tgz", SATS), true);
-  assert.equal(refIsSatellite("@haechi/crypto-kms", SATS), true); // no version
+  assert.equal(refIsSatellite("haechi-crypto-kms@0.1.0", SATS), true);
+  assert.equal(refIsSatellite("pkg:npm/haechi-crypto-kms@0.1.0", SATS), true);
+  assert.equal(refIsSatellite("pkg:npm/haechi-crypto-kms@0.1.0?type=tgz", SATS), true);
+  assert.equal(refIsSatellite("haechi-crypto-kms", SATS), true); // no version
 });
 
 test("refIsSatellite does NOT over-strip a different package sharing the name as a prefix", () => {
   // The previous substring match would have wrongly stripped these.
-  assert.equal(refIsSatellite("@haechi/crypto-kms-utils@1.0.0", SATS), false);
-  assert.equal(refIsSatellite("pkg:npm/%40haechi/crypto-kms-extra@2.0.0", SATS), false);
-  assert.equal(refIsSatellite("@haechi/crypto@1.0.0", SATS), false);
+  assert.equal(refIsSatellite("haechi-crypto-kms-utils@1.0.0", SATS), false);
+  assert.equal(refIsSatellite("pkg:npm/haechi-crypto-kms-extra@2.0.0", SATS), false);
+  assert.equal(refIsSatellite("haechi-crypto@1.0.0", SATS), false);
   assert.equal(refIsSatellite("haechi@0.8.0", SATS), false);
 });
 
@@ -29,11 +29,11 @@ test("stripSatellites removes satellite components and dep edges, stamps core me
   const raw = {
     metadata: { component: { name: "p2p-encryption", version: "0.0.0", "bom-ref": "x" } },
     components: [
-      { name: "crypto-kms", "bom-ref": "@haechi/crypto-kms@0.1.0", purl: "pkg:npm/%40haechi/crypto-kms@0.1.0" }
+      { name: "haechi-crypto-kms", "bom-ref": "haechi-crypto-kms@0.1.0", purl: "pkg:npm/haechi-crypto-kms@0.1.0" }
     ],
     dependencies: [
-      { ref: "haechi@0.8.0", dependsOn: ["@haechi/crypto-kms@0.1.0"] },
-      { ref: "@haechi/crypto-kms@0.1.0", dependsOn: [] }
+      { ref: "haechi@0.8.0", dependsOn: ["haechi-crypto-kms@0.1.0"] },
+      { ref: "haechi-crypto-kms@0.1.0", dependsOn: [] }
     ]
   };
   const out = stripSatellites(raw, SATS, { name: "haechi", version: "0.8.0" });
@@ -54,7 +54,7 @@ test("stripSatellites preserves a genuine runtime dependency (must not over-stri
   const raw = {
     components: [{ name: "left-pad", "bom-ref": "left-pad@1.3.0", purl: "pkg:npm/left-pad@1.3.0" }],
     dependencies: [
-      { ref: "haechi@0.8.0", dependsOn: ["left-pad@1.3.0", "@haechi/crypto-kms@0.1.0"] },
+      { ref: "haechi@0.8.0", dependsOn: ["left-pad@1.3.0", "haechi-crypto-kms@0.1.0"] },
       { ref: "left-pad@1.3.0", dependsOn: [] }
     ]
   };

@@ -1,4 +1,4 @@
-name: Publish @haechi/auth-jwt
+name: Publish haechi-auth-jwt
 
 # Triggered by publishing a GitHub Release whose tag is `auth-jwt-v<semver>`.
 # Core releases use `v<semver>`; the `if:` guard keeps the workflows from cross-firing.
@@ -45,14 +45,14 @@ jobs:
       - name: Pack and checksum
         run: |
           set -o pipefail
-          TARBALL=$(npm pack -w @haechi/auth-jwt --silent)
+          TARBALL=$(npm pack -w haechi-auth-jwt --silent)
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           node scripts/release-checksums.mjs "$TARBALL" | tee SHA256SUMS
       # actions/attest-build-provenance v2.4.0
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: ${{ env.TARBALL }}
-      - run: npm publish -w @haechi/auth-jwt --provenance --access public
+      - run: npm publish -w haechi-auth-jwt --provenance --access public
       - name: Upload release artifacts
         env:
           GH_TOKEN: ${{ github.token }}

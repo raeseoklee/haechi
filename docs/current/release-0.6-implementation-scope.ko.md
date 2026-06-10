@@ -10,7 +10,7 @@
 
 0.4에서 예약해 둔 `authProvider`/`identity` 계약을 구현하고, identity를 실질적인 per-client 제어로 전환한다: 내장 bearer 인증, 명명된 per-client policy profile, model allowlist, request rate limiting. 이로써 Haechi를 단일 호스트에서 복수의 클라이언트/에이전트 앞에 안전하게 배치할 수 있게 된다.
 
-**범위 결정 (2026-06-10):** 0.6은 auth 핵심에 집중한다. 원래 0.6으로 묶였던 무거운 운영 항목들 — Vault/AWS KMS 레퍼런스 어댑터, 외부 append-only audit 싱크, 서명된 릴리스 아티팩트, npm org(`@haechi/*`) 취득 — 은 각각 별도의 보안 설계를 받을 수 있도록 **0.7**로 이월한다.
+**범위 결정 (2026-06-10):** 0.6은 auth 핵심에 집중한다. 원래 0.6으로 묶였던 무거운 운영 항목들 — Vault/AWS KMS 레퍼런스 어댑터, 외부 append-only audit 싱크, 서명된 릴리스 아티팩트, `haechi-*` 패키지 패밀리 — 은 각각 별도의 보안 설계를 받을 수 있도록 **0.7**로 이월한다.
 
 ## 2. 범위
 
@@ -21,7 +21,7 @@
 - `auth.provider`로 선택한다:
   - `none` (기본값) — 인증 없음; `identity`는 `null`로 유지 (0.5와 byte 단위로 동일한 audit 형태). Per-client policy는 default profile / base policy로 결정된다.
   - `bearer` — 내장 token auth (§2.2).
-  - `external` — 주입된 `authProvider` 필요; 없으면 fail-closed (`keys.provider: external`과 동일한 방식). OIDC/JWT provider는 **0.7+ 위성 패키지** (`@haechi/auth-oidc`)로 남긴다; 0.6은 네트워크 IdP 코드를 포함하지 않는다.
+  - `external` — 주입된 `authProvider` 필요; 없으면 fail-closed (`keys.provider: external`과 동일한 방식). OIDC/JWT provider는 **0.7+ 위성 패키지** (`haechi-auth-oidc`)로 남긴다; 0.6은 네트워크 IdP 코드를 포함하지 않는다.
 
 ### 2.2 내장 bearer auth + token store
 
@@ -123,8 +123,8 @@ forward
 
 ## 4. 명시적 비범위 (0.7+로 이월)
 
-- OIDC/JWT provider (`@haechi/auth-oidc`, `@haechi/auth-jwt`) — 0.6은 bearer + external 주입만 포함.
-- Vault/AWS KMS 레퍼런스 어댑터; 외부 append-only audit 싱크; 서명된 릴리스 아티팩트; npm org `@haechi/*`.
+- OIDC/JWT provider (`haechi-auth-oidc`, `haechi-auth-jwt`) — 0.6은 bearer + external 주입만 포함.
+- Vault/AWS KMS 레퍼런스 어댑터; 외부 append-only audit 싱크; 서명된 릴리스 아티팩트; the `haechi-*` package family.
 - LLM token-budget limiting; 분산/공유 rate 상태.
 - auth provider의 동적 npm 로딩 (1.0 plugin sandbox).
 

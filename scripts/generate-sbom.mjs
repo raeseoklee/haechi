@@ -3,7 +3,7 @@
 //
 // Caveat handled here: the repo is an npm workspaces monorepo whose root self-
 // lists (`workspaces: [".", "satellites/*"]`) so satellites can resolve core.
-// `npm sbom` therefore reports the local `@haechi/*` satellites as if they were
+// `npm sbom` therefore reports the local `haechi-*` satellites as if they were
 // dependencies of `haechi` — they are NOT (core's package.json has zero
 // `dependencies`; satellites are independently published siblings). We strip
 // those local workspace components so the SBOM describes the zero-dependency
@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-// Names of the local satellite workspaces (e.g. "@haechi/crypto-kms") — these
+// Names of the local satellite workspaces (e.g. "haechi-crypto-kms") — these
 // are sibling packages, never runtime deps of core.
 export async function localSatelliteNames(root = "satellites") {
   const names = new Set();
@@ -40,9 +40,9 @@ export async function localSatelliteNames(root = "satellites") {
 
 // A SBOM ref/purl identifies a satellite if its package coordinate IS one of the
 // local packages — matched on the package-name boundary, not a loose substring,
-// so a future real dep like "@haechi/crypto-kms-utils" is never mistaken for the
-// "@haechi/crypto-kms" satellite. Handles both the bom-ref form
-// ("@haechi/crypto-kms@0.1.0") and the purl form ("pkg:npm/%40haechi/crypto-kms@0.1.0").
+// so a future real dep like "haechi-crypto-kms-utils" is never mistaken for the
+// "haechi-crypto-kms" satellite. Handles both the bom-ref form
+// ("haechi-crypto-kms@0.1.0") and the purl form ("pkg:npm/%40haechi/crypto-kms@0.1.0").
 export function refIsSatellite(ref, satelliteNames) {
   if (!ref) return false;
   let coord = String(ref);

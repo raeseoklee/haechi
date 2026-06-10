@@ -1,12 +1,12 @@
-# `@haechi/auth-jwt`
+# `haechi-auth-jwt`
 
-A **headless** JWKS bearer (JWT) `authProvider` for Haechi. It verifies an `Authorization: Bearer <jwt>` against an issuer's JWKS and resolves a **PII-safe identity** — using `node:` builtins only (no `jose`). Published independently as `@haechi/auth-jwt`; it adds **no runtime dependency** to core.
+A **headless** JWKS bearer (JWT) `authProvider` for Haechi. It verifies an `Authorization: Bearer <jwt>` against an issuer's JWKS and resolves a **PII-safe identity** — using `node:` builtins only (no `jose`). Published independently as `haechi-auth-jwt`; it adds **no runtime dependency** to core.
 
 ## Usage
 
 ```js
 import { createRuntime } from "haechi/runtime";
-import { createJwtAuthProvider } from "@haechi/auth-jwt";
+import { createJwtAuthProvider } from "haechi-auth-jwt";
 
 const runtime = createRuntime(
   { auth: { provider: "external" }, /* ... */ },
@@ -39,4 +39,4 @@ Wired via **injection** (`auth.provider: "external"`); dynamic loading stays ban
 
 ## Scope (0.8)
 
-Single-origin issuers only (issuer host == JWKS host). Multi-origin/CDN-fronted JWKS and full interactive OIDC (`@haechi/auth-oidc`) are 0.9.
+Single-origin issuers only (issuer host == JWKS host). Multi-origin/CDN-fronted JWKS and full interactive OIDC (`haechi-auth-oidc`) are 0.9.

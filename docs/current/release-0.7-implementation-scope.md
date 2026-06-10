@@ -10,7 +10,7 @@
 
 Harden the operational story that 1.0 ("stable", developer-preview label removed) blocks on: audit integrity beyond a single local file, external key custody, and verifiable release artifacts. This is the first of the two 1.0-blocker releases.
 
-**Scope decision (2026-06-10):** 0.7 is focused on **ops hardening** — audit integrity, key custody contract, signed artifacts. The **ecosystem** items previously grouped here (npm org `@haechi/*`, publishing `@haechi/crypto-kms` / `@haechi/auth-oidc`, `@haechi/dashboard`, npm workspaces) move to **0.8**, which also removes the duplicate 0.7 roadmap row.
+**Scope decision (2026-06-10):** 0.7 is focused on **ops hardening** — audit integrity, key custody contract, signed artifacts. The **ecosystem** items previously grouped here (the `haechi-*` package family, publishing `haechi-crypto-kms` / `haechi-auth-oidc`, `haechi-dashboard`, npm workspaces) move to **0.8**, which also removes the duplicate 0.7 roadmap row.
 
 Core's **zero runtime dependency** posture is non-negotiable: everything in 0.7 ships with `node:` builtins only. Heavy adapters (AWS KMS, Vault) are satellites/examples, never core.
 
@@ -39,7 +39,7 @@ The audit hash chain detects tampering and reordering but **not** deletion of th
 
 - Tighten and document the `cryptoProvider` contract for `keys.provider: external`: a provider always implements `encrypt`/`decrypt`, binds canonical AAD, and selects keys by `kid`; the envelope **base shape** is `{ v, alg, kid, iv, ct, tag, aadHash }` and adapters **may add provider-specific fields** (e.g. a KMS adapter's `wrappedKey`). `hmac` is required **only by features that use it** — bearer auth and deterministic tokenization — and `createRuntime` fails closed at construction when one of those is configured without `hmac` (an encrypt-only provider is otherwise valid). Policy-bundle signing uses the local key file directly via the CLI, not the injected provider.
 - Ship `assertCryptoProviderConformance(provider, { requireHmac = true })` (an exported test helper): encrypt→decrypt round-trip (distinct plaintexts), AAD-mismatch rejection, **tampered-ciphertext rejection (real AEAD authentication)**, and `hmac` determinism + data-dependency + domain separation + invalid-domain rejection. Satellite adapters self-test against it; pass `requireHmac: false` for an encrypt-only provider.
-- Ship a **reference adapter** under `examples/crypto-kms-reference/` (its own `package.json`, AWS/Vault SDK as an *optional* dependency; the in-process `createInMemoryKms` is explicitly non-production) demonstrating envelope-encryption injection. It is the source that becomes the published **`@haechi/crypto-kms`** satellite in 0.8 (gated on the npm org).
+- Ship a **reference adapter** under `examples/crypto-kms-reference/` (its own `package.json`, AWS/Vault SDK as an *optional* dependency; the in-process `createInMemoryKms` is explicitly non-production) demonstrating envelope-encryption injection. It is the source that becomes the published **`haechi-crypto-kms`** satellite in 0.8 (gated on the npm org).
 
 ### 2.4 Signed release artifacts
 
@@ -48,8 +48,8 @@ The audit hash chain detects tampering and reordering but **not** deletion of th
 
 ## 3. Explicit non-scope (deferred to 0.8)
 
-- Create npm org `@haechi/*`; publish `@haechi/crypto-kms`, `@haechi/auth-oidc`, `@haechi/auth-jwt`.
-- `@haechi/dashboard` (read-only audit viewer) and npm workspaces conversion.
+- Publish the `haechi-*` family: publish `haechi-crypto-kms`, `haechi-auth-oidc`, `haechi-auth-jwt`.
+- `haechi-dashboard` (read-only audit viewer) and npm workspaces conversion.
 - Real AWS KMS / HashiCorp Vault SDK integration as a published package (0.7 ships the contract + reference example only).
 - Distributed/shared audit or rate state.
 
