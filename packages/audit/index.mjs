@@ -127,7 +127,9 @@ export async function verifyAuditChain(path) {
     records += 1;
   }
 
-  return { valid: true, records };
+  // headHash anchors the chain externally: publishing it out-of-band is the
+  // only defense against tail truncation, which the chain alone cannot detect.
+  return { valid: true, records, headHash: expectedPreviousHash };
 }
 
 async function buildIntegrityRecord(path, event) {

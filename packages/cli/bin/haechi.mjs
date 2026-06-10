@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
-import { readAuditSummary } from "../../audit/index.mjs";
+import { readFile, stat } from "node:fs/promises";
+import { readAuditSummary, verifyAuditChain } from "../../audit/index.mjs";
 import { DEFAULT_PROXY_PORT, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
@@ -19,6 +19,12 @@ try {
       break;
     case "report":
       await reportCommand(argv);
+      break;
+    case "audit-verify":
+      await auditVerifyCommand(argv);
+      break;
+    case "status":
+      await statusCommand(argv);
       break;
     case "proxy":
       await proxyCommand(argv);
@@ -120,6 +126,116 @@ async function reportCommand(argv) {
     ok: true,
     auditPath,
     summary: await readAuditSummary(auditPath)
+  });
+}
+
+async function auditVerifyCommand(argv) {
+  const options = parseOptions(argv);
+  let auditPath = options.audit ?? options.path;
+  if (!auditPath) {
+    try {
+      auditPath = (await loadConfig(options.config ?? DEFAULT_CONFIG_PATH)).audit.path;
+    } catch {
+      auditPath = ".haechi/audit.jsonl";
+    }
+  }
+
+  const result = await verifyAuditChain(auditPath);
+  writeJson({
+    ok: result.valid,
+    command: "audit-verify",
+    auditPath,
+    result
+  });
+  if (!result.valid) {
+    process.exitCode = 4;
+  }
+}
+
+async function statusCommand(argv) {
+  const options = parseOptions(argv);
+  const configPath = options.config ?? DEFAULT_CONFIG_PATH;
+  const config = await loadConfig(configPath);
+  const effectiveMode = config.policy.mode ?? config.mode;
+  const enforced = !["dry-run", "report-only"].includes(effectiveMode);
+  const warnings = [];
+
+  if (!enforced) {
+    warnings.push(`policy mode is ${effectiveMode}: payloads are inspected and audited but NOT modified or blocked`);
+  }
+  if (!config.responseProtection.enabled) {
+    warnings.push("responseProtection.enabled is false: upstream responses are forwarded without inspection");
+  }
+  if (config.streaming.requestMode === "pass-through") {
+    warnings.push("streaming.requestMode is pass-through: streaming payloads are not protected");
+  }
+  if (config.tokenVault.revealPolicy !== "disabled") {
+    warnings.push(`tokenVault.revealPolicy is ${config.tokenVault.revealPolicy}: manual token reveal is enabled`);
+  }
+  if (config.tokenVault.detokenizeResponses && !config.responseProtection.enabled) {
+    warnings.push("tokenVault.detokenizeResponses is true but responseProtection.enabled is false: detokenization never runs");
+  }
+
+  const keys = {
+    provider: config.keys.provider,
+    keyFile: config.keys.keyFile,
+    exists: false,
+    permissions: null
+  };
+  try {
+    const info = await stat(config.keys.keyFile);
+    keys.exists = true;
+    keys.permissions = `0${(info.mode & 0o777).toString(8)}`;
+    if ((info.mode & 0o077) !== 0) {
+      warnings.push(`key file ${config.keys.keyFile} is group/world accessible (${keys.permissions}); expected 0600`);
+    }
+  } catch {
+    warnings.push(`key file ${config.keys.keyFile} does not exist; run haechi init`);
+  }
+
+  const audit = { path: config.audit.path, exists: false, chain: null };
+  try {
+    await stat(config.audit.path);
+    audit.exists = true;
+    audit.chain = await verifyAuditChain(config.audit.path);
+    if (!audit.chain.valid) {
+      warnings.push(`audit chain verification failed: ${audit.chain.reason}`);
+    }
+  } catch {
+    // No audit file yet is a normal pre-first-run state, not a warning.
+  }
+
+  writeJson({
+    ok: true,
+    command: "status",
+    configPath,
+    protection: {
+      policyMode: effectiveMode,
+      enforced,
+      responseProtection: {
+        enabled: config.responseProtection.enabled,
+        mode: config.responseProtection.mode,
+        failureMode: config.responseProtection.failureMode
+      },
+      streamingRequestMode: config.streaming.requestMode
+    },
+    target: {
+      type: config.target.type,
+      adapter: config.target.adapter,
+      upstream: config.target.upstream
+    },
+    proxy: config.proxy,
+    tokenVault: {
+      revealPolicy: config.tokenVault.revealPolicy,
+      retentionDays: config.tokenVault.retentionDays,
+      deterministic: config.tokenVault.deterministic,
+      deterministicTypes: config.tokenVault.deterministicTypes,
+      detokenizeResponses: config.tokenVault.detokenizeResponses
+    },
+    privacyProfile: config.privacy.profile,
+    keys,
+    audit,
+    warnings
   });
 }
 
@@ -326,6 +442,8 @@ Usage:
   haechi init [--config haechi.config.json] [--force]
   haechi protect <input.json> [--config haechi.config.json]
   haechi report [--audit .haechi/audit.jsonl]
+  haechi audit-verify [--audit .haechi/audit.jsonl] [--config haechi.config.json]
+  haechi status [--config haechi.config.json]
   haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]
   haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]
   haechi policy-verify <policy.bundle.json> [--config haechi.config.json]
