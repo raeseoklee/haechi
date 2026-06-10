@@ -9,12 +9,15 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
 
   async function protectJson(payload, context = {}) {
     const effectiveMode = context.mode ?? mode;
+    // A per-request policy engine (a named profile selected from identity)
+    // overrides the default; without it the base engine applies.
+    const engine = context.policyEngine ?? policyEngine;
     const entries = collectStringEntries(payload);
     const detections = await filterEngine.detect({ entries, context });
     const decisions = [];
 
     for (const detection of detections) {
-      decisions.push(await policyEngine.decide({ detection, context, mode: effectiveMode }));
+      decisions.push(await engine.decide({ detection, context, mode: effectiveMode }));
     }
 
     const enforced = !NO_ENFORCE_MODES.has(effectiveMode);
@@ -57,6 +60,7 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
   // guarantee: a single match longer than it may still split across frames.
   function createStreamProtector(context = {}) {
     const effectiveMode = context.mode ?? mode;
+    const engine = context.policyEngine ?? policyEngine;
     const enforced = !NO_ENFORCE_MODES.has(effectiveMode);
     const maxMatchBytes = context.maxMatchBytes ?? 256;
     const byType = {};
@@ -76,7 +80,7 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     async function decideAll(detections) {
       const decisions = [];
       for (const detection of detections) {
-        decisions.push(await policyEngine.decide({ detection, context, mode: effectiveMode }));
+        decisions.push(await engine.decide({ detection, context, mode: effectiveMode }));
       }
       return decisions;
     }
