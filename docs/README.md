@@ -22,14 +22,9 @@ English is the primary documentation language. Korean translations are maintaine
 - `docs/current/api-stability.md`: developer preview API stability and migration note criteria
 - `docs/current/release-process.md`: release preflight, SBOM, npm provenance publish procedure
 
-## Archive
-
-- `docs/archive/2026-06-08-initial/research-summary.md`: initial research summary for the general-purpose modular segment-encryption concept
-- `docs/archive/2026-06-08-initial/`: PRD, SRS, and security review drafts for the general-purpose segment-encryption concept (Korean, historical record)
-
 ## Direction Change Record
 
-Early documents covered a general-purpose modular segment-encryption layer spanning HTTP/HTTPS/socket/gRPC/A2A. The current direction is a specialized protection solution for prompts, context, tool calls, resources, artifacts, and streaming messages across AI, LLM, MCP, A2A, and agent platforms.
+Early drafts (now removed; see git history before this commit) covered a general-purpose modular segment-encryption layer spanning HTTP/HTTPS/socket/gRPC/A2A. The current direction is a specialized protection solution for prompts, context, tool calls, resources, artifacts, and streaming messages across AI, LLM, MCP, A2A, and agent platforms.
 
 Open-source/self-hosted security infrastructure takes priority over commercial SaaS. Current documents therefore center on the self-hosted SDK/CLI/proxy, replaceable `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `KeyProvider`, `AuditSink`, and plugin conformance tests, rather than a hosted control plane.
 

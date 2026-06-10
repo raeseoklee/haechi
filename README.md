@@ -6,6 +6,8 @@
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
 [![status](https://img.shields.io/badge/status-developer%20preview-orange)](docs/current/risk-register-release-gate.md)
 
+**English** | [한국어](README.ko.md)
+
 Haechi is an experimental developer preview of a self-hosted AI context enforcement layer for protecting LLM, MCP, vLLM, Ollama, and agent payloads before they reach models, tools, logs, or proxies.
 
 The name comes from Haechi, a Korean guardian figure associated with discernment and protection.
