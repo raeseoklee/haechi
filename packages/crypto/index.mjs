@@ -139,6 +139,113 @@ export async function initLocalKeyFile(keyFile, { force = false } = {}) {
   return { created: true, keyFile, rotated: retiredKeys.length > 0 };
 }
 
+// Conformance suite for any cryptoProvider used via keys.provider: external.
+// Adapter authors (e.g. a KMS satellite) run this to self-test against the
+// contract. encrypt/decrypt are always required; hmac is required for
+// tokenization, auth, deterministic tokens, and policy bundles — pass
+// { requireHmac: false } for an encrypt-only provider.
+export async function assertCryptoProviderConformance(provider, { requireHmac = true } = {}) {
+  const failures = [];
+  const check = async (name, fn) => {
+    try {
+      await fn();
+    } catch (error) {
+      failures.push(`${name}: ${error.message}`);
+    }
+  };
+  const assert = (condition, message) => {
+    if (!condition) {
+      throw new Error(message);
+    }
+  };
+
+  if (typeof provider?.encrypt !== "function" || typeof provider?.decrypt !== "function") {
+    throw new Error("cryptoProvider must implement encrypt() and decrypt()");
+  }
+
+  const plaintext = `conformance-${randomBytes(8).toString("hex")}@example.com`;
+  const aad = { purpose: "conformance", path: "messages[0].content", type: "email" };
+
+  const other = `conformance-${randomBytes(8).toString("hex")}@example.org`;
+
+  await check("encrypt/decrypt round-trip", async () => {
+    const envelope = await provider.encrypt({ plaintext, aad });
+    assert(envelope && typeof envelope === "object", "encrypt must return an envelope object");
+    assert(envelope.kid, "envelope must carry a key id (kid)");
+    assert(envelope.aadHash, "envelope must carry an aadHash");
+    const back = await provider.decrypt({ envelope, aad });
+    assert(back === plaintext, "decrypt did not return the original plaintext");
+    // A second, distinct plaintext rules out a decrypt that returns a fixed value.
+    const back2 = await provider.decrypt({ envelope: await provider.encrypt({ plaintext: other, aad }), aad });
+    assert(back2 === other, "decrypt did not return the second plaintext (fixed/garbage output)");
+  });
+
+  await check("decrypt rejects a different AAD", async () => {
+    const envelope = await provider.encrypt({ plaintext, aad });
+    let rejected = false;
+    try {
+      await provider.decrypt({ envelope, aad: { ...aad, type: "phone" } });
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "decrypt accepted a mismatched AAD (no AAD binding)");
+  });
+
+  await check("decrypt rejects tampered ciphertext (real AEAD authentication)", async () => {
+    const envelope = await provider.encrypt({ plaintext, aad });
+    if (typeof envelope.ct !== "string" || envelope.ct.length === 0) {
+      return; // provider uses a non-ct envelope shape; the AAD check above still applies
+    }
+    // Flip a byte of the ciphertext; a real AEAD provider fails the auth tag.
+    const buf = Buffer.from(envelope.ct, "base64url");
+    buf[0] ^= 0xff;
+    let rejected = false;
+    try {
+      await provider.decrypt({ envelope: { ...envelope, ct: buf.toString("base64url") }, aad });
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "decrypt accepted tampered ciphertext (no AEAD authentication)");
+  });
+
+  if (requireHmac) {
+    if (typeof provider.hmac !== "function") {
+      failures.push("hmac: provider does not implement hmac() (required for tokenization/auth/bundles)");
+    } else {
+      await check("hmac is deterministic and data-dependent", async () => {
+        const a = await provider.hmac({ data: "x", domain: "haechi:conformance:v1" });
+        const b = await provider.hmac({ data: "x", domain: "haechi:conformance:v1" });
+        assert(typeof a === "string" && a.length > 0, "hmac must return a non-empty string");
+        assert(a === b, "hmac is not deterministic for the same (data, domain)");
+        // Different data MUST give different output — else tokens/identities collide.
+        const c = await provider.hmac({ data: "y", domain: "haechi:conformance:v1" });
+        assert(a !== c, "hmac ignores the data argument (same output for different data)");
+      });
+      await check("hmac separates domains", async () => {
+        const a = await provider.hmac({ data: "x", domain: "haechi:conformance:a" });
+        const b = await provider.hmac({ data: "x", domain: "haechi:conformance:b" });
+        assert(a !== b, "hmac does not separate domains (same output for different domains)");
+      });
+      await check("hmac requires a domain", async () => {
+        for (const badDomain of ["", undefined, null]) {
+          let rejected = false;
+          try {
+            await provider.hmac({ data: "x", domain: badDomain });
+          } catch {
+            rejected = true;
+          }
+          assert(rejected, `hmac accepted an invalid domain (${JSON.stringify(badDomain)})`);
+        }
+      });
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`cryptoProvider conformance failed:\n- ${failures.join("\n- ")}`);
+  }
+  return { ok: true };
+}
+
 export function canonicalize(value) {
   if (Array.isArray(value)) {
     return `[${value.map((item) => canonicalize(item)).join(",")}]`;
