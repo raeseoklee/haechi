@@ -7,24 +7,56 @@ export const DEFAULT_PROXY_PORT = 1016;
 export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "127.0.0.1", allowRemoteBind = false }) {
   assertSafeProxyBind({ host, allowRemoteBind });
   const { haechi, config, protocolAdapter } = runtime;
+  const rateLimiter = createRateLimiter();
 
   const server = createServer(async (request, response) => {
     try {
       if (request.method === "GET" && request.url === "/__haechi/health") {
+        // Intentionally unauthenticated; exposes only the mode.
         writeJson(response, 200, { ok: true, mode: config.mode });
         return;
       }
 
       assertRelativeProxyTarget(request.url);
       const routeContext = protocolAdapter.classifyRequest(request);
+
+      // Authenticate, resolve the policy profile, and rate-limit BEFORE reading
+      // the body, so a denied/throttled request cannot stream a large body.
+      const gate = await authorizeRequest({ runtime, request, routeContext, rateLimiter });
+      if (gate.denied) {
+        writeJson(response, gate.denied.status, {
+          error: gate.denied.error,
+          message: gate.denied.message
+        });
+        return;
+      }
+      const { identity, profile, policyEngine, modelAllowlist } = gate;
+      const authContext = { identity, profile, policyEngine };
+
       const body = await readBody(request, {
         maxBytes: config.limits.maxRequestBytes
       });
       const json = parseJsonBody(body);
 
+      // Model allowlist runs after body read (the model field is in the body).
+      if (modelAllowlist && typeof json?.model === "string" && !modelAllowlist.includes(json.model)) {
+        await recordProxyDecision({
+          runtime, routeContext, identity, profile,
+          decision: "model_not_allowed",
+          reason: `model:${json.model}`,
+          enforced: true,
+          blocked: true
+        });
+        writeJson(response, 403, {
+          error: "haechi_model_not_allowed",
+          message: `Model not allowed: ${json.model}`
+        });
+        return;
+      }
+
       if (isStreamingRequest(json, routeContext)) {
         if (config.streaming.requestMode === "inspect") {
-          await handleInspectedStream({ runtime, request, response, routeContext, json });
+          await handleInspectedStream({ runtime, request, response, routeContext, json, authContext });
           return;
         }
 
@@ -32,6 +64,8 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
           await recordProxyDecision({
             runtime,
             routeContext,
+            identity,
+            profile,
             decision: "streaming_request_pass_through",
             reason: "streaming_request_pass_through",
             enforced: false,
@@ -59,6 +93,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       const result = routeContext.protectRequest
         ? await haechi.protectJson(json, {
           ...routeContext,
+          ...authContext,
           operation: `request:${routeContext.operation}`,
           direction: "request",
           mode: config.policy.mode ?? config.mode
@@ -85,6 +120,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
         upstreamResponse,
         routeContext,
         runtime,
+        authContext,
         issuedTokens: result.issuedTokens ?? []
       });
 
@@ -120,7 +156,89 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
   };
 }
 
-async function handleInspectedStream({ runtime, request, response, routeContext, json }) {
+// Authenticate → resolve policy profile → rate-limit. Returns the request's
+// identity/profile/policyEngine/modelAllowlist, or a denial. Auth is required
+// exactly when an authProvider is configured (auth.provider !== "none").
+async function authorizeRequest({ runtime, request, routeContext, rateLimiter }) {
+  const { authProvider, policyProfiles } = runtime;
+  let identity = null;
+
+  if (authProvider) {
+    try {
+      identity = await authProvider.authenticate(request);
+    } catch {
+      await recordAuthDenied({ runtime, routeContext, reason: "provider_error" });
+      return { denied: { status: 401, error: "haechi_auth_denied", message: "Authentication failed" } };
+    }
+    if (!identity) {
+      const reason = hasBearerHeader(request) ? "invalid_token" : "no_token";
+      await recordAuthDenied({ runtime, routeContext, reason });
+      return { denied: { status: 401, error: "haechi_auth_denied", message: "Authentication required" } };
+    }
+  }
+
+  const resolved = policyProfiles.resolve(identity);
+
+  if (resolved.rate && resolved.rate.requestsPerMinute) {
+    const key = identity?.id ?? "anonymous";
+    if (!rateLimiter.allow(key, resolved.rate.requestsPerMinute)) {
+      await recordProxyDecision({
+        runtime, routeContext, identity, profile: resolved.profile,
+        decision: "rate_limited",
+        reason: `rate:${resolved.rate.requestsPerMinute}`,
+        enforced: true,
+        blocked: true
+      });
+      return { denied: { status: 429, error: "haechi_rate_limited", message: "Rate limit exceeded" } };
+    }
+  }
+
+  return {
+    identity,
+    profile: resolved.profile,
+    policyEngine: resolved.policyEngine,
+    modelAllowlist: resolved.modelAllowlist
+  };
+}
+
+function hasBearerHeader(request) {
+  const header = request?.headers?.authorization ?? request?.headers?.Authorization;
+  return typeof header === "string" && /^Bearer\s+/i.test(header.trim());
+}
+
+function createRateLimiter() {
+  // In-memory fixed-window counter. Per-process: resets on restart, not shared
+  // across replicas — acceptable for a single-process self-hosted preview.
+  const windows = new Map();
+  const windowMs = 60000;
+  return {
+    allow(key, limit) {
+      const now = Date.now();
+      const slot = windows.get(key);
+      if (!slot || now - slot.windowStart >= windowMs) {
+        windows.set(key, { windowStart: now, count: 1 });
+        return true;
+      }
+      if (slot.count >= limit) {
+        return false;
+      }
+      slot.count += 1;
+      return true;
+    }
+  };
+}
+
+async function recordAuthDenied({ runtime, routeContext, reason }) {
+  await recordProxyDecision({
+    runtime, routeContext, identity: null, profile: null,
+    decision: "auth_denied",
+    reason,
+    enforced: true,
+    blocked: true
+  });
+}
+
+async function handleInspectedStream({ runtime, request, response, routeContext, json, authContext = {} }) {
   const { haechi, config } = runtime;
 
   // Inspection needs to know the wire format and delta channel for this route.
@@ -137,6 +255,7 @@ async function handleInspectedStream({ runtime, request, response, routeContext,
   const requestResult = routeContext.protectRequest
     ? await haechi.protectJson(json, {
       ...routeContext,
+      ...authContext,
       operation: `request:${routeContext.operation}`,
       direction: "request",
       mode: config.policy.mode ?? config.mode
@@ -162,6 +281,7 @@ async function handleInspectedStream({ runtime, request, response, routeContext,
   const streamMode = config.streaming.responseMode ?? config.responseProtection.mode ?? config.policy.mode ?? config.mode;
   const protector = haechi.createStreamProtector({
     ...routeContext,
+    ...authContext,
     operation: `response-stream:${routeContext.operation}`,
     direction: "response",
     mode: streamMode,
@@ -177,7 +297,10 @@ async function handleInspectedStream({ runtime, request, response, routeContext,
     protector
   });
 
-  await recordStreamDecision({ runtime, routeContext, blocked, summary, mode: streamMode });
+  await recordStreamDecision({
+    runtime, routeContext, blocked, summary, mode: streamMode,
+    identity: authContext.identity ?? null, profile: authContext.profile ?? null
+  });
   response.end();
 }
 
@@ -200,7 +323,7 @@ async function* emptyAsyncIterable() {
   // No upstream body to inspect.
 }
 
-async function recordStreamDecision({ runtime, routeContext, blocked, summary, mode }) {
+async function recordStreamDecision({ runtime, routeContext, blocked, summary, mode, identity = null, profile = null }) {
   if (typeof runtime.auditSink?.record !== "function") {
     return;
   }
@@ -210,7 +333,8 @@ async function recordStreamDecision({ runtime, routeContext, blocked, summary, m
     protocol: routeContext?.protocol ?? "proxy",
     operation: `response-stream:${routeContext?.operation ?? "unknown"}`,
     mode,
-    identity: null,
+    identity,
+    profile,
     enforced: !["dry-run", "report-only"].includes(mode),
     blocked,
     decision: blocked ? "stream_blocked" : "stream_inspected",
@@ -221,7 +345,7 @@ async function recordStreamDecision({ runtime, routeContext, blocked, summary, m
   });
 }
 
-async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, issuedTokens = [] }) {
+async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, authContext = {}, issuedTokens = [] }) {
   const headers = Object.fromEntries(upstreamResponse.headers.entries());
 
   if (!runtime.config.responseProtection.enabled || !routeContext.protectResponse) {
@@ -311,6 +435,7 @@ async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, i
 
   const result = await runtime.haechi.protectJson(json, {
     ...routeContext,
+    ...authContext,
     operation: `response:${routeContext.operation}`,
     direction: "response",
     mode: runtime.config.responseProtection.mode ?? runtime.config.policy.mode ?? runtime.config.mode
@@ -595,7 +720,7 @@ async function cancelReader(reader) {
   }
 }
 
-async function recordProxyDecision({ runtime, routeContext, decision, reason, enforced, blocked }) {
+async function recordProxyDecision({ runtime, routeContext, decision, reason, enforced, blocked, identity = null, profile = null }) {
   if (typeof runtime.auditSink?.record !== "function") {
     return;
   }
@@ -606,7 +731,8 @@ async function recordProxyDecision({ runtime, routeContext, decision, reason, en
     protocol: routeContext?.protocol ?? "proxy",
     operation: routeContext ? `proxy:${routeContext.protocol}:${routeContext.routeId ?? "unknown"}` : "proxy",
     mode: runtime.config.policy.mode ?? runtime.config.mode,
-    identity: null,
+    identity,
+    profile,
     enforced,
     blocked,
     decision,

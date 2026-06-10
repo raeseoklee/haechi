@@ -7,11 +7,13 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     throw new Error("Haechi requires filterEngine, policyEngine, cryptoProvider, and auditSink");
   }
 
-  async function protectJson(payload, context = {}) {
-    const effectiveMode = context.mode ?? mode;
+  async function protectJson(payload, rawContext = {}) {
     // A per-request policy engine (a named profile selected from identity)
-    // overrides the default; without it the base engine applies.
-    const engine = context.policyEngine ?? policyEngine;
+    // overrides the default. It is a control object, NOT data: strip it before
+    // anything downstream (tokenize AAD, audit) sees the context.
+    const { policyEngine: contextEngine, ...context } = rawContext;
+    const effectiveMode = context.mode ?? mode;
+    const engine = contextEngine ?? policyEngine;
     const entries = collectStringEntries(payload);
     const detections = await filterEngine.detect({ entries, context });
     const decisions = [];
@@ -58,9 +60,12 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
   // Holds a bounded raw tail so a detection split across chunk boundaries is
   // caught before the leading part is emitted. maxMatchBytes bounds the
   // guarantee: a single match longer than it may still split across frames.
-  function createStreamProtector(context = {}) {
+  function createStreamProtector(rawContext = {}) {
+    // Strip the control-object policy engine from the data context (see
+    // protectJson) so it cannot leak into tokenize AAD or audit.
+    const { policyEngine: contextEngine, ...context } = rawContext;
     const effectiveMode = context.mode ?? mode;
-    const engine = context.policyEngine ?? policyEngine;
+    const engine = contextEngine ?? policyEngine;
     const enforced = !NO_ENFORCE_MODES.has(effectiveMode);
     const maxMatchBytes = context.maxMatchBytes ?? 256;
     const byType = {};
@@ -382,9 +387,11 @@ function buildAuditEvent({ context, mode, enforced, blocked, payload, detections
     timestamp: new Date().toISOString(),
     protocol: context.protocol ?? "custom",
     operation: context.operation ?? "protect",
-    // Reserved for 0.6 auth: hard null so unvalidated identity objects cannot
-    // reach the audit log before the PII-safe hashing contract exists.
-    identity: null,
+    // PII-safe identity built by the auth layer (subject/issuer are keyed
+    // HMACs); null when no auth is configured. `profile` is the resolved
+    // policy profile name (or null).
+    identity: context.identity ?? null,
+    profile: context.profile ?? null,
     mode,
     enforced,
     blocked,
