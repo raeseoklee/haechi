@@ -227,7 +227,8 @@ async function statusCommand(argv) {
         mode: config.responseProtection.mode,
         failureMode: config.responseProtection.failureMode
       },
-      streamingRequestMode: config.streaming.requestMode
+      streamingRequestMode: config.streaming.requestMode,
+      streamingResponseMode: config.streaming.responseMode
     },
     target: {
       type: config.target.type,
@@ -594,7 +595,9 @@ Upstream + proxy
 Response + streaming
   responseProtection.enabled  inspect upstream responses        (default false)
   responseProtection.failureMode  fail-closed | allow           (default fail-closed)
-  streaming.requestMode     block | pass-through                (default block)
+  streaming.requestMode     block | pass-through | inspect       (default block)
+                            inspect = stream-filter SSE/NDJSON responses
+  streaming.maxMatchBytes   cross-frame match window             (default 256)
   limits.upstreamTimeoutMs  upstream timeout in ms              (default 120000)
 
 Detection policy

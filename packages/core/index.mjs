@@ -51,7 +51,116 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     };
   }
 
-  return { protectJson };
+  // Stateful protector for an incremental text stream (SSE/NDJSON deltas).
+  // Holds a bounded raw tail so a detection split across chunk boundaries is
+  // caught before the leading part is emitted. maxMatchBytes bounds the
+  // guarantee: a single match longer than it may still split across frames.
+  function createStreamProtector(context = {}) {
+    const effectiveMode = context.mode ?? mode;
+    const enforced = !NO_ENFORCE_MODES.has(effectiveMode);
+    const maxMatchBytes = context.maxMatchBytes ?? 256;
+    const byType = {};
+    const byAction = {};
+    let detectionCount = 0;
+    let pending = "";
+
+    function tally(detections, decisions) {
+      detections.forEach((detection, index) => {
+        byType[detection.type] = (byType[detection.type] ?? 0) + 1;
+        const action = decisions[index]?.action ?? "unknown";
+        byAction[action] = (byAction[action] ?? 0) + 1;
+        detectionCount += 1;
+      });
+    }
+
+    async function decideAll(detections) {
+      const decisions = [];
+      for (const detection of detections) {
+        decisions.push(await policyEngine.decide({ detection, context, mode: effectiveMode }));
+      }
+      return decisions;
+    }
+
+    // Transform a complete, committed text segment.
+    async function transformSegment(text) {
+      const detections = await filterEngine.detect({
+        entries: collectStringEntries(text),
+        context
+      });
+      const decisions = await decideAll(detections);
+      tally(detections, decisions);
+      const blocked = enforced && decisions.some((decision) => decision.action === "block");
+      if (blocked) {
+        return { text: "", blocked: true };
+      }
+      if (!enforced || detections.length === 0) {
+        return { text, blocked: false };
+      }
+      const items = detections.map((detection, index) => ({ detection, decision: decisions[index] }));
+      const transformed = await transformString(text, items, { context, cryptoProvider, tokenVault, issuedTokens: null });
+      return { text: transformed, blocked: false };
+    }
+
+    return {
+      // Protect string leaves of a parsed frame OTHER than the incremental
+      // delta text (e.g. tool-call arguments). Returns the mutated object.
+      async protectFrameExtras(value) {
+        const detections = await filterEngine.detect({
+          entries: collectStringEntries(value),
+          context
+        });
+        if (detections.length === 0) {
+          return { value, blocked: false };
+        }
+        const decisions = await decideAll(detections);
+        tally(detections, decisions);
+        const blocked = enforced && decisions.some((decision) => decision.action === "block");
+        if (blocked) {
+          return { value: null, blocked: true };
+        }
+        if (!enforced) {
+          return { value, blocked: false };
+        }
+        const transformed = await transformPayload(value, detections, decisions, {
+          context, cryptoProvider, tokenVault, enforced
+        });
+        return { value: transformed, blocked: false };
+      },
+      // Append incremental text; return the portion safe to emit now.
+      async push(text) {
+        pending += text;
+        const detections = await filterEngine.detect({
+          entries: collectStringEntries(pending),
+          context
+        });
+        let commit = Math.max(0, pending.length - maxMatchBytes);
+        const straddlers = detections.filter((detection) => detection.end > commit);
+        if (straddlers.length > 0) {
+          commit = Math.min(commit, ...straddlers.map((detection) => detection.start));
+        }
+        if (commit <= 0) {
+          return { text: "", blocked: false };
+        }
+        const head = pending.slice(0, commit);
+        pending = pending.slice(commit);
+        return transformSegment(head);
+      },
+      // Drain the held tail at end of stream (no more cross-frame risk).
+      async flush() {
+        const tail = pending;
+        pending = "";
+        if (!tail) {
+          return { text: "", blocked: false };
+        }
+        return transformSegment(tail);
+      },
+      summary() {
+        return { detectionCount, byType, byAction };
+      }
+    };
+  }
+
+  return { protectJson, createStreamProtector };
 }
 
 export function collectStringEntries(value, path = []) {

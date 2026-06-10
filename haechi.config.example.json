@@ -18,7 +18,9 @@
     "maxBytes": 1048576
   },
   "streaming": {
-    "requestMode": "block"
+    "requestMode": "block",
+    "responseMode": "enforce",
+    "maxMatchBytes": 256
   },
   "limits": {
     "maxRequestBytes": 1048576,
