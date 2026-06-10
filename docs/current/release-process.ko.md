@@ -12,7 +12,7 @@ npm run sbom
 npm run bench:payload
 ```
 
-`release:preflight`는 테스트, stale-name scan, pack dry-run을 실행한다. npm 계정 인증과 package ownership 확인까지 포함하려면 다음을 사용한다.
+`release:preflight`는 테스트, 타입 체크, stale-name scan, pack dry-run을 실행한다. npm 계정 인증과 package ownership 확인까지 포함하려면 다음을 사용한다.
 
 ```bash
 npm run release:preflight:npm
@@ -20,13 +20,22 @@ npm run release:preflight:npm
 
 첫 publish 전에는 `npm view <package> version`이 `E404 Not Found`를 반환하는 것이 정상이다. 이 경우 preflight는 인증된 계정에서 이름을 claim할 준비가 된 상태로 통과한다. 단, `npm view <package>@<version> version`이 성공하면 같은 버전을 다시 배포할 수 없으므로 실패한다.
 
-## 2. npm provenance
+## 2. npm provenance와 trusted publishing
 
-npm provenance는 GitHub Actions release workflow에서 생성한다. 공식 npm 문서의 요구사항에 맞춰 GitHub-hosted runner, `id-token: write`, `npm publish --provenance --access public`을 사용한다.
+의도된 publish 경로는 GitHub Actions trusted publishing이다: npm이 release workflow를 OIDC로 인증하고 provenance 증명을 자동 생성한다. 공식 npm 요구사항에 따라 GitHub-hosted runner, `id-token: write`, 연결된 workflow에서의 publish가 필요하다.
+
+**현재 상태: trusted publishing은 아직 구성되지 않았다.** `haechi@0.3.2`는 로컬 머신에서 패스키 인증과 `--provenance=false`로 배포되어 해당 버전의 provenance 증명이 존재하지 않는다. 다음 npm publish 전에 이 갭을 닫아야 한다.
+
+1. npmjs.com에서: package settings → Trusted Publisher → `raeseoklee/haechi` 저장소와 `npm-publish.yml` workflow 연결.
+2. `.github/workflows/npm-publish.yml`을 OIDC 인증으로 변경 (`NODE_AUTH_TOKEN` secret 제거, runner의 npm CLI가 trusted publishing을 지원하는 버전인지 확인).
+3. 다음 릴리스 후 `npm view haechi --json`(`dist.attestations`)으로 증명을 확인.
+
+provenance 없이 수행한 publish는 release note에 갭을 명시적으로 기록해야 한다(`CONTRIBUTING.md` 참조).
 
 참고:
 
 - https://docs.npmjs.com/generating-provenance-statements/
+- https://docs.npmjs.com/trusted-publishers/
 - https://docs.github.com/actions/publishing-packages/publishing-nodejs-packages
 
 ## 3. GitHub Actions
@@ -34,7 +43,7 @@ npm provenance는 GitHub Actions release workflow에서 생성한다. 공식 npm
 | Workflow | 목적 |
 |---|---|
 | `.github/workflows/ci.yml` | test, release preflight, SBOM artifact |
-| `.github/workflows/npm-publish.yml` | GitHub release published 이벤트에서 npm provenance publish |
+| `.github/workflows/npm-publish.yml` | GitHub release published 이벤트에서 npm publish (trusted publishing 구성 후 provenance 경로) |
 
 ## 4. 배포 차단 조건
 
@@ -46,3 +55,4 @@ npm provenance는 GitHub Actions release workflow에서 생성한다. 공식 npm
 - SBOM 생성 실패
 - npm package name ownership 불확실
 - README/SECURITY가 developer preview와 production 제한을 명시하지 않음
+- trusted publishing/provenance가 미구성인데 release note에 provenance 갭을 명시하지 않음

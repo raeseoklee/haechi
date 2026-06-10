@@ -9,7 +9,7 @@ Agreed 2026-06-10 between maintainer and assistant; recorded in `risk-register-r
 
 | Version | Theme | Why this cut |
 |---|---|---|
-| 0.3.2 ✅ | Hardening + **first npm publish** | Separate name-claim/pipeline risk from feature risk: validate provenance publish on a low-stakes release. Published 2026-06-10 |
+| 0.3.2 ✅ | Hardening + **first npm publish** | Separate name-claim risk from feature risk. Published 2026-06-10 via local passkey with `--provenance=false`; provenance deferred to GitHub Actions trusted publishing, which must be configured **before the next npm publish** ([[packaging-and-distribution]]) |
 | 0.4.0 | Token round-trip and adoption | [[token-vault]] round-trip is what makes tokenization real; `mcp-wrap`, `audit-verify`, `status` are low-cost adoption wins; `identity`/`authProvider` contracts reserved (no implementation) |
 | 0.5.0 | Streaming hardening | [[streaming-protection-gap]] — too complex to share a release with 0.4 |
 | 0.6.0 | Auth + operational controls | Built-in bearer auth, per-client policy scope, model allowlist/rate budget, KMS reference adapter, npm org `@haechi/*` |
@@ -19,6 +19,6 @@ Agreed 2026-06-10 between maintainer and assistant; recorded in `risk-register-r
 ## Principles behind the ordering
 
 1. **Product credibility before operational controls** — for a personal/self-hosted preview, token round-trip and MCP plug-in UX persuade more than rate limits.
-2. **First publish small** — name ownership and pipeline verification decoupled from feature risk.
+2. **First publish small** — name ownership decoupled from feature risk; the provenance/trusted-publishing pipeline remains an open pre-0.4-release task.
 3. **Injection heuristics ship report-only** (default action `allow`; detections still audit) — false-positive blocks would burn trust in a security product.
 4. **No dynamic provider loading before the sandbox** — keeps P1-SEC-004's manifest-only stance coherent.
