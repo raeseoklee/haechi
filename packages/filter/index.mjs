@@ -51,6 +51,50 @@ const DEFAULT_RULES = [
     pattern: "(?<=\\b(?:api[_-]?key|secret|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
     flags: "gi",
     confidence: 0.85
+  },
+  // Indirect prompt injection heuristics. Response/tool-result direction only,
+  // and the policy default for the injection type is `allow` (report-only):
+  // detections are audited regardless of action, and false-positive blocks
+  // would erode trust faster than missed detections.
+  {
+    id: "injection-instruction-override",
+    type: "injection",
+    pattern: "\\b(?:ignore|disregard|forget)\\s+(?:all\\s+|any\\s+|the\\s+|your\\s+)?(?:previous|prior|earlier|above|system)\\s+(?:instructions?|rules?|prompts?|guidelines)",
+    flags: "gi",
+    confidence: 0.7,
+    direction: "response"
+  },
+  {
+    id: "injection-role-reassignment",
+    type: "injection",
+    pattern: "\\b(?:you are now|act as)\\s+(?:an?\\s+)?(?:unrestricted|jailbroken|uncensored|developer mode|dan\\b)|\\bnew (?:system )?instructions?\\s*:",
+    flags: "gi",
+    confidence: 0.65,
+    direction: "response"
+  },
+  {
+    id: "injection-prompt-markers",
+    type: "injection",
+    pattern: "<\\|im_start\\|>|<<SYS>>|\\[\\[?system\\]\\]?\\s*:",
+    flags: "gi",
+    confidence: 0.7,
+    direction: "response"
+  },
+  {
+    id: "injection-conceal-from-user",
+    type: "injection",
+    pattern: "\\bdo not (?:tell|inform|mention|reveal|show)(?:\\s+this)?(?:\\s+to)?\\s+the user\\b",
+    flags: "gi",
+    confidence: 0.7,
+    direction: "response"
+  },
+  {
+    id: "injection-tool-induction",
+    type: "injection",
+    pattern: "\\b(?:silently|secretly|immediately)\\s+(?:call|invoke|run|execute)\\s+(?:the\\s+)?[\\w.-]+\\s+tool\\b",
+    flags: "gi",
+    confidence: 0.6,
+    direction: "response"
   }
 ];
 
@@ -64,16 +108,21 @@ export function createDefaultFilterEngine({ customRules = [] } = {}) {
       readsPlaintext: true,
       networkEgress: false
     },
-    async detect({ entries }) {
-      return entries.flatMap((entry) => detectEntry(entry, rules));
+    async detect({ entries, context }) {
+      return entries.flatMap((entry) => detectEntry(entry, rules, context));
     }
   };
 }
 
-export function detectEntry(entry, rules) {
+export function detectEntry(entry, rules, context = {}) {
   const detections = [];
 
   for (const rule of rules) {
+    // Direction-scoped rules (e.g. injection heuristics) only run on the
+    // matching traffic direction; rules without a direction run everywhere.
+    if (rule.direction && rule.direction !== context?.direction) {
+      continue;
+    }
     const regex = new RegExp(rule.pattern, rule.flags.includes("g") ? rule.flags : `${rule.flags}g`);
     for (const match of entry.value.matchAll(regex)) {
       const value = match[0];

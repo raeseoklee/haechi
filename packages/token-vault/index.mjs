@@ -52,6 +52,7 @@ export function createLocalTokenVault({
       timestamp: new Date().toISOString(),
       protocol: "token-vault",
       operation,
+      identity: null,
       mode: "n/a",
       enforced: true,
       blocked: decision.endsWith("_denied"),

@@ -95,6 +95,12 @@ export function buildPolicy({
       allowUnsafeOverrides
     });
   }
+  // Injection heuristics ship report-only: unless a preset or the user sets an
+  // explicit action, injection detections are audited but never transform or
+  // block. This intentionally bypasses defaultAction.
+  if (!merged.actions.injection) {
+    merged.actions.injection = "allow";
+  }
   validatePolicy(merged);
   return merged;
 }

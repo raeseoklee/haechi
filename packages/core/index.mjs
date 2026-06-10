@@ -269,6 +269,9 @@ function buildAuditEvent({ context, mode, enforced, blocked, payload, detections
     timestamp: new Date().toISOString(),
     protocol: context.protocol ?? "custom",
     operation: context.operation ?? "protect",
+    // Reserved for 0.6 auth: hard null so unvalidated identity objects cannot
+    // reach the audit log before the PII-safe hashing contract exists.
+    identity: null,
     mode,
     enforced,
     blocked,
