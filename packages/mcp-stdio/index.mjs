@@ -38,6 +38,7 @@ async function protectTagged(message, runtime, { enforceMethodAllowlist = true }
     const result = await runtime.haechi.protectJson(next.params, {
       protocol: "mcp-stdio",
       operation: next.method ?? "params",
+      direction: "request",
       mode: runtime.config.policy.mode ?? runtime.config.mode
     });
     if (result.blocked) {
@@ -50,6 +51,7 @@ async function protectTagged(message, runtime, { enforceMethodAllowlist = true }
     const result = await runtime.haechi.protectJson(next.result, {
       protocol: "mcp-stdio",
       operation: "result",
+      direction: "response",
       mode: runtime.config.policy.mode ?? runtime.config.mode
     });
     if (result.blocked) {

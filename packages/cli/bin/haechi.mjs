@@ -101,6 +101,7 @@ async function protectCommand(argv) {
   const result = await runtime.haechi.protectJson(input, {
     protocol: config.target.type,
     operation: "cli protect",
+    direction: "request",
     mode: effectiveMode
   });
 

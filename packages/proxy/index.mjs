@@ -54,6 +54,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
         ? await haechi.protectJson(json, {
           ...routeContext,
           operation: `request:${routeContext.operation}`,
+          direction: "request",
           mode: config.policy.mode ?? config.mode
         })
         : { payload: json, blocked: false };
@@ -204,6 +205,7 @@ async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, i
   const result = await runtime.haechi.protectJson(json, {
     ...routeContext,
     operation: `response:${routeContext.operation}`,
+    direction: "response",
     mode: runtime.config.responseProtection.mode ?? runtime.config.policy.mode ?? runtime.config.mode
   });
 
@@ -497,6 +499,7 @@ async function recordProxyDecision({ runtime, routeContext, decision, reason, en
     protocol: routeContext?.protocol ?? "proxy",
     operation: routeContext ? `proxy:${routeContext.protocol}:${routeContext.routeId ?? "unknown"}` : "proxy",
     mode: runtime.config.policy.mode ?? runtime.config.mode,
+    identity: null,
     enforced,
     blocked,
     decision,
