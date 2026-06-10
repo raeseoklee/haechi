@@ -63,12 +63,34 @@ npm audit signatures
 
 ## 4. GitHub Actions
 
-| Workflow | 목적 |
-|---|---|
-| `.github/workflows/ci.yml` | test, release preflight, SBOM artifact |
-| `.github/workflows/npm-publish.yml` | GitHub release published 이벤트에서 npm provenance publish + 체크섬/증명 release 자산 |
+| Workflow | 배포 대상 | 트리거 태그 | 목적 |
+|---|---|---|---|
+| `.github/workflows/ci.yml` | — | 모든 push/PR | test, release preflight, SBOM artifact |
+| `.github/workflows/npm-publish.yml` | `haechi` | `v<semver>` | npm provenance publish + 체크섬/증명 release 자산 |
+| `.github/workflows/crypto-kms-publish.yml` | `@haechi/crypto-kms` | `crypto-kms-v<semver>` | satellite publish, 동일한 서명 아티팩트 경로 |
 
-## 5. 배포 차단 조건
+각 publish 워크플로는 `release: published`에서 트리거되지만 **가드**되어 둘이 교차 발화하지 않는다: core job은 `v`로 시작하는 태그에서만 실행되고(그리고 `^v[0-9]+\.[0-9]+\.[0-9]+$` 재검증), satellite job은 `crypto-kms-v…`에서만 실행된다(그리고 `^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$` 재검증 **및** 태그 버전이 satellite `package.json` 버전과 일치하는지 검증). npmjs.com Trusted Publisher는 각 패키지의 **특정 워크플로 파일명**에 바인딩된다 — 워크플로 파일 rename은 npm 설정을 갱신할 때까지 OIDC publish를 깨뜨린다.
+
+## 5. Satellite 패키지 (`@haechi/*`)
+
+Satellite는 npm workspaces 모노레포의 `satellites/*`에 살며 core와 **독립적으로** 발행된다(자체 semver; satellite patch가 `haechi`를 bump하지 않음). core와 동일한 서명 아티팩트 경로를 재사용한다(pack → checksum → sigstore attest → OIDC publish → upload).
+
+**satellite별 부트스트랩 순서(첫 발행, chicken-and-egg):**
+
+1. npm org **`@haechi`** 생성/소유(네임스페이스 방어; scoped publish 전에 필요).
+2. npmjs.com에서 org 내 패키지 이름 **예약** — 버전 발행 없이 네임스페이스 확보.
+3. 예약된 패키지에 Trusted Publisher **설정**: `raeseoklee/haechi` 저장소와 satellite의 **정확한 워크플로 파일명**(예: `crypto-kms-publish.yml`) 연결.
+4. 접두사 태그를 push하고 GitHub Release 발행(예: `crypto-kms-v0.1.0`) → 워크플로의 OIDC publish가 provenance와 함께 `0.1.0` 생성.
+
+2–3단계는 1단계의 org-owner 권한이 필요하다. 노트북에서의 수동 `npm publish`는 필요 없다.
+
+| 패키지 | 태그 패턴 | 워크플로 파일 | npm 버전 소스 |
+|---|---|---|---|
+| `@haechi/crypto-kms` | `crypto-kms-v<semver>` | `crypto-kms-publish.yml` | `satellites/crypto-kms/package.json` |
+
+**의존성 노트:** `@haechi/crypto-kms`는 core를 zero-dependency로 유지한다 — `@aws-sdk/client-kms`는 **optional peer dependency**이며, 실제 AWS 클라이언트를 쓰고 주입하지 않을 때만 lazy import된다. in-memory 또는 주입형 클라이언트를 쓰는 소비자는 SDK를 설치하지 않는다.
+
+## 6. 배포 차단 조건
 
 다음 중 하나라도 실패하면 npm publish를 하지 않는다.
 

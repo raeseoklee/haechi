@@ -68,6 +68,7 @@
     "pack:dry": "npm pack --dry-run",
     "scan:stale-names": "node scripts/stale-name-scan.mjs",
     "check:packaging": "node scripts/check-core-packaging.mjs",
+    "check:satellite-packaging": "node scripts/check-satellite-packaging.mjs",
     "sbom": "node scripts/generate-sbom.mjs",
     "checksums": "node scripts/release-checksums.mjs",
     "bench:payload": "node scripts/bench-payload.mjs",

@@ -12,7 +12,21 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Only act on core `v<semver>` release tags. Satellite releases use prefixed
+    # tags (e.g. `crypto-kms-v0.1.0`) and are handled by their own workflow, so
+    # this job must NOT fire for them (it would try to publish `haechi`).
+    if: startsWith(github.event.release.tag_name, 'v')
     steps:
+      # Fail closed if the tag is not strictly `v<major>.<minor>.<patch>` — the
+      # `if:` above is a coarse prefix filter; this rejects e.g. `vendor-1` or a
+      # malformed `v1.2`.
+      - name: Validate core release tag
+        run: |
+          tag='${{ github.event.release.tag_name }}'
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '$tag' is not a core v<semver> tag; refusing to publish haechi"
+            exit 1
+          fi
       # actions/checkout v6
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       # actions/setup-node v6.4.0
