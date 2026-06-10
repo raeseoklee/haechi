@@ -10,7 +10,7 @@
 
 This release resolves the 16 risks identified during the full 0.3.1 code review. The detailed risk list and closure evidence follow `risk-register-release-gate.md` section 5.2 (P0-SEC-016 through P2-DOC-005).
 
-Because no version has ever been published to npm, 0.3.2 is the first published version. Separating the first publication from a feature release (0.4.0) allows package-name ownership to be confirmed and the publish pipeline (provenance, GitHub release workflow) to be validated in a low-risk release first.
+Because no version had ever been published to npm before 0.3.2, this is the first published version. Separating the first publication from a feature release (0.4.0) confirmed package-name ownership in a low-risk release while leaving the provenance-backed GitHub Actions publish path as a follow-up hardening item.
 
 ## 2. Change Summary
 
