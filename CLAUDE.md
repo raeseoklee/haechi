@@ -40,7 +40,7 @@ Conventions: English only (the wiki is working memory, exempt from the `.ko.md` 
 
 ## Git workflow
 
-Follow `CONTRIBUTING.md`: branch off `main` with a type prefix (`feature/`, `fix/`, `docs/`, `chore/`, `release/`, `hotfix/`) — never personal-name prefixes. Commits are one-line imperative English subjects with **no attribution trailers** (no `Co-Authored-By`). PRs target `main`, English body with Summary/Verification sections, no generated-with footers. Documentation is English-main with Korean `*.ko.md` siblings — update both.
+Follow `CONTRIBUTING.md`: branch off `main` with a type prefix (`feature/`, `fix/`, `docs/`, `chore/`, `release/`, `hotfix/`) — never personal-name prefixes. Commits use one-line imperative English subjects; non-trivial changes include Lore-style decision trailers when useful. Do not add attribution or generated-by footers (no `Co-Authored-By`). PRs target `main`, English body with Summary/Verification sections, no generated-with footers. Documentation is English-main with Korean `*.ko.md` siblings — update both.
 
 ## Architecture
 
