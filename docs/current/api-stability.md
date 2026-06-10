@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.1
+- 기준 버전: 0.3.2
 
 ## 1. 버전 해석
 
@@ -28,7 +28,7 @@
 
 ## 3. Experimental exports
 
-다음 export는 0.3.1에서 preview로 취급한다.
+다음 export는 0.3.2에서 preview로 취급한다.
 
 - `haechi/runtime`
 - `haechi/proxy`

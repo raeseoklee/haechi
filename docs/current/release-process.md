@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.1
+- 기준 버전: 0.3.2
 
 ## 1. 로컬 릴리즈 검증
 
@@ -17,6 +17,8 @@ npm run bench:payload
 ```bash
 npm run release:preflight:npm
 ```
+
+첫 publish 전에는 `npm view <package> version`이 `E404 Not Found`를 반환하는 것이 정상이다. 이 경우 preflight는 인증된 계정에서 이름을 claim할 준비가 된 상태로 통과한다. 단, `npm view <package>@<version> version`이 성공하면 같은 버전을 다시 배포할 수 없으므로 실패한다.
 
 ## 2. npm provenance
 

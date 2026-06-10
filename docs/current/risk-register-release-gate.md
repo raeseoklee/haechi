@@ -1,13 +1,13 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Draft 0.2
+- 문서 상태: Draft 0.3
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.1
+- 기준 버전: 0.3.2
 - 기준 브랜치: `irae/risk-resolution`
 
 ## 1. 현재 판단
 
-0.3.1은 0.3.0에서 식별된 코드/문서/운영 리스크를 developer preview 기준으로 해소했다. GitHub 공개와 npm developer preview 배포는 허용 가능하다. 단, 실제 npm publish는 npm 계정 인증, package ownership, GitHub release workflow 실행이라는 외부 운영자 게이트를 통과해야 한다.
+0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했다. GitHub 공개와 npm developer preview 배포는 허용 가능하다. 단, 실제 npm publish는 npm 계정 인증, package ownership, GitHub release workflow 실행이라는 외부 운영자 게이트를 통과해야 한다.
 
 | 구분 | 판단 | 이유 |
 |---|---|---|
@@ -15,7 +15,7 @@
 | GitHub release/tag | 허용 | production-ready가 아닌 developer preview로 표현해야 함 |
 | npm developer preview | 조건부 허용 | `npm run release:preflight` 통과 후, 인증된 계정에서 `release:preflight:npm` 및 provenance publish 필요 |
 | npm stable | 보류 | 1.0 API 안정성, 운영 KMS/HSM/Vault reference adapter, stream-aware enforcement 전까지 stable 표현 금지 |
-| production use | 금지 | 0.3.1은 self-hosted developer preview이며 운영 인증/인가/key custody는 사용자 책임 |
+| production use | 금지 | 0.3.2는 self-hosted developer preview이며 운영 인증/인가/key custody는 사용자 책임 |
 
 ## 2. 릴리스 게이트
 
@@ -73,7 +73,7 @@
 | P1-SEC-015 | MCP `allowedMethods` 원소 타입 검증 부족 | Resolved | non-empty string만 허용하도록 config validation 강화 |
 | P1-OPS-006 | GitHub Actions major tag pinning으로 supply-chain drift 가능 | Resolved | `checkout`, `setup-node`, `upload-artifact`를 확인된 commit SHA로 고정 |
 
-## 5.2 2차 전체 코드 리뷰 리스크 해소 상태
+## 5.2 2차 전체 코드 리뷰 리스크 해소 상태 (0.3.2)
 
 | ID | 검출 리스크 | 상태 | 해소 증거 |
 |---|---|---|---|
@@ -109,10 +109,10 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 현재 외부 npm 게이트 확인 결과:
 
-- `npm whoami`: `E401 Unauthorized`
+- `npm whoami`: `raeseoklee`
 - `npm view haechi version`: `E404 Not Found`
 
-`haechi` 이름은 비어 있어 보이나, package ownership은 인증된 계정에서 최초 publish가 성공해야 확정된다.
+`haechi` 이름은 비어 있어 보이나, package ownership은 인증된 계정에서 최초 publish가 성공해야 확정된다. `release:preflight:npm`은 인증 확인 후 `haechi@<현재 버전>`의 중복 publish를 차단하고, 첫 publish 전 package E404는 통과 조건으로 처리한다.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
@@ -126,13 +126,17 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 | 버전 | 목표 | 남은 범위 |
 |---|---|---|
-| 0.4.0 | streaming and deployment hardening | SSE/NDJSON stream inspection, stream sequence AAD, replay cache, stronger remote deployment guide |
-| 0.5.0 | key custody and audit hardening | Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts |
-| 1.0.0 | stable API contract | migration policy, long-term audit schema, plugin sandbox/runtime conformance |
+| 0.4.0 | token round-trip and adoption | 요청 스코프 response detokenization, deterministic tokenization(파생 키), `haechi mcp-wrap`(양방향 stdio), `haechi audit-verify`/`haechi status`, injection detection type(기본 allow), PII-safe `identity` 필드 및 `authProvider` 계약 예약. `docs/current/release-0.4-implementation-scope.md` 참조 |
+| 0.5.0 | streaming hardening | SSE/NDJSON stream inspection, stream sequence AAD, replay cache, stronger remote deployment guide |
+| 0.6.0 | auth and 운영 통제 | built-in bearer auth, client별 policy scope, model allowlist/rate budget, Vault/AWS KMS reference adapter, external append-only audit sink, signed release artifacts, npm org(`@haechi/*`) 확보 |
+| 0.7.0 | observability | npm workspaces 전환, `@haechi/dashboard` read-only audit viewer (hash chain 무결성 표시, 요약/검색/타임라인) |
+| 1.0.0 | stable API contract | migration policy, long-term audit schema, plugin sandbox/runtime conformance 및 allowlist/manifest 통과 외부 auth/classifier package 동적 로딩 |
+
+동적 npm package 로딩은 1.0 plugin sandbox 이전까지 금지한다. 0.4~0.7의 외부 provider는 `createRuntime(config, providers)` 프로그래매틱 주입만 지원한다.
 
 ## 9. 현재 허용 가능한 사용 범위
 
-현재 0.3.1은 다음 범위에서 사용한다.
+현재 0.3.2는 다음 범위에서 사용한다.
 
 - 로컬 개발 환경
 - 샘플 payload 검증
@@ -141,7 +145,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 - GitHub 코드 리뷰와 보안 설계 논의
 - npm developer preview
 
-현재 0.3.1은 다음 용도로 사용하지 않는다.
+현재 0.3.2는 다음 용도로 사용하지 않는다.
 
 - production LLM gateway
 - 인터넷에 직접 노출되는 proxy

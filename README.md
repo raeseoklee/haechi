@@ -98,3 +98,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.3 adds local inference protocol adapters, optional JSON response protection, npm package metadata, and publish-ready exports. See `docs/current/release-0.3-implementation-scope.md`.
 
 0.3.1 adds release safety gates, response fail-closed behavior, audit hash chaining, token reveal governance, provider injection, privacy profiles, CI/SBOM/provenance workflow scaffolding, and dedicated threat/shared-responsibility/API-stability docs.
+
+0.3.2 is a security-hardening release and the first npm developer preview target: Ollama implicit-streaming fail-closed handling, audited token reveal/purge, retention purge, kid-based key rotation, domain-separated policy bundle signing, JSON number/object key detection, upstream timeouts, stale lock recovery, and non-enforcing-mode warnings. See `docs/current/release-0.3.2-hardening-scope.md`.
