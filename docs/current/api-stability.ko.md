@@ -42,7 +42,7 @@
 - `identity` audit 필드와 `authProvider` 계약 (0.4 예약, 0.6 구현 — 그 전까지 형태 변경 가능)
 - `status` / `audit-verify` CLI 출력 형태
 - `haechi/stream-filter` (`inspectResponseStream`, path helpers) 및 `createStreamProtector` (스트리밍 검사 내부 구현)
-- `haechi/auth` (`createBearerAuthProvider`, token store, `buildIdentity`) 및 `authProvider` 계약
+- `haechi/auth` (`createBearerAuthProvider`, token store, `buildIdentity`, `buildExternalIdentity`) 및 `authProvider` 계약
 - `policy.profiles`/`policy.profileBinding`/`modelAllowlist`/`rate` 및 `identity`/`profile` audit 필드
 - `assertCryptoProviderConformance` 및 강화된 cryptoProvider 계약 (envelope base shape + provider 확장)
 - `audit.anchor` 설정 및 `verifyAuditChain(path, { anchorPath })`
@@ -58,3 +58,12 @@
 - audit event 필드 변경
 - token format 변경
 - plugin manifest schema 변경
+
+## 5. Satellite 패키지 (`@haechi/*`)
+
+위성(예: `@haechi/crypto-kms`, `@haechi/auth-jwt`)은 core와 **독립적으로** 버저닝한다 — 위성 릴리스가 `haechi`를 bump하지 않고, 그 반대도 마찬가지다.
+
+- **pre-1.0:** 위성은 npm semver를 따르며 `0.x` **minor** bump가 breaking change를 담을 수 있다; `major.minor`로 핀한다(예: `@haechi/crypto-kms@~0.1`). 각자 자체 `1.0.0`까지 pre-stable.
+- **core 호환성**은 `peerDependencies` 범위(`"haechi": ">=0.8.0 <1.0.0"`)로 표현한다 — 위성은 소비자가 설치한 단일 `haechi`를 재사용하므로 crypto/identity 표면이 하나다.
+- **무거운 백엔드는 optional peer다.** `@haechi/crypto-kms`는 `@aws-sdk/client-kms`를 `peerDependencies` + `peerDependenciesMeta.optional`로 선언하고 lazy import하므로, AWS 경로를 쓰지 않는 소비자는 설치하지 않고 core는 zero-dependency를 유지한다. 위성의 배포 tarball은 항상 **runtime `dependencies` 0**을 선언한다(CI `check-satellite-packaging`로 강제).
+- 위성 export(`createKmsCryptoProvider`, `createAwsKmsClient`, `createJwtAuthProvider`)는 0.8에서 preview이며 각 위성의 `1.0.0` 전에 변경될 수 있다.
