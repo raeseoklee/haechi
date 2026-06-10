@@ -7,7 +7,7 @@ tags: [decision, distribution]
 
 ## Current (0.3.2)
 
-Single npm package `haechi` (unscoped), zero runtime dependencies, subpath exports per module (`haechi/proxy`, `haechi/audit`, …). First published 2026-06-10 via local passkey authentication with provenance deferred to GitHub Actions trusted publishing. SBOM omits dev dependencies so it describes the shipped artifact only.
+Single npm package `haechi` (unscoped), zero runtime dependencies, subpath exports per module (`haechi/proxy`, `haechi/audit`, …). First published 2026-06-10 via local passkey authentication (0.3.2, unattested); from 0.4.0 onward releases publish through GitHub Actions trusted publishing with SLSA provenance attestations (verified on npm). SBOM omits dev dependencies so it describes the shipped artifact only.
 
 ## Satellite package strategy (0.6–0.7)
 
