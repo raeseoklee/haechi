@@ -77,7 +77,8 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       const forwarded = await maybeProtectResponse({
         upstreamResponse,
         routeContext,
-        runtime
+        runtime,
+        issuedTokens: result.issuedTokens ?? []
       });
 
       response.writeHead(forwarded.status, forwarded.headers);
@@ -112,7 +113,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
   };
 }
 
-async function maybeProtectResponse({ upstreamResponse, routeContext, runtime }) {
+async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, issuedTokens = [] }) {
   const headers = Object.fromEntries(upstreamResponse.headers.entries());
 
   if (!runtime.config.responseProtection.enabled || !routeContext.protectResponse) {
@@ -218,11 +219,45 @@ async function maybeProtectResponse({ upstreamResponse, routeContext, runtime })
     };
   }
 
+  let responsePayload = result.payload;
+
+  // Request-scoped token round-trip: restore ONLY tokens issued/reused while
+  // protecting this request, so the model sees tokens but the caller sees
+  // plaintext. Explicit opt-in; runs after response protection, so an opt-in
+  // here intentionally overrides response-direction transforms for values the
+  // caller already sent.
+  if (runtime.config.tokenVault.detokenizeResponses
+    && issuedTokens.length > 0
+    && typeof runtime.tokenVault?.detokenize === "function") {
+    const values = await runtime.tokenVault.detokenize({ tokens: issuedTokens });
+    if (values.size > 0) {
+      responsePayload = restoreTokens(responsePayload, values);
+    }
+  }
+
   return {
     status: upstreamResponse.status,
     headers: transformedJsonHeaders(headers),
-    body: Buffer.from(`${JSON.stringify(result.payload)}\n`)
+    body: Buffer.from(`${JSON.stringify(responsePayload)}\n`)
   };
+}
+
+function restoreTokens(value, tokenValues) {
+  if (typeof value === "string") {
+    let output = value;
+    for (const [token, plaintext] of tokenValues) {
+      output = output.split(`[TOKEN:${token}]`).join(plaintext);
+    }
+    return output;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => restoreTokens(item, tokenValues));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value)
+      .map(([key, item]) => [restoreTokens(key, tokenValues), restoreTokens(item, tokenValues)]));
+  }
+  return value;
 }
 
 async function forward({ upstream, request, body, timeoutMs = null }) {

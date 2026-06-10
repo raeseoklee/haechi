@@ -51,7 +51,10 @@
     "provider": "local",
     "path": ".haechi/token-vault.json",
     "revealPolicy": "disabled",
-    "retentionDays": 30
+    "retentionDays": 30,
+    "deterministic": false,
+    "deterministicTypes": null,
+    "detokenizeResponses": false
   },
   "privacy": {
     "profile": null
