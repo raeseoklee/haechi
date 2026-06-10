@@ -55,6 +55,7 @@
     "haechi.config.example.json",
     "packages/",
     "examples/",
+    "scripts/release-checksums.mjs",
     "docs/current/"
   ],
   "scripts": {
@@ -63,6 +64,7 @@
     "pack:dry": "npm pack --dry-run",
     "scan:stale-names": "node scripts/stale-name-scan.mjs",
     "sbom": "node scripts/generate-sbom.mjs",
+    "checksums": "node scripts/release-checksums.mjs",
     "bench:payload": "node scripts/bench-payload.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:preflight:npm": "node scripts/release-preflight.mjs --require-npm-auth",

@@ -38,14 +38,37 @@ References:
 - https://docs.npmjs.com/trusted-publishers/
 - https://docs.github.com/actions/publishing-packages/publishing-nodejs-packages
 
-## 3. GitHub Actions
+## 3. Signed release artifacts
+
+The **cryptographic** trust anchors are the **npm provenance attestation** (registry artifact) and the **sigstore attestation** (release tarball) — both bind the artifact to this repository's release workflow identity via GitHub OIDC. `SHA256SUMS` is a **tooling-compatible convenience** for offline checksumming (`sha256sum -c`); on its own it is not a trust anchor, since the same workflow produces and uploads it. Beyond provenance, the publish workflow attaches these assets so a downloaded tarball can be verified before install:
+
+- It runs `npm pack`, then `node scripts/release-checksums.mjs <tarball>` to emit a `SHA256SUMS` manifest (standard `<sha256-hex>  <name>` format).
+- It produces a **keyless sigstore attestation** of the tarball via `actions/attest-build-provenance` (GitHub OIDC, no signing keys).
+- It uploads the tarball + `SHA256SUMS` to the GitHub release.
+
+Verify a downloaded release:
+
+```bash
+# checksum (cross-platform: sha256sum -c, or the bundled script)
+node scripts/release-checksums.mjs --check SHA256SUMS
+sha256sum -c SHA256SUMS            # GNU
+shasum -a 256 -c SHA256SUMS        # macOS
+
+# sigstore attestation (tarball was built by this repo's release workflow)
+gh attestation verify haechi-<version>.tgz --repo raeseoklee/haechi
+
+# npm provenance (registry artifact)
+npm audit signatures
+```
+
+## 4. GitHub Actions
 
 | Workflow | Purpose |
 |---|---|
 | `.github/workflows/ci.yml` | Tests, release preflight, SBOM artifact |
-| `.github/workflows/npm-publish.yml` | npm publish on GitHub release published event (provenance path once trusted publishing is configured) |
+| `.github/workflows/npm-publish.yml` | npm provenance publish + checksummed/attested release assets on GitHub release published |
 
-## 4. Deployment block conditions
+## 5. Deployment block conditions
 
 npm publish is not performed if any of the following fail.
 

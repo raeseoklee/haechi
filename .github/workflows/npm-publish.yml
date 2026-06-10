@@ -5,8 +5,9 @@ on:
     types: [published]
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write       # upload signed artifacts to the GitHub release
+  id-token: write       # OIDC for npm trusted publishing + sigstore attestation
+  attestations: write   # sigstore build-provenance attestation of the tarball
 
 jobs:
   publish:
@@ -25,6 +26,25 @@ jobs:
       - run: npm install -g npm@^11.5.1
       - run: npm ci
       - run: npm run release:preflight
+      # Build and attest the artifacts BEFORE the irreversible npm publish, so a
+      # failure here cannot leave a published package without signed assets.
+      # `npm pack` is byte-identical to what `npm publish` uploads (same tree).
+      - name: Pack and checksum
+        run: |
+          set -o pipefail
+          TARBALL=$(npm pack --silent)
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          node scripts/release-checksums.mjs "$TARBALL" | tee SHA256SUMS
+      # Keyless sigstore attestation of the tarball (verifiable with gh attestation verify).
+      # actions/attest-build-provenance v2.4.0
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: ${{ env.TARBALL }}
       # Authenticates via the npmjs.com Trusted Publisher link for this repo and
       # workflow (no npm token). Fails closed if the OIDC exchange is unavailable.
       - run: npm publish --provenance --access public
+      # Attach the (already attested) tarball + checksum manifest to the release.
+      - name: Upload release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "$TARBALL" SHA256SUMS --clobber
