@@ -36,9 +36,9 @@ The audit hash chain detects tampering and reordering but **not** deletion of th
 
 ### 2.3 cryptoProvider contract hardening + reference KMS adapter
 
-- Tighten and document the `cryptoProvider` contract for `keys.provider: external`: an external provider MUST implement `encrypt`, `decrypt`, **and `hmac`** (added in 0.4 for tokens/identity), preserve the envelope shape (`{ v, alg, kid, iv, ct, tag, aadHash }`), bind canonical AAD, and select keys by `kid`.
-- Ship `assertCryptoProviderConformance(provider)` (an exported test helper): encrypt→decrypt round-trip, AAD-mismatch rejection, `hmac` determinism + domain separation. Satellite adapters self-test against it.
-- Ship a **reference adapter** under `examples/crypto-kms-reference/` (its own `package.json`, AWS/Vault SDK as an *optional/peer* dependency, NOT in core's `files`) demonstrating the injection. It is the source that becomes the published **`@haechi/crypto-kms`** satellite in 0.8 (gated on the npm org).
+- Tighten and document the `cryptoProvider` contract for `keys.provider: external`: a provider always implements `encrypt`/`decrypt`, binds canonical AAD, and selects keys by `kid`; the envelope **base shape** is `{ v, alg, kid, iv, ct, tag, aadHash }` and adapters **may add provider-specific fields** (e.g. a KMS adapter's `wrappedKey`). `hmac` is required **only by features that use it** — bearer auth and deterministic tokenization — and `createRuntime` fails closed at construction when one of those is configured without `hmac` (an encrypt-only provider is otherwise valid). Policy-bundle signing uses the local key file directly via the CLI, not the injected provider.
+- Ship `assertCryptoProviderConformance(provider, { requireHmac = true })` (an exported test helper): encrypt→decrypt round-trip (distinct plaintexts), AAD-mismatch rejection, **tampered-ciphertext rejection (real AEAD authentication)**, and `hmac` determinism + data-dependency + domain separation + invalid-domain rejection. Satellite adapters self-test against it; pass `requireHmac: false` for an encrypt-only provider.
+- Ship a **reference adapter** under `examples/crypto-kms-reference/` (its own `package.json`, AWS/Vault SDK as an *optional* dependency; the in-process `createInMemoryKms` is explicitly non-production) demonstrating envelope-encryption injection. It is the source that becomes the published **`@haechi/crypto-kms`** satellite in 0.8 (gated on the npm org).
 
 ### 2.4 Signed release artifacts
 

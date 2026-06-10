@@ -122,6 +122,14 @@ export function createRuntime(config, providers = {}) {
   const normalized = normalizeConfig(config);
   const cryptoProvider = providers.cryptoProvider ?? createConfiguredCryptoProvider(normalized);
   assertProvider("cryptoProvider", cryptoProvider, ["encrypt", "decrypt"]);
+  // hmac is only required by features that use it (bearer auth, deterministic
+  // tokenization). An encrypt-only external provider is valid otherwise; fail
+  // closed at construction rather than deep in a request if a needing feature
+  // is configured without it.
+  if (typeof cryptoProvider.hmac !== "function"
+    && (normalized.auth.provider === "bearer" || normalized.tokenVault.deterministic)) {
+    throw new Error("cryptoProvider must implement hmac() for bearer auth / deterministic tokenization");
+  }
   const auditSink = providers.auditSink ?? createJsonlAuditSink({
     path: normalized.audit.path,
     anchor: normalized.audit.anchor
