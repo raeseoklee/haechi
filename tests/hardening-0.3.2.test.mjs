@@ -266,7 +266,9 @@ test("audit sink recovers from a stale lock file", async () => {
     summary: { detectionCount: 0, byType: {}, byAction: {} }
   });
 
-  assert.deepEqual(await verifyAuditChain(auditPath), { valid: true, records: 1 });
+  const chain = await verifyAuditChain(auditPath);
+  assert.equal(chain.valid, true);
+  assert.equal(chain.records, 1);
 });
 
 test("card numbers passed as JSON numbers are detected and enforced", async () => {

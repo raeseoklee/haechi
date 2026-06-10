@@ -134,7 +134,10 @@ test("audit hash chain detects tampering", async () => {
 
   await runtime.haechi.protectJson({ message: "minji.kim@example.com" });
   await runtime.haechi.protectJson({ message: "seoul@example.com" });
-  assert.deepEqual(await verifyAuditChain(auditPath), { valid: true, records: 2 });
+  const chain = await verifyAuditChain(auditPath);
+  assert.equal(chain.valid, true);
+  assert.equal(chain.records, 2);
+  assert.match(chain.headHash, /^[A-Za-z0-9_-]{43}$/);
 
   const lines = (await readFile(auditPath, "utf8")).trim().split("\n");
   const first = JSON.parse(lines[0]);
@@ -166,5 +169,7 @@ test("audit hash chain remains valid under concurrent writes", async () => {
     }
   })));
 
-  assert.deepEqual(await verifyAuditChain(auditPath), { valid: true, records: 20 });
+  const chain = await verifyAuditChain(auditPath);
+  assert.equal(chain.valid, true);
+  assert.equal(chain.records, 20);
 });
