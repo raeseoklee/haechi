@@ -61,7 +61,10 @@ function parseHttpsUrl(value, label) {
 
 // Block literal addresses in private/loopback/link-local ranges + cloud metadata.
 // Applied to both a literal host in the URL and every DNS-resolved address.
-function isBlockedAddress(host) {
+// Exported (additive, behavior-preserving — auth-jwt stays 0.2.0) so the
+// haechi-auth-oidc broker reuses the SAME guard rather than copying the range
+// logic (release-0.9-implementation-scope.md §2.2).
+export function isBlockedAddress(host) {
   // A URL's .hostname keeps the brackets on an IPv6 literal ("[::1]"), and isIP
   // rejects a bracketed string — strip them first so literals are classified.
   const bare = String(host).replace(/^\[|\]$/g, "");
