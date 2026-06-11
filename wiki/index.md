@@ -16,6 +16,8 @@ Every page must be listed here with a one-line summary. Update this index on eve
 - [[audit-integrity]] — JSONL hash chain, sanitization, locking, and the tail-truncation limitation
 - [[key-management]] — key file format, kid-based rotation, and domain-separated key derivation
 - [[streaming-protection-gap]] — why streaming is blocked today, the Ollama implicit-streaming trap, and the 0.5 plan
+- [[dashboard-audit-viewer]] — the zero-dep read-only audit viewer satellite and its security model (loopback/Host-allowlist/CSP/sessionGuard seam)
+- [[oidc-session-broker]] — the interactive OIDC session broker satellite (authorization-code + PKCE, state-first callback, shared JWS verifier, PII-safe audit)
 
 ## Decisions
 

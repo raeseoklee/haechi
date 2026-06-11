@@ -167,7 +167,14 @@ haechi auth revoke <id>
 - **Rate limit**: per-identity requests-per-minute → `429` (in-memory, per-process).
 - Audit events carry the **PII-safe** `identity` (keyed-HMAC subject/issuer, never raw values) and the resolved `profile`; `auth_denied` / `model_not_allowed` / `rate_limited` decisions never include credentials. `/__haechi/health` stays unauthenticated.
 
-JWT/JWKS auth and KMS-backed key custody ship as `haechi-*` satellite packages (0.8): [`haechi-auth-jwt`](satellites/auth-jwt/) (headless JWKS bearer verification) and [`haechi-crypto-kms`](satellites/crypto-kms/) (envelope encryption with a real AWS KMS client). Both are `node:`-only by default and keep core zero-dependency; interactive OIDC and a dashboard are 0.9.
+JWT/JWKS auth and KMS-backed key custody ship as `haechi-*` satellite packages, each versioned and published independently of core:
+
+- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.8) — headless JWKS bearer verification; 0.2.0 additively exports a reusable JWS verifier (`createJwtVerifier`).
+- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.8) — envelope encryption with a real KMS client; 0.2.0 adds GCP (`./gcp`), Azure (`./azure`), and HashiCorp Vault Transit (`./vault`, `node:`-only) backends alongside AWS.
+- [`haechi-dashboard`](satellites/dashboard/) (0.9, new) — a zero-dependency, read-only audit viewer (`node:http`) over the audit log and its hash-chain status.
+- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.9, new) — an interactive OIDC session broker (authorization-code + PKCE) that provides the dashboard's human login.
+
+The satellites are `node:`-only by default (heavy SDKs are optional peers) and keep core zero-dependency.
 
 ## Configuration
 
@@ -269,3 +276,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.7.0 is operational hardening: audit head-hash anchoring (`audit.anchor`) that detects tail truncation, a hardened external `cryptoProvider` contract with `assertCryptoProviderConformance` and a reference KMS adapter, and signed/checksummed GitHub release artifacts. See `docs/current/release-0.7-implementation-scope.md`.
 
 0.8.0 stands up the `haechi-*` ecosystem: an npm workspaces monorepo (core stays the unscoped `haechi`, zero runtime dependency, gated by a packed-manifest CI check) plus the first two satellites — [`haechi-crypto-kms`](satellites/crypto-kms/) (envelope encryption with a real AWS KMS client; the AWS SDK is an optional peer) and [`haechi-auth-jwt`](satellites/auth-jwt/) (headless JWKS bearer verification, `node:`-only). Each publishes independently with its own provenance + sigstore-attested workflow. See `docs/current/release-0.8-implementation-scope.md`.
+
+0.9.0 is the observability + interactive-auth theme: two new satellites — [`haechi-dashboard`](satellites/dashboard/) (a zero-dependency, read-only `node:http` audit viewer over the audit log and its hash-chain status, with an anti-DNS-rebinding Host allowlist, strict CSP/Trusted Types, and fail-closed loopback/remote-bind guards) and [`haechi-auth-oidc`](satellites/auth-oidc/) (an interactive OIDC session broker — authorization-code + PKCE + server-side sessions — that provides the dashboard's human login). Existing satellites also ship additive minors: `haechi-auth-jwt@0.2.0` exports a reusable JWS verifier (`createJwtVerifier`) and `haechi-crypto-kms@0.2.0` adds GCP/Azure/Vault backends. Core bumps to `0.9.0`, carrying only an additive `FORBIDDEN_KEYS` audit-sanitization hardening — defense-in-depth that changes no current event output. See `docs/current/release-0.9-implementation-scope.md`.

@@ -1,8 +1,8 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Draft 0.3
-- 작성일: 2026-06-10
-- 기준 버전: 0.7.0
+- 문서 상태: Draft 0.4
+- 작성일: 2026-06-11
+- 기준 버전: 0.9.0
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -25,6 +25,7 @@
 | G1 | GitHub pre-release | P0 코드 리스크 해결, production-ready 표현 없음 | Pass |
 | G2 | npm developer preview | P0 해결, preflight/SBOM/provenance 경로 준비, npm auth 확인 | Pass (`haechi@0.3.2` 2026-06-10 배포) |
 | G3 | npm stable | P1 운영 reference, stream-aware enforcement, API stability 강화 | Blocked |
+| G4 | 0.9.0 observability + interactive-auth 위성 컷 | P1-SEC-009 (0.9) / P1-OPS-005 (0.9) mitigated 및 P2-CRYPTO-001 (0.9) accepted; `haechi-dashboard` + `haechi-auth-oidc` + `haechi-crypto-kms@0.2.0` 테스트 통과; 위성 tarball zero-dep; core 0.9.0 bump(추가적 FORBIDDEN_KEYS audit 강화만) | Pass |
 
 ## 3. P0 배포 차단 리스크 상태
 
@@ -96,6 +97,16 @@
 
 base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncation 탐지는 명시적 제외로 threat model에 문서화했다 (0.4+ backlog).
 
+## 5.3 0.9.0 Observability + Interactive-Auth 리스크 상태
+
+이 ID들은 0.9.0 위성 컷(`haechi-dashboard`, `haechi-auth-oidc`, `haechi-crypto-kms@0.2.0`)에 한정되며, 0.9.0 섹션으로 namespace되어 위의 동일 번호 P0/P1 행과 구분된다. 증거는 위성 소스, 그 테스트 스위트, 그리고 `docs/current/release-0.9-implementation-scope.md` §6에 정리된 adversarial security review다.
+
+| ID | 리스크 | 상태 | 해소 증거 |
+|---|---|---|---|
+| P1-SEC-009 (0.9) | OIDC broker 세션/로그인 보안: `haechi-auth-oidc`의 login CSRF, authorization-code injection, open-redirect, session fixation, mix-up(잘못된 IdP/RP) | Mitigated | `satellites/auth-oidc/index.mjs`: state-first `/auth/callback`(pre-auth 쿠키 바인딩 pending record를 atomic `take()` + egress 이전 constant-time `state` 비교), PKCE S256, callback에서 새 세션 id 발급(fixation 없음), `returnToAllowlist`(open-redirect 없음), issuer/endpoint pinning + RFC 9207 `iss` 검사 + 공유 `createJwtVerifier` 경유 ID-token `aud`/`azp` 프로파일(mix-up), CSRF-gated non-GET logout. `satellites/auth-oidc/auth-oidc.test.mjs`가 각 deny 케이스 검증; scope §6 adversarial review. **잔여:** multi-origin IdP는 범위 외 |
+| P1-OPS-005 (0.9) | Dashboard audit 노출: `haechi-dashboard`의 `detections[].path` stored XSS, 미래 필드 audit leak, localhost 뷰어 DNS-rebinding 읽기, remote bind 시 인증 없는 읽기 | Mitigated | `satellites/dashboard/index.mjs` + `assets.mjs`: 엄격 CSP(`require-trusted-types-for 'script'`) + `textContent`-only 렌더링(XSS), `FORBIDDEN_KEYS` 위 재귀적 key-by-key allowlist projection(필드 leak), 요청별 anti-rebinding `Host` allowlist + CORP/COOP same-origin(rebinding), `sessionGuard` **및** TLS 종단을 요구하는 fail-closed remote bind(인증 없는 remote 읽기). `satellites/dashboard/dashboard.test.mjs`; scope §6 adversarial review. **잔여:** remote bind 시 운영자가 TLS 종단을 책임 |
+| P2-CRYPTO-001 (0.9) | KMS backend egress: `haechi-crypto-kms@0.2.0` Vault/GCP/Azure backend가 key material이나 provider/key-path 상세를 유출하거나 의도치 않은(metadata) 엔드포인트에 도달 가능 | Accepted | `satellites/crypto-kms/{vault,gcp,azure}.mjs`: optional-peer + injected-client 모델과 faithful-mock `assertCryptoProviderConformance`(cross-key·corrupted-blob 거부, HMAC determinism/domain-separation), Vault `fetch`의 satellite-local `isBlockedAddress` SSRF 가드(dev-only `satellites/crypto-kms/ssrf-parity.test.mjs`로 auth-jwt와 parity 유지), generic fail-closed provider-error 매핑(audit에 provider/key-ARN 없음). `{vault,gcp,azure}.test.mjs` + `crypto-kms.test.mjs`; scope §6 adversarial review. **수용된 잔여:** 실제 Vault/GCP/Azure live-backend 검증은 CI 외부; 발행 tarball은 zero runtime dependency 유지 |
+
 ## 6. P2 제품/문서 리스크 상태
 
 | ID | 기존 리스크 | 상태 | 해소 증거 |
@@ -128,8 +139,8 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 |---|---|---|
 | 0.4.0 ✅ | token round-trip and adoption | 2026-06-10 구현 완료: 요청 스코프 response detokenization, deterministic tokenization(파생 키), `haechi mcp-wrap`, `haechi audit-verify`/`haechi status`, injection detection type(기본 allow), `identity`/`authProvider` 계약 예약. `docs/current/release-0.4-implementation-scope.md` 참조 |
 | 0.5.0 ✅ | streaming hardening | 2026-06-10 출시: bounded cross-frame 버퍼를 사용한 SSE/NDJSON 스트리밍 응답 검사(`streaming.requestMode: inspect`). stream sequence AAD, replay cache, 강화된 원격 배포 가이드는 0.6+으로 이월. `docs/current/release-0.5-implementation-scope.md` 참조 |
-| 0.6.0 ✅ | Shipped 2026-06-10 (PRs #17–#19): built-in bearer auth, named policy profiles, model allowlist, request rate limit, PII-safe identity in audit. `docs/current/release-0.6-implementation-scope.md` 참조 |
-| 0.7.0 ✅ | Shipped 2026-06-10 (PRs #22–#24): audit head-hash anchoring + external sink contract, cryptoProvider contract hardening + `assertCryptoProviderConformance` + reference KMS adapter, 서명/체크섬된 release artifact. `docs/current/release-0.7-implementation-scope.md` 참조 |
+| 0.6.0 ✅ | auth and per-client controls | Shipped 2026-06-10 (PRs #17–#19): built-in bearer auth, named policy profiles, model allowlist, request rate limit, PII-safe identity in audit. `docs/current/release-0.6-implementation-scope.md` 참조 |
+| 0.7.0 ✅ | ops hardening | Shipped 2026-06-10 (PRs #22–#24): audit head-hash anchoring + external sink contract, cryptoProvider contract hardening + `assertCryptoProviderConformance` + reference KMS adapter, 서명/체크섬된 release artifact. `docs/current/release-0.7-implementation-scope.md` 참조 |
 | 0.8.0 ✅ | ecosystem foundation + satellites | 2026-06-10 출시(PR #27–#32): npm workspaces 모노레포(루트 자기참조 `["."]` + `satellites/*`); `haechi@0.8.0`(attested), `haechi-crypto-kms`, `haechi-auth-jwt`(unscoped — `@haechi` scope 점유됨) **발행 완료**. core는 zero runtime dependency 유지(CI no-leak + zero-dep + satellite-packaging 게이트). 위성 `0.1.0`은 이름 생성을 위한 수동 부트스트랩 발행(unattested, `--provenance=false`, `0.3.2`와 동일한 갭)으로 per-name Trusted Publisher 설정 후, `0.1.1`이 첫 attested CI 릴리스(SLSA provenance + sigstore, `gh attestation verify` 통과). `docs/current/release-0.8-implementation-scope.md` 참조 |
 | 0.9.0 | observability + interactive auth | `haechi-auth-oidc` 전체 authorization-code flow, `haechi-dashboard` 읽기 전용 audit 뷰어(hash-chain 무결성 표시, 요약/검색/타임라인), `haechi-crypto-kms` 추가 백엔드(Vault/GCP/Azure) |
 | 1.0.0 | stable API contract | migration policy, long-term audit schema, plugin sandbox/runtime conformance 및 allowlist/manifest 통과 외부 auth/classifier package 동적 로딩 |

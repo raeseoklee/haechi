@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-10
+updated: 2026-06-11
 tags: [decision, security, auth]
 ---
 
@@ -47,3 +47,17 @@ The first external auth satellite — headless JWKS bearer verification ([[packa
 - **Scope:** single-origin issuers only (issuer host == JWKS host); multi-origin/CDN JWKS and full interactive `haechi-auth-oidc` are 0.9.
 
 Two adversarial reviews drove fixes: the resolveJwk double-refetch (stale + unknown kid → 2 fetches; the old two-gate state machine wasn't unified), the IPv6 `fe80::/10` partial match (only `fe80` prefix), the bracketed-IPv6-literal host bypassing the blocklist, whitespace-only `sub`, heterogeneous `aud` arrays, and the JWKS body-size check ordering.
+
+## 0.9: per-request vs interactive — two halves of auth
+
+0.8's `haechi-auth-jwt` validates a *pre-obtained* bearer JWT per request. 0.9 adds the **interactive** half — a human logging in through a browser — and refactors auth-jwt so both share one verification path.
+
+### `haechi-auth-jwt@0.2.0`: extracted JWS verifier (additive, behavior-preserving)
+
+The satellite now **exports `createJwtVerifier`** (and `isBlockedAddress`), a standalone primitive carved out of the existing internal `resolveJwk`/`verifySignature`/claim-validation. It verifies signature + `alg`/`kid`/RSA-bits + `iss`/`aud`/`exp`/`nbf` — the exact 0.8 surface. **`nonce` is deliberately NOT baked in** (a bearer JWT has none): `verify(jwt, { expectedNonce })` checks it only when the caller passes it. `createJwtAuthProvider` is reimplemented on the primitive, still owns Bearer-header parsing, and keeps all its 0.8 tests green. The result: the whole auth ecosystem has exactly **one** audited JWS/JWKS verification path.
+
+### `haechi-auth-oidc@0.1.0`: interactive session broker
+
+The interactive-auth satellite ([[oidc-session-broker]]) — `createOidcSessionBroker(...)` implements the OIDC authorization-code + PKCE flow, produces an opaque server-side session, and satisfies the [[dashboard-audit-viewer]]'s `sessionGuard` contract by injection. It is **not** an `authProvider` (the per-request role stays with `createJwtAuthProvider`). It **reuses this page's `buildExternalIdentity`** to build the PII-safe identity (keyed-HMAC `subjectHash`, domain `haechi:identity:hash:v1`, `provider: "oidc"`) and the auth-jwt `createJwtVerifier` for ID-token validation — layering an OIDC `aud`/`azp` profile on top (stricter than the lenient bearer `aud`: multi-valued `aud` requires `azp === clientId`). It peer-depends on `haechi-auth-jwt >=0.2.0` for the verifier; the core peer stays `>=0.8.0` (only `buildExternalIdentity` is used).
+
+Broker login security is concentrated at `/auth/callback`: a **state-first short-circuit** (atomic `take()` of a pre-auth-cookie-bound pending record, constant-time state compare **before any IdP egress**), PKCE S256, `nonce` binding, RFC 9207 `iss` pinning (mix-up defense), a fresh session id at callback (no fixation), and PII-safe audit events (`oidc.login.*`/`logout`/`session.evict`) carrying only `*Hash`/`reasonCode`/`provider`/timestamp. The one core touch is additive: `packages/audit` `FORBIDDEN_KEYS` gains the broker token/claim keys.

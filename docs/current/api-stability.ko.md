@@ -61,9 +61,13 @@
 
 ## 5. Satellite 패키지 (`haechi-*`)
 
-위성(예: `haechi-crypto-kms`, `haechi-auth-jwt`)은 core와 **독립적으로** 버저닝한다 — 위성 릴리스가 `haechi`를 bump하지 않고, 그 반대도 마찬가지다.
+위성(예: `haechi-crypto-kms`, `haechi-auth-jwt`, `haechi-dashboard`, `haechi-auth-oidc`)은 core와 **독립적으로** 버저닝한다 — 위성 릴리스가 `haechi`를 bump하지 않고, 그 반대도 마찬가지다.
 
-- **pre-1.0:** 위성은 npm semver를 따르며 `0.x` **minor** bump가 breaking change를 담을 수 있다; `major.minor`로 핀한다(예: `haechi-crypto-kms@~0.1`). 각자 자체 `1.0.0`까지 pre-stable.
-- **core 호환성**은 `peerDependencies` 범위(`"haechi": ">=0.8.0 <1.0.0"`)로 표현한다 — 위성은 소비자가 설치한 단일 `haechi`를 재사용하므로 crypto/identity 표면이 하나다.
-- **무거운 백엔드는 optional peer다.** `haechi-crypto-kms`는 `@aws-sdk/client-kms`를 `peerDependencies` + `peerDependenciesMeta.optional`로 선언하고 lazy import하므로, AWS 경로를 쓰지 않는 소비자는 설치하지 않고 core는 zero-dependency를 유지한다. 위성의 배포 tarball은 항상 **runtime `dependencies` 0**을 선언한다(CI `check-satellite-packaging`로 강제).
-- 위성 export(`createKmsCryptoProvider`, `createAwsKmsClient`, `createJwtAuthProvider`)는 0.8에서 preview이며 각 위성의 `1.0.0` 전에 변경될 수 있다.
+- **pre-1.0:** 위성은 npm semver를 따르며 `0.x` **minor** bump가 breaking change를 담을 수 있다; `major.minor`로 핀한다(예: `haechi-crypto-kms@~0.2`). 각자 자체 `1.0.0`까지 pre-stable.
+- **core 호환성**은 `peerDependencies` 범위(`"haechi": ">=0.8.0 <1.0.0"`)로 표현한다 — 위성은 소비자가 설치한 단일 `haechi`를 재사용하므로 crypto/identity 표면이 하나다. `haechi-auth-oidc`는 추가로 `haechi-auth-jwt`(`">=0.2.0 <1.0.0"`)에 peer-depend하여 둘이 audit되는 단일 JWS/JWKS 검증 경로를 공유한다.
+- **무거운 백엔드는 optional peer다.** `haechi-crypto-kms`는 SDK 백엔드(`@aws-sdk/client-kms`, 그리고 0.2.0의 `@google-cloud/kms`, `@azure/keyvault-keys`, `@azure/identity`)를 `peerDependencies` + `peerDependenciesMeta.optional`로 선언하고 lazy import하므로, 해당 경로를 쓰지 않는 소비자는 설치하지 않고 core는 zero-dependency를 유지한다. `./vault` 백엔드는 `node:` `fetch`만 사용한다(optional peer 없음). 위성의 배포 tarball은 항상 **runtime `dependencies` 0**을 선언한다(CI `check-satellite-packaging`로 강제).
+- **pre-1.0 위성 export**는 preview이며 각 위성의 자체 `1.0.0` 전에 변경될 수 있다:
+  - `haechi-crypto-kms` (0.8 → 0.2.0): `createKmsCryptoProvider`, `createInMemoryKms`, `./aws`의 `createAwsKmsClient`, 그리고 0.2.0의 새 subpath `./gcp`(`createGcpKmsClient`), `./azure`(`createAzureKmsClient`), `./vault`(`createVaultKmsClient`).
+  - `haechi-auth-jwt` (0.2.0): `createJwtAuthProvider`(0.8, behavior-preserving)와 추가된 `createJwtVerifier`(재사용 가능한 JWS 검증 primitive), `isBlockedAddress`(SSRF 범위 술어, `haechi-auth-oidc`가 재사용).
+  - `haechi-dashboard` (0.1.0, 신규): `createDashboardServer`, `normalizeDashboardConfig`.
+  - `haechi-auth-oidc` (0.1.0, 신규): `createOidcSessionBroker`, `normalizeOidcConfig`.
