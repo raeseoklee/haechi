@@ -32,7 +32,8 @@ export function defaultConfig() {
       failureMode: "fail-closed",
       allowNonJson: false,
       allowCompressed: false,
-      maxBytes: 1048576
+      maxBytes: 1048576,
+      scanNumbers: false
     },
     streaming: {
       requestMode: "block",
@@ -319,6 +320,9 @@ export function normalizeConfig(config) {
   }
   if (typeof merged.responseProtection.maxBytes !== "number" || merged.responseProtection.maxBytes < 1) {
     throw new Error("responseProtection.maxBytes must be a positive number");
+  }
+  if (typeof merged.responseProtection.scanNumbers !== "boolean") {
+    throw new Error("responseProtection.scanNumbers must be boolean");
   }
   if (!["block", "pass-through", "inspect"].includes(merged.streaming.requestMode)) {
     throw new Error(`Invalid streaming.requestMode: ${merged.streaming.requestMode}`);

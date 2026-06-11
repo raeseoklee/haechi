@@ -15,7 +15,8 @@
     "failureMode": "fail-closed",
     "allowNonJson": false,
     "allowCompressed": false,
-    "maxBytes": 1048576
+    "maxBytes": 1048576,
+    "scanNumbers": false
   },
   "streaming": {
     "requestMode": "block",

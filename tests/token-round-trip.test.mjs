@@ -113,6 +113,7 @@ test("config validation rejects malformed round-trip settings", () => {
   assert.throws(() => normalizeConfig({ tokenVault: { deterministicTypes: [] } }), /deterministicTypes/);
   assert.throws(() => normalizeConfig({ tokenVault: { deterministicTypes: [7] } }), /deterministicTypes/);
   assert.throws(() => normalizeConfig({ tokenVault: { detokenizeResponses: 1 } }), /detokenizeResponses must be boolean/);
+  assert.throws(() => normalizeConfig({ responseProtection: { scanNumbers: 1 } }), /scanNumbers must be boolean/);
 });
 
 test("proxy restores request-issued tokens in the response (model sees token, caller sees plaintext)", async () => {

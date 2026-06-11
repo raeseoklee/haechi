@@ -90,6 +90,48 @@ test("marker exclusion is positional: a real secret ADJACENT to a marker is stil
   assert.equal(detections.filter((d) => d.type === "api_key").length, 2);
 });
 
+test("response-direction skips bare number leaves (metadata) but keeps strings and request numbers", async () => {
+  const filter = createDefaultFilterEngine();
+  // A long Luhn-passing duration / 13-digit count is inference-server metadata,
+  // not a model-leaked card/RRN — not scanned on the response.
+  const respNumber = await filter.detect({
+    entries: collectStringEntries({ total_duration: 4242424242424242, eval_duration: 1781129892000 }),
+    context: { direction: "response" }
+  });
+  assert.deepEqual(respNumber, []);
+  // But a card the model leaks in generated TEXT (a string) is still caught.
+  const respText = await filter.detect({
+    entries: collectStringEntries({ choices: [{ message: { content: "your card is 4242 4242 4242 4242" } }] }),
+    context: { direction: "response" }
+  });
+  assert.ok(respText.some((d) => d.type === "card"));
+  // The exemption is narrow — a card inside a STRINGIFIED-JSON string (kind
+  // "value", not "number") is still detected on the response.
+  const respStringified = await filter.detect({
+    entries: collectStringEntries({ tool: JSON.stringify({ card: 4242424242424242 }) }),
+    context: { direction: "response" }
+  });
+  assert.ok(respStringified.some((d) => d.type === "card"));
+  // And the REQUEST direction still scans numbers (a client can send a card/RRN as a number).
+  const reqNumber = await filter.detect({
+    entries: collectStringEntries({ card: 4242424242424242, rrn: 9001011234568 }),
+    context: { direction: "request" }
+  });
+  const reqTypes = reqNumber.map((d) => d.type);
+  assert.ok(reqTypes.includes("card") && reqTypes.includes("kr_rrn"));
+});
+
+test("responseProtection.scanNumbers opts back into scanning response number leaves", async () => {
+  const filter = createDefaultFilterEngine();
+  // A strict deployment can set scanNumbers: true (threaded as context.scanNumbers)
+  // to scan response numbers too — accepting the metadata false positives.
+  const scanned = await filter.detect({
+    entries: collectStringEntries({ card: 4242424242424242 }),
+    context: { direction: "response", scanNumbers: true }
+  });
+  assert.ok(scanned.some((d) => d.type === "card"), "scanNumbers:true scans response number leaves");
+});
+
 test("the phone-rule tightening does not affect card detection", async () => {
   const filter = createDefaultFilterEngine();
   const detections = await filter.detect({
