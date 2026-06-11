@@ -14,8 +14,12 @@ import {
   PROCESS_PROBE_PLUGIN_SOURCE,
   POLLUTING_PLUGIN_SOURCE,
   HANGING_PLUGIN_SOURCE,
-  NONDETERMINISTIC_PLUGIN_SOURCE
+  NONDETERMINISTIC_PLUGIN_SOURCE,
+  KEYMATERIAL_PLUGIN_SOURCE
 } from "./helpers/sandbox-fixtures.mjs";
+
+const okText = (body) => async () => ({ ok: true, body: null, text: async () => body });
+const publicLookup = async () => [{ address: "93.184.216.34" }];
 
 // The process-isolated runtime fails closed (refuses to construct) on a Node that
 // cannot enforce --allow-net (e.g. Node 22 LTS) — capability containment is not
@@ -275,6 +279,48 @@ itNet("two concurrent authenticate calls with distinct cids never cross response
   } finally {
     await provider.close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// §7.2 host-mediated key material — the host fetches an operator-declared URL via
+// the core SSRF guard and injects it; the plugin NEVER names a URL.
+// ---------------------------------------------------------------------------
+
+itNet("host-mediated key material is fetched via the core guard and injected into the plugin", async () => {
+  const built = buildProcessPlugin({ entrySource: KEYMATERIAL_PLUGIN_SOURCE });
+  const rec = createRecordingCrypto();
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, {
+    cryptoProvider: rec,
+    keyMaterial: { url: "https://keys.example.com/jwks", fetchImpl: okText("JWKS_DOC_CONTENT"), lookupImpl: publicLookup }
+  }));
+  try {
+    const identity = await provider.authenticate(bearer("needs-keys"));
+    assert.ok(identity, "the plugin authenticates with injected key material");
+    const entry = rec.hashed.find((h) => typeof h.data === "string" && h.data.startsWith("km:"));
+    assert.ok(entry, "the host hashed the subject carrying the injected key material");
+    assert.equal(entry.data, "km:JWKS_DOC_CONTENT", "the operator-declared key doc was fetched + injected (the plugin never named a URL)");
+  } finally {
+    await provider.close();
+  }
+});
+
+itNet("a host key fetch to a private/metadata address fails closed (the plugin never names the URL)", async () => {
+  const built = buildProcessPlugin({ entrySource: KEYMATERIAL_PLUGIN_SOURCE });
+  let fetched = false;
+  // The operator-declared URL resolves to the cloud-metadata IP → the core guard
+  // refuses every fetch → no roundtrip can succeed → construction fails closed
+  // (conformance cannot pass). The plugin never gets a chance to exfiltrate.
+  await assert.rejects(
+    createProcessIsolatedAuthProvider(sandboxOptions(built, {
+      keyMaterial: {
+        url: "https://keys.example.com/jwks",
+        lookupImpl: async () => [{ address: "169.254.169.254" }],
+        fetchImpl: async () => { fetched = true; return { ok: true, body: null, text: async () => "x" }; }
+      }
+    })),
+    (err) => err instanceof Error
+  );
+  assert.equal(fetched, false, "the SSRF guard must refuse before any fetch to a blocked address");
 });
 
 itNet("kill-switch: closing the provider terminates the child and subsequent calls fail closed", async () => {
