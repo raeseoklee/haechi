@@ -141,9 +141,28 @@ upstream JSON 응답을 검사한다(기본적으로 꺼져 있음 — 모델로
 
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
-| `auth.provider` | `none` \| `bearer` \| `external` | `none` | `none` = 인증 없음(identity null). `bearer` = 내장 token auth. `external`은 `createRuntime(config, { authProvider })`를 통해 `authProvider`를 주입해야 한다. |
+| `auth.provider` | `none` \| `bearer` \| `external` \| `plugin` | `none` | `none` = 인증 없음(identity null). `bearer` = 내장 token auth. `external`은 `createRuntime(config, { authProvider })`를 통해 `authProvider`를 주입해야 한다. `plugin` = 서명된 `authProvider` 샌드박스([`auth.plugin`](#authplugin-signed-authprovider-sandbox) 참고). |
 | `auth.store` | 경로 | `.haechi/auth.json` | Bearer token 저장소(모드 `0600`). Token은 keyed-HMAC 해시로만 보관되며, 평문은 `haechi auth add` 실행 시 한 번만 표시된다. |
 | `auth.allowedLabelKeys` | 문자열 배열 | `["team", "env", "tier", "role"]` | Token이 가질 수 있는 label 키; 값은 길이가 제한되며 PII를 포함하면 안 된다. |
+
+### `auth.plugin` (signed authProvider sandbox)
+
+`auth.provider: "plugin"`일 때 필요. 샌드박스는 **서명된** `authProvider` 플러그인을 capability-gated, 감사되는 런타임에서 로드한다. 최상위 `plugins.enabled`(기본 `true`)는 kill-switch — `false`면 어떤 플러그인 생성도 거부한다. 동적 로딩은 opt-in이며 기본은 dependency injection. `docs/current/release-1.0-implementation-scope.md`(worker) 및 `release-1.1-implementation-scope.md`(process) 참고.
+
+| Key | Type / values | Default | Notes |
+|---|---|---|---|
+| `auth.plugin.manifestPath` | 경로 | — | 서명된 플러그인 매니페스트(`haechi.plugin.json`). |
+| `auth.plugin.trustAnchors` | `[{keyId, publicKey}]` 또는 `{ keyId: publicKey }` | — | 운영자 allowlist된 Ed25519 **공개** 키. 키 해석은 trust-anchor 전용. |
+| `auth.plugin.allowCapabilities` | 문자열 배열 | — | capability 허용 목록; `readsCredentials` 포함 필수. 목록에 없는 요청 capability → 로드 거부. |
+| `auth.plugin.isolation` | `worker` \| `process` | `worker` | `worker` = `worker_threads`(memory/crash 격리, **1.0**). `process` = Node 권한 모델 하 자식으로 **커널 강제** capability 거부(**1.1**); `--allow-net`을 강제하는 Node 필요. |
+| `auth.plugin.timeoutMs` | 양의 정수 | — | call별 timeout; timeout 시 런타임이 자식/worker를 terminate하고 deny. |
+| `auth.plugin.resourceLimits` | `{ maxOldGenerationSizeMb }` | — | **`worker` 전용** — `worker_threads` heap bound. `process`에는 N/A. |
+| `auth.plugin.netEnforcement` | `require-permission` | `require-permission` | **`process` 전용** — 네트워크 봉쇄 정책. `require-permission`은 `--allow-net` 없는 Node에서 **fail closed**(생성 거부). |
+| `auth.plugin.keyMaterial` | `{ url (https), ttlMs?, cooldownMs? }` | unset | **`process` 전용** — **호스트**가 가져와(SSRF 가드 + TTL+cooldown) 커스텀 자격증명 플러그인에 주입하는 선택적 운영자 선언 키 문서. 플러그인은 URL을 명명하지 않음. |
+| `auth.plugin.pin` | `{ version?, entrySha256?, manifestSha256? }` | unset | 정확 일치 pin(악성 업데이트/rollback 방지). |
+| `auth.plugin.revoked` | `{ signerKeyIds?, entrySha256? }` | unset | revocation denylist(로드 시 fail-closed). |
+| `auth.plugin.versionFloor` | `{ <pluginId>: version }` | unset | 플러그인별 최소 버전(rollback 방지). |
+| `auth.plugin.maxPendingCalls` / `maxMessageBytes` | 양의 정수 | `8` / `16384` | 동시성 + wire 한계(초과/oversized → deny). |
 
 ## `policy` profiles & limits
 

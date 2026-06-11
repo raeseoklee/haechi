@@ -1,6 +1,10 @@
 # Haechi 1.1 Implementation Scope
 
-- Status: Draft 0.2 (design — not yet implemented; hardened after a 3-lens adversarial review with empirical Node-26 testing, 2026-06-11)
+- Status: **Implemented + shipped** (2026-06-12; PRs #54/#55/#56 + this release cut, core 1.0.0 → 1.1.0). Design hardened after a 3-lens adversarial review with empirical Node-26 testing.
+- Implementation notes (deltas from this design as written):
+  - The **fail-closed `--allow-net` feature detection** (`netEnforcementSupported` + `netEnforcement: "require-permission"` default) shipped in **PR1**, not PR3 — it is intrinsic to the runtime's safety: CI on Node 22 (no `--allow-net`) proved that without it the runtime would run net-uncontained, the exact "pretend to contain" failure this design rejects. Detection probes BEHAVIOR (a `--permission` child must see `net.connect` denied), immune to a flag-listed-but-unenforced Node.
+  - The **satellite re-import** of the promoted SSRF guard (§2.3) was **deferred**: forcing `haechi-auth-jwt`/`haechi-auth-oidc`/`haechi-crypto-kms` to import `haechi/ssrf` would raise their `haechi` peer floor to 1.1 and reverse their deliberate "no cross-package SSRF coupling" decision (`crypto-kms/ssrf-parity.test.mjs`). The core copy is kept honest by a core-vs-`auth-jwt` parity test instead; the drift is guarded, not yet eliminated.
+  - Risk IDs renumbered **P1-SEC-026/027 → P1-SEC-027/028** (the proposed P1-SEC-026 collided with the existing 0.9 OIDC-broker risk).
 - Date: 2026-06-11
 - Target version: 1.1.0 (after 1.0.0)
 - Type: capability **enforcement** for the plugin sandbox (closes the 1.0 honest residual)
@@ -100,7 +104,7 @@ Additive and opt-in. `worker-isolated`, injection, every provider contract, and 
 | Audit plaintext leak via new fields | host-computed/enum-only fields, fixed reason enum, no child free-text | none material |
 | Spawn-storm DoS | warm child + circuit breaker + backoff | a tripped breaker denies (fail-closed) until operator reset |
 
-Proposed risk IDs: **P1-SEC-026** (process-isolated capability **enforcement** — strengthens P1-SEC-024's worker residual: fs/exec/net/stdio now enforced), **P1-SEC-027** (host-mediated key material + the core SSRF guard). The 1.0 P1-SEC-024 row is annotated "enforced in 1.1 for `process-isolated` on a `--allow-net` Node." New §4 exclusions: network containment on `--allow-net`-less Node (fail-closed), `networkEgress:true` plugins, core-dump/swap, OS-level escape.
+Risk IDs (final): **P1-SEC-027** (process-isolated capability **enforcement** — strengthens P1-SEC-024's worker residual: fs/exec/net/stdio now enforced), **P1-SEC-028** (host-mediated key material + the core SSRF guard). *(Renumbered from the proposed 026/027 — P1-SEC-026 is the existing 0.9 OIDC-broker risk.)* The 1.0 P1-SEC-024 row is annotated "enforced in 1.1 for `process-isolated` on a `--allow-net` Node." New §4 exclusions: network containment on `--allow-net`-less Node (fail-closed), `networkEgress:true` plugins, core-dump/swap, OS-level escape.
 
 ## 7. Test criteria (mapped to the PR breakdown)
 
