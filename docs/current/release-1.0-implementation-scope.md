@@ -88,7 +88,12 @@ Reusing the existing hash-chained `auditSink` (the same seam `recordProxyDecisio
 
 - `plugin.load.accepted` `{ pluginId, version, entrySha256, signerKeyId, capabilitiesGranted }`
 - `plugin.load.refused` `{ reason ∈ missing-signature | unknown-signer | tampered-entry | revoked | below-version-floor | pin-mismatch | expired-window | capability-not-allowlisted | conformance-failed | manifest-invalid, pluginId?, signerKeyId? }`
-- `plugin.authenticate.deny` `{ pluginId, reason ∈ invalid-claims | throw | non-pii-safe-identity | timeout }`
+- `plugin.authenticate.deny` `{ pluginId, reason ∈ deny | invalid-claims | timeout | over-capacity | oversized }`
+  - `deny` — plugin returned a plain deny (including a worker-harness-converted internal throw)
+  - `invalid-claims` — host-side claims sanitize or `buildExternalIdentity` rejection (subsumes the earlier `non-pii-safe-identity` label)
+  - `timeout` — per-call timeout expired; worker terminated and respawned
+  - `over-capacity` — `maxPendingCalls` exceeded; call rejected before entering the worker queue
+  - `oversized` — credential message exceeds `maxMessageBytes`; not sent to the worker
 - `plugin.worker.terminated` `{ pluginId, cause ∈ timeout | oom | crash }`
 
 `FORBIDDEN_KEYS` is **extended** with the plugin/claims surface (`claims`, `subject`, `issuer`, `credential`, `authorization`, `signature`, `entry`) as defense-in-depth so a future plugin event can never leak a raw claim/token/signer secret into the chained log (the events above already carry only ids/hashes). Tests assert a refused load and a worker timeout each emit exactly one chained event, and that a synthetic plugin event with raw claims is stripped by `sanitizeAudit`.

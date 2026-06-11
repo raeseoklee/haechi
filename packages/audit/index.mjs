@@ -21,7 +21,13 @@ const FORBIDDEN_KEYS = new Set([
   // defense-in-depth so a future plugin event can never leak a raw claim, the
   // received credential/authorization, the signer's signature, or the entry
   // source into the chained log.
-  "claims", "subject", "issuer", "credential", "authorization", "signature", "entry"
+  "claims", "subject", "issuer", "credential", "authorization", "signature", "entry",
+  // The frozen 1.0 audit-identity contract is exactly {id,type,subjectHash,
+  // issuerHash,provider} — scopes/labels are NOT part of it. This additive
+  // guard ensures that even if a future code path passes an un-projected
+  // identity object, scopes/labels (which can carry attacker-controlled plugin
+  // claim values) can never enter the hash-chained audit record.
+  "scopes", "labels"
 ]);
 
 export function createJsonlAuditSink({ path, anchor = null }) {

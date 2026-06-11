@@ -10,7 +10,21 @@ import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
 import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
 import { createBearerAuthProvider } from "../auth/index.mjs";
+import { createSandboxedAuthProviderSync } from "../plugin/index.mjs";
 import { DEFAULT_PROXY_PORT } from "../proxy/index.mjs";
+
+// Capability keys an operator may allowlist for a plugin. Mirrors the plugin
+// manifest's declared-capability set plus the authProvider-specific
+// readsCredentials. Inlined (not imported) to keep the dependency one-way.
+const KNOWN_PLUGIN_CAPABILITIES = new Set([
+  "readsPlaintext",
+  "writesPlaintext",
+  "networkEgress",
+  "fileWrite",
+  "auditWrite",
+  "externalSecrets",
+  "readsCredentials"
+]);
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
@@ -85,6 +99,12 @@ export function defaultConfig() {
       store: ".haechi/auth.json",
       allowedLabelKeys: ["team", "env", "tier", "role"]
     },
+    // Top-level kill-switch for dynamic plugin loading (1.0 §2.2). Default true;
+    // an operator sets `plugins.enabled: false` to force-refuse construction of
+    // any sandboxed plugin (a live force-drop, since revocation is next-load).
+    plugins: {
+      enabled: true
+    },
     mcp: {
       allowedMethods: ["initialize", "tools/call", "resources/read", "prompts/get"],
       protectParams: true,
@@ -128,8 +148,10 @@ export function createRuntime(config, providers = {}) {
   // closed at construction rather than deep in a request if a needing feature
   // is configured without it.
   if (typeof cryptoProvider.hmac !== "function"
-    && (normalized.auth.provider === "bearer" || normalized.tokenVault.deterministic)) {
-    throw new Error("cryptoProvider must implement hmac() for bearer auth / deterministic tokenization");
+    && (normalized.auth.provider === "bearer"
+      || normalized.auth.provider === "plugin"
+      || normalized.tokenVault.deterministic)) {
+    throw new Error("cryptoProvider must implement hmac() for bearer/plugin auth / deterministic tokenization");
   }
   const auditSink = providers.auditSink ?? createJsonlAuditSink({
     path: normalized.audit.path,
@@ -169,7 +191,7 @@ export function createRuntime(config, providers = {}) {
   const policyEngine = providers.policyEngine ?? policyProfiles.base.policyEngine;
   assertProvider("policyEngine", policyEngine, ["decide"]);
 
-  const authProvider = resolveAuthProvider(normalized, providers, cryptoProvider);
+  const authProvider = resolveAuthProvider(normalized, providers, cryptoProvider, auditSink);
 
   return {
     config: normalized,
@@ -249,6 +271,10 @@ export function normalizeConfig(config) {
       ...defaultConfig().auth,
       ...(config.auth ?? {}),
       allowedLabelKeys: config.auth?.allowedLabelKeys ?? defaultConfig().auth.allowedLabelKeys
+    },
+    plugins: {
+      ...defaultConfig().plugins,
+      ...(config.plugins ?? {})
     },
     mcp: {
       ...defaultConfig().mcp,
@@ -340,7 +366,7 @@ export function normalizeConfig(config) {
     throw new Error("limits.upstreamTimeoutMs must be a positive number");
   }
   validatePolicyExtras(merged.policy);
-  if (!["none", "bearer", "external"].includes(merged.auth.provider)) {
+  if (!["none", "bearer", "external", "plugin"].includes(merged.auth.provider)) {
     throw new Error(`Invalid auth.provider: ${merged.auth.provider}`);
   }
   if (typeof merged.auth.store !== "string" || !merged.auth.store.trim()) {
@@ -349,6 +375,9 @@ export function normalizeConfig(config) {
   if (!Array.isArray(merged.auth.allowedLabelKeys)
     || !merged.auth.allowedLabelKeys.every((key) => typeof key === "string" && key.trim())) {
     throw new Error("auth.allowedLabelKeys must be an array of non-empty strings");
+  }
+  if (merged.auth.provider === "plugin") {
+    validatePluginAuthConfig(merged);
   }
   createProtocolAdapter(merged.target);
   return merged;
@@ -411,7 +440,124 @@ function assertRate(value, label) {
   }
 }
 
-function resolveAuthProvider(config, providers, cryptoProvider) {
+// Enumerated, fail-closed validation of auth.provider:"plugin" (1.0 §2.3). Every
+// rule throws a distinct error so a bad option is attributable. Mirrors the
+// keys/tokenVault rigor — no silent degradation.
+function validatePluginAuthConfig(merged) {
+  // Kill-switch: refuse to construct any plugin when plugins.enabled is false.
+  if (typeof merged.plugins?.enabled !== "boolean") {
+    throw new Error("plugins.enabled must be boolean");
+  }
+  if (merged.plugins.enabled === false) {
+    throw new Error("plugins are disabled (plugins.enabled: false); refusing to construct a plugin authProvider");
+  }
+
+  const plugin = merged.auth.plugin;
+  if (!plugin || typeof plugin !== "object" || Array.isArray(plugin)) {
+    throw new Error("auth.provider 'plugin' requires an auth.plugin object");
+  }
+  if (typeof plugin.manifestPath !== "string" || !plugin.manifestPath.trim()) {
+    throw new Error("auth.plugin.manifestPath must be a non-empty string");
+  }
+
+  // trustAnchors: a non-empty array of {keyId, publicKey} OR a non-empty object
+  // map keyId -> publicKey/anchor.
+  const anchors = plugin.trustAnchors;
+  if (Array.isArray(anchors)) {
+    if (anchors.length === 0) {
+      throw new Error("auth.plugin.trustAnchors must be a non-empty array");
+    }
+    for (const anchor of anchors) {
+      if (!anchor || typeof anchor !== "object"
+        || typeof anchor.keyId !== "string" || !anchor.keyId.trim()
+        || anchor.publicKey === undefined || anchor.publicKey === null) {
+        throw new Error("each auth.plugin.trustAnchors entry must be { keyId, publicKey }");
+      }
+    }
+  } else if (anchors && typeof anchors === "object") {
+    const keys = Object.keys(anchors);
+    if (keys.length === 0) {
+      throw new Error("auth.plugin.trustAnchors must be a non-empty object");
+    }
+    for (const keyId of keys) {
+      if (anchors[keyId] === undefined || anchors[keyId] === null) {
+        throw new Error(`auth.plugin.trustAnchors.${keyId} must be a public key`);
+      }
+    }
+  } else {
+    throw new Error("auth.plugin.trustAnchors must be a non-empty array or object of { keyId, publicKey }");
+  }
+
+  // allowCapabilities: an array of known capability keys, including readsCredentials.
+  if (!Array.isArray(plugin.allowCapabilities) || plugin.allowCapabilities.length === 0) {
+    throw new Error("auth.plugin.allowCapabilities must be a non-empty array of capability keys");
+  }
+  for (const capability of plugin.allowCapabilities) {
+    if (typeof capability !== "string" || !KNOWN_PLUGIN_CAPABILITIES.has(capability)) {
+      throw new Error(`auth.plugin.allowCapabilities contains an unknown capability: ${capability}`);
+    }
+  }
+  if (!plugin.allowCapabilities.includes("readsCredentials")) {
+    throw new Error("auth.plugin.allowCapabilities must include readsCredentials for an authProvider");
+  }
+
+  if (!Number.isInteger(plugin.timeoutMs) || plugin.timeoutMs <= 0) {
+    throw new Error("auth.plugin.timeoutMs must be a positive integer");
+  }
+
+  const limits = plugin.resourceLimits;
+  if (!limits || typeof limits !== "object" || Array.isArray(limits)
+    || !Number.isInteger(limits.maxOldGenerationSizeMb) || limits.maxOldGenerationSizeMb <= 0) {
+    throw new Error("auth.plugin.resourceLimits.maxOldGenerationSizeMb must be a positive integer");
+  }
+
+  if (plugin.maxPendingCalls !== undefined
+    && (!Number.isInteger(plugin.maxPendingCalls) || plugin.maxPendingCalls < 1)) {
+    throw new Error("auth.plugin.maxPendingCalls must be a positive integer");
+  }
+  if (plugin.maxMessageBytes !== undefined
+    && (!Number.isInteger(plugin.maxMessageBytes) || plugin.maxMessageBytes < 1)) {
+    throw new Error("auth.plugin.maxMessageBytes must be a positive integer");
+  }
+
+  if (plugin.pin !== undefined && plugin.pin !== null) {
+    if (typeof plugin.pin !== "object" || Array.isArray(plugin.pin)) {
+      throw new Error("auth.plugin.pin must be an object");
+    }
+    for (const field of ["version", "entrySha256", "manifestSha256"]) {
+      if (plugin.pin[field] !== undefined && plugin.pin[field] !== null
+        && (typeof plugin.pin[field] !== "string" || !plugin.pin[field].trim())) {
+        throw new Error(`auth.plugin.pin.${field} must be a non-empty string`);
+      }
+    }
+  }
+
+  if (plugin.revoked !== undefined && plugin.revoked !== null) {
+    if (typeof plugin.revoked !== "object" || Array.isArray(plugin.revoked)) {
+      throw new Error("auth.plugin.revoked must be an object");
+    }
+    for (const field of ["signerKeyIds", "entrySha256"]) {
+      if (plugin.revoked[field] !== undefined
+        && (!Array.isArray(plugin.revoked[field])
+          || !plugin.revoked[field].every((v) => typeof v === "string" && v.trim()))) {
+        throw new Error(`auth.plugin.revoked.${field} must be an array of non-empty strings`);
+      }
+    }
+  }
+
+  if (plugin.versionFloor !== undefined && plugin.versionFloor !== null) {
+    if (typeof plugin.versionFloor !== "object" || Array.isArray(plugin.versionFloor)) {
+      throw new Error("auth.plugin.versionFloor must be an object mapping pluginId -> version");
+    }
+    for (const [id, floor] of Object.entries(plugin.versionFloor)) {
+      if (typeof floor !== "string" || !floor.trim()) {
+        throw new Error(`auth.plugin.versionFloor.${id} must be a non-empty version string`);
+      }
+    }
+  }
+}
+
+function resolveAuthProvider(config, providers, cryptoProvider, auditSink) {
   if (config.auth.provider === "external") {
     if (typeof providers.authProvider?.authenticate !== "function") {
       throw new Error("auth.provider external requires createRuntime(config, { authProvider })");
@@ -425,7 +571,40 @@ function resolveAuthProvider(config, providers, cryptoProvider) {
   if (config.auth.provider === "bearer") {
     return createBearerAuthProvider({ path: config.auth.store, cryptoProvider });
   }
+  if (config.auth.provider === "plugin") {
+    const plugin = config.auth.plugin;
+    return createSandboxedAuthProviderSync({
+      manifestPath: plugin.manifestPath,
+      trustAnchors: normalizeTrustAnchors(plugin.trustAnchors),
+      allowCapabilities: plugin.allowCapabilities,
+      pin: plugin.pin ?? null,
+      revoked: plugin.revoked ?? {},
+      versionFloor: plugin.versionFloor ?? {},
+      timeoutMs: plugin.timeoutMs,
+      maxPendingCalls: plugin.maxPendingCalls,
+      maxMessageBytes: plugin.maxMessageBytes,
+      resourceLimits: plugin.resourceLimits,
+      coreVersion: plugin.coreVersion ?? null,
+      cryptoProvider,
+      auditSink,
+      allowedLabelKeys: config.auth.allowedLabelKeys
+    });
+  }
   return null;
+}
+
+// The config form is a non-empty array of { keyId, publicKey } OR an object map.
+// verifySignedPlugin resolves the anchor by signerKeyId against an object map, so
+// normalize an array form into that map here.
+function normalizeTrustAnchors(anchors) {
+  if (Array.isArray(anchors)) {
+    const map = {};
+    for (const anchor of anchors) {
+      map[anchor.keyId] = anchor.publicKey;
+    }
+    return map;
+  }
+  return anchors;
 }
 
 function createConfiguredCryptoProvider(config) {

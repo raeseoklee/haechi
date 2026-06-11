@@ -7,6 +7,11 @@ export {
   PLUGIN_LOAD_REASONS
 } from "./signing.mjs";
 
+export {
+  createSandboxedAuthProvider,
+  createSandboxedAuthProviderSync
+} from "./sandbox.mjs";
+
 const VALID_KINDS = new Set([
   "crypto-provider",
   "key-provider",
