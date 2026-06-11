@@ -15,7 +15,13 @@ const FORBIDDEN_KEYS = new Set([
   // elsewhere, and the broker already self-guards them via its own allowlist
   // projection.
   "access_token", "id_token", "refresh_token", "code", "code_verifier",
-  "client_secret", "state", "nonce"
+  "client_secret", "state", "nonce",
+  // Plugin/claims surface (1.0): a dynamically-loaded auth plugin's lifecycle
+  // events carry only ids/hashes/counts, but this additive membership is
+  // defense-in-depth so a future plugin event can never leak a raw claim, the
+  // received credential/authorization, the signer's signature, or the entry
+  // source into the chained log.
+  "claims", "subject", "issuer", "credential", "authorization", "signature", "entry"
 ]);
 
 export function createJsonlAuditSink({ path, anchor = null }) {

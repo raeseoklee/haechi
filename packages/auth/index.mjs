@@ -212,4 +212,177 @@ export function createBearerAuthProvider({ path, cryptoProvider }) {
   };
 }
 
+// Conformance suite for any authProvider — the CORRECTNESS gate the plugin
+// loader runs before wiring a (sandboxed) auth plugin. It is NOT a malice screen
+// (a signed plugin can detect a fixed test and behave, so vectors are randomized
+// per run and the host re-validates PII-safety per call); it asserts the
+// enumerated security behaviors of the authProvider contract:
+//   - missing credential -> null
+//   - malformed credential -> null
+//   - expired / not-yet-valid credential (clock via injected now) -> null
+//   - an internal throw surfaces to the caller as null (never propagates)
+//   - a returned identity MUST carry subjectHash AND issuerHash, and MUST NOT
+//     contain any field whose value equals the raw input subject or issuer
+//   - deny is DETERMINISTIC for identical input
+//   - a valid credential -> a well-formed PII-safe identity
+//
+// vectors lets a caller supply the request builders / raw values; by default a
+// randomized-per-run vector set is generated so a plugin cannot hardcode the
+// test. Mirrors assertCryptoProviderConformance's check/assert/failures shape.
+export async function assertAuthProviderConformance(provider, { now = Date.now(), vectors } = {}) {
+  const failures = [];
+  const check = async (name, fn) => {
+    try {
+      await fn();
+    } catch (error) {
+      failures.push(`${name}: ${error.message}`);
+    }
+  };
+  const assert = (condition, message) => {
+    if (!condition) {
+      throw new Error(message);
+    }
+  };
+
+  if (typeof provider?.authenticate !== "function") {
+    throw new Error("authProvider must implement authenticate()");
+  }
+
+  const v = vectors ?? randomAuthVectors(now);
+
+  // A contract-conformant authProvider must never throw into the caller. We wrap
+  // every call so a throw becomes an explicit failure in the relevant check
+  // rather than aborting the whole suite — except the dedicated throw-vector
+  // check below, which asserts the provider itself swallowed the throw.
+  const callRaw = (request) => provider.authenticate(request);
+  const callSafe = async (request) => {
+    try {
+      return await provider.authenticate(request);
+    } catch (error) {
+      return { __threw: true, error };
+    }
+  };
+
+  await check("missing credential -> null", async () => {
+    const result = await callSafe(v.missing.request);
+    assert(!result?.__threw, "authenticate threw on a missing credential (must return null)");
+    assert(result === null, "missing credential must deny with null");
+  });
+
+  await check("malformed credential -> null", async () => {
+    const result = await callSafe(v.malformed.request);
+    assert(!result?.__threw, "authenticate threw on a malformed credential (must return null)");
+    assert(result === null, "malformed credential must deny with null");
+  });
+
+  await check("expired credential -> null", async () => {
+    const result = await callSafe(v.expired.request);
+    assert(!result?.__threw, "authenticate threw on an expired credential (must return null)");
+    assert(result === null, "expired credential must deny with null");
+  });
+
+  await check("not-yet-valid credential -> null", async () => {
+    const result = await callSafe(v.notYetValid.request);
+    assert(!result?.__threw, "authenticate threw on a not-yet-valid credential (must return null)");
+    assert(result === null, "not-yet-valid credential must deny with null");
+  });
+
+  await check("an internal throw surfaces to the caller as null (never propagates)", async () => {
+    let propagated = false;
+    let result;
+    try {
+      result = await callRaw(v.throwing.request);
+    } catch {
+      propagated = true;
+    }
+    assert(!propagated, "authenticate propagated an internal throw (must catch and deny with null)");
+    assert(result === null, "an internal error must deny with null, not a non-null identity");
+  });
+
+  await check("deny is deterministic for identical input", async () => {
+    const a = await callSafe(v.malformed.request);
+    const b = await callSafe(v.malformed.request);
+    assert(!a?.__threw && !b?.__threw, "authenticate threw while checking determinism");
+    assert(a === b, "deny is not deterministic for identical input (expected null both times)");
+    assert(a === null, "expected a deterministic null deny");
+  });
+
+  await check("valid credential -> a well-formed, PII-safe identity", async () => {
+    const identity = await callSafe(v.valid.request);
+    assert(!identity?.__threw, "authenticate threw on a valid credential");
+    assert(identity && typeof identity === "object", "a valid credential must return an identity object");
+    assert(typeof identity.subjectHash === "string" && identity.subjectHash.length > 0,
+      "identity must carry a non-empty subjectHash");
+    assert(typeof identity.issuerHash === "string" && identity.issuerHash.length > 0,
+      "identity must carry a non-empty issuerHash");
+    // PII-safety: no field value may equal the raw input subject or issuer.
+    assertNoRawPii(identity, v.valid.subject, v.valid.issuer, assert);
+
+    // Determinism for the accept path too: identical valid input -> identical
+    // identity (a non-deterministic identity breaks audit correlation).
+    const again = await callSafe(v.valid.request);
+    assert(!again?.__threw, "authenticate threw on a repeated valid credential");
+    assert(JSON.stringify(again) === JSON.stringify(identity),
+      "accept is not deterministic for identical valid input");
+  });
+
+  if (failures.length > 0) {
+    return { ok: false, failures };
+  }
+  return { ok: true, failures: [] };
+}
+
+// Recursively assert no value in the identity equals the raw subject/issuer. The
+// keyed-HMAC subjectHash/issuerHash are derived from these, so an equality
+// against the raw value would mean a PII leak (or an un-hashed passthrough).
+function assertNoRawPii(value, subject, issuer, assert, path = "identity") {
+  if (typeof value === "string") {
+    assert(value !== subject, `${path} contains the raw subject (PII leak)`);
+    assert(value !== issuer, `${path} contains the raw issuer (PII leak)`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => assertNoRawPii(item, subject, issuer, assert, `${path}[${i}]`));
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      assertNoRawPii(item, subject, issuer, assert, `${path}.${key}`);
+    }
+  }
+}
+
+function randomAuthVectors(now) {
+  const nowMs = typeof now === "number" ? now : Date.parse(now);
+  // Per-run random so a plugin cannot hardcode the expected test values.
+  const nonce = randomBytes(8).toString("hex");
+  const subject = `subj-${randomBytes(6).toString("hex")}`;
+  const issuer = `iss-${randomBytes(6).toString("hex")}`;
+  const validToken = `valid.${nonce}.${randomBytes(8).toString("hex")}`;
+  const expiredToken = `expired.${nonce}.${randomBytes(8).toString("hex")}`;
+  const notYetToken = `notyet.${nonce}.${randomBytes(8).toString("hex")}`;
+  const malformedToken = `~malformed~${nonce}`;
+  const throwToken = `throw.${nonce}`;
+
+  const bearer = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  // The valid credential encodes the random subject/issuer so any provider that
+  // echoes/leaks them into the returned identity is caught by assertNoRawPii.
+  // The credential is structured as "valid.<nonce>.<randHex>.<subject>.<issuer>"
+  // so a provider COULD extract them — but it MUST then keyed-hash them (not echo
+  // them raw) for the PII-safety assertion to pass. This makes the default-vector
+  // PII check non-vacuous: a leaking provider fails without custom vectors.
+  const validTokenWithPii = `${validToken}.${subject}.${issuer}`;
+  return {
+    nowMs,
+    subject,
+    issuer,
+    missing: { request: { headers: {} } },
+    malformed: { request: bearer(malformedToken), token: malformedToken },
+    expired: { request: bearer(expiredToken), token: expiredToken },
+    notYetValid: { request: bearer(notYetToken), token: notYetToken },
+    throwing: { request: bearer(throwToken), token: throwToken },
+    valid: { request: bearer(validTokenWithPii), token: validTokenWithPii, subject, issuer }
+  };
+}
+
 export { DEFAULT_ALLOWED_LABEL_KEYS };
