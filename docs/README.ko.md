@@ -20,7 +20,7 @@
 - `docs/current/release-0.7-implementation-scope.md`: 0.7 audit anchoring, cryptoProvider 계약 + reference KMS adapter, signed release artifacts
 - `docs/current/configuration.md`: 전체 설정 레퍼런스 (모든 키, 기본값, 검증, preset, 자주 쓰는 설정)
 - `docs/current/risk-register-release-gate.md`: 0.3.2 기준 배포 차단 리스크, 보안/운영 리스크, npm release gate
-- `docs/current/threat-model.md`: Haechi 0.3.2 신뢰 경계, 보호 자산, 주요 위협과 통제
+- `docs/current/threat-model.md`: Haechi 신뢰 경계, 보호 자산, 주요 위협과 통제
 - `docs/current/shared-responsibility.md`: self-hosted 운영에서 Haechi와 사용자/운영자의 책임 분리
 - `docs/current/api-stability.md`: developer preview API 안정성 및 migration note 기준
 - `docs/current/release-process.md`: release preflight, SBOM, npm provenance publish 절차

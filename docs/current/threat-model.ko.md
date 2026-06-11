@@ -76,9 +76,9 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 
 ## 4. 명시적 제외
 
-0.3.2는 다음을 보장하지 않는다.
+Haechi는 다음을 보장하지 않는다.
 
-- 운영 KMS/HSM/Vault adapter 자체 제공
+- 코어 자체의 운영 KMS/HSM/Vault adapter 제공(`haechi-crypto-kms` satellite가 외부 `cryptoProvider` 계약을 통해 AWS/GCP/Azure/Vault adapter를 제공한다)
 - internet-facing gateway 인증/인가
 - `streaming.maxMatchBytes`보다 긴 cross-frame 매칭(스트림 프레임에 걸쳐 분할될 수 있음)
 - `block`이 발동되기 전에 이미 방출된 스트림 바이트의 회수

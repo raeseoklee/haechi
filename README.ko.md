@@ -52,7 +52,7 @@ npm run demo:report
 
 기본 설정은 `dry-run` 모드로 실행된다. 민감한 값을 탐지하고 audit 메타데이터를 기록하지만, 정책 모드를 변경하기 전까지는 아웃바운드 payload를 수정하지 않는다.
 
-`npm run demo:init`은 `haechi.config.json`과 `.haechi/dev.keys.json`을 로컬에 생성한다. 생성된 키 파일은 로컬 개발 전용이다. Haechi 0.3.x는 운영 환경용 KMS/HSM/Vault 키 provider를 포함하지 않는다. 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에서 확인할 수 있다.
+`npm run demo:init`은 `haechi.config.json`과 `.haechi/dev.keys.json`을 로컬에 생성한다. 생성된 키 파일은 로컬 개발 전용이다. 코어는 운영 환경용 KMS/HSM/Vault 키 provider를 포함하지 않으며, KMS·Vault 기반 키 custody는 `haechi-crypto-kms` satellite로 제공된다(외부 `cryptoProvider` 계약을 통해 주입). 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에서 확인할 수 있다.
 
 ## Local Proxy
 
@@ -72,7 +72,7 @@ upstream 요청은 `limits.upstreamTimeoutMs`(기본값 120000) 이후 타임아
 
 ## Local Inference Servers
 
-Haechi 0.3은 OpenAI 호환 서버, vLLM, Ollama, llama.cpp를 위한 프로토콜 adapter 프리셋을 포함한다.
+Haechi는 OpenAI 호환 서버, vLLM, Ollama, llama.cpp를 위한 프로토콜 adapter 프리셋을 포함한다.
 
 ```json
 {
