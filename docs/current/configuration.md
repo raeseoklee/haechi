@@ -141,9 +141,28 @@ Applies to `mcp-stdio` and `mcp-wrap`.
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
-| `auth.provider` | `none` \| `bearer` \| `external` | `none` | `none` = no auth (identity null). `bearer` = built-in token auth. `external` requires injecting an `authProvider` via `createRuntime(config, { authProvider })`. |
+| `auth.provider` | `none` \| `bearer` \| `external` \| `plugin` | `none` | `none` = no auth (identity null). `bearer` = built-in token auth. `external` requires injecting an `authProvider` via `createRuntime(config, { authProvider })`. `plugin` = a signed `authProvider` sandbox (see [`auth.plugin`](#authplugin-signed-authprovider-sandbox)). |
 | `auth.store` | path | `.haechi/auth.json` | Bearer token store (mode `0600`). Tokens are kept only as keyed-HMAC hashes; the plaintext is shown once by `haechi auth add`. |
 | `auth.allowedLabelKeys` | string array | `["team", "env", "tier", "role"]` | Label keys a token may carry; values are length-limited and must not contain PII. |
+
+### `auth.plugin` (signed authProvider sandbox)
+
+Required when `auth.provider: "plugin"`. The sandbox loads a **signed** `authProvider` plugin under a capability-gated, audited runtime. The top-level `plugins.enabled` (default `true`) is a kill-switch — `false` refuses to construct any plugin. Dynamic loading is opt-in; the default is dependency injection. See `docs/current/release-1.0-implementation-scope.md` (worker) and `release-1.1-implementation-scope.md` (process).
+
+| Key | Type / values | Default | Notes |
+|---|---|---|---|
+| `auth.plugin.manifestPath` | path | — | The signed plugin manifest (`haechi.plugin.json`). |
+| `auth.plugin.trustAnchors` | `[{keyId, publicKey}]` or `{ keyId: publicKey }` | — | Operator-allowlisted Ed25519 **public** keys. Key resolution is trust-anchor-only. |
+| `auth.plugin.allowCapabilities` | string array | — | Capability allowlist; must include `readsCredentials`. A requested capability not listed → load refused. |
+| `auth.plugin.isolation` | `worker` \| `process` | `worker` | `worker` = `worker_threads` (memory/crash isolation, **1.0**). `process` = a child under the Node permission model with **kernel-enforced** capability denial (**1.1**); requires a Node that enforces `--allow-net`. |
+| `auth.plugin.timeoutMs` | positive int | — | Per-call timeout; on timeout the runtime terminates the child/worker and denies. |
+| `auth.plugin.resourceLimits` | `{ maxOldGenerationSizeMb }` | — | **`worker` only** — `worker_threads` heap bound. N/A for `process`. |
+| `auth.plugin.netEnforcement` | `require-permission` | `require-permission` | **`process` only** — network-containment policy. `require-permission` **fails closed** (refuses to construct) on a Node without `--allow-net`. |
+| `auth.plugin.keyMaterial` | `{ url (https), ttlMs?, cooldownMs? }` | unset | **`process` only** — optional operator-declared key document the **host** fetches (SSRF-guarded, TTL+cooldown) and injects to a custom-credential plugin. The plugin never names a URL. |
+| `auth.plugin.pin` | `{ version?, entrySha256?, manifestSha256? }` | unset | Exact-match pin (anti malicious-update / rollback). |
+| `auth.plugin.revoked` | `{ signerKeyIds?, entrySha256? }` | unset | Revocation denylists (fail-closed at load). |
+| `auth.plugin.versionFloor` | `{ <pluginId>: version }` | unset | Per-plugin minimum version (anti-rollback). |
+| `auth.plugin.maxPendingCalls` / `maxMessageBytes` | positive int | `8` / `16384` | Concurrency + wire bounds (excess/oversized → deny). |
 
 ## `policy` profiles & limits
 

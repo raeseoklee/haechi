@@ -1,11 +1,11 @@
 ---
-updated: 2026-06-11
+updated: 2026-06-12
 tags: [concept, security, plugin, sandbox, auth]
 ---
 
 # Plugin Sandbox
 
-The 1.0 **signed-plugin sandbox** is the narrow lifting of Haechi's long-standing dynamic-loading ban: it dynamically loads a third-party **`authProvider` only**, under an Ed25519 signed-manifest trust gate, in a `worker_threads`-isolated worker, fully audited. Everything else still loads only by injection through `createRuntime(config, providers)` — injection stays the default, and the manifest-only `validatePluginManifest` path is untouched. Sources: `packages/plugin/signing.mjs` (the trust gate), `packages/plugin/sandbox.mjs` (the worker), `packages/plugin/index.mjs` (`runtime: "worker-isolated"` manifest validation). Design + authoritative threat rows: `docs/current/release-1.0-implementation-scope.md` §2.2–2.4/§6. Risk IDs: **P1-SEC-024** (dynamic plugin execution / sandbox trust model — supersedes P1-SEC-004's manifest-only stance, lifted under the new controls), **P1-SEC-025** (plugin signing / trust-anchor / revocation lifecycle).
+The **signed-plugin sandbox** is the narrow lifting of Haechi's long-standing dynamic-loading ban: it dynamically loads a third-party **`authProvider` only**, under an Ed25519 signed-manifest trust gate, fully audited. **1.0** ships the `worker_threads`-isolated worker (trust-based; the honest residual below); **1.1** adds the opt-in **`process-isolated`** runtime — real capability enforcement via a child process under the Node permission model (jump to [§ process-isolated](#capability-enforcement-the-process-isolated-runtime-11)). Everything else still loads only by injection through `createRuntime(config, providers)` — injection stays the default, and the manifest-only `validatePluginManifest` path is untouched. Sources: `packages/plugin/signing.mjs` (the trust gate), `packages/plugin/sandbox.mjs` (the worker), `packages/plugin/index.mjs` (`runtime: "worker-isolated"` manifest validation). Design + authoritative threat rows: `docs/current/release-1.0-implementation-scope.md` §2.2–2.4/§6. Risk IDs: **P1-SEC-024** (dynamic plugin execution / sandbox trust model — supersedes P1-SEC-004's manifest-only stance, lifted under the new controls), **P1-SEC-025** (plugin signing / trust-anchor / revocation lifecycle).
 
 ## The honest security model (read this first)
 
@@ -16,7 +16,25 @@ The 1.0 **signed-plugin sandbox** is the narrow lifting of Haechi's long-standin
 - **Data minimization** — the worker receives **only** the credential slice (never the request body / key / sink); the **host** builds the keyed-HMAC identity.
 - **A narrow, audited, correlation-id'd contract.**
 
-True enforcement (block fs/net, contain the credential) needs **child-process isolation under the Node permission model** and is explicitly **1.x** (§3). So the **load-bearing** defense is the trust gate (Ed25519 signature + operator allowlist + pin + revocation + window), not the worker boundary.
+For the `worker_threads` mode the **load-bearing** defense is the trust gate (Ed25519 signature + operator allowlist + pin + revocation + window), not the worker boundary. **1.1 closes this residual** with the opt-in **`process-isolated`** runtime (below) — real capability enforcement via a child process under the Node permission model. The worker mode stays the default and is unchanged.
+
+## Capability enforcement: the `process-isolated` runtime (1.1)
+
+`packages/plugin/process-sandbox.mjs` `createProcessIsolatedAuthProvider`/`…Sync` is the **1.1** answer to the worker residual — manifest `runtime: "process-isolated"`, `auth.plugin.isolation: "process"`. It runs the **same** signed `authProvider` (the trust gate + claims sanitizer + host keyed-HMAC identity are shared via `packages/plugin/sandbox-common.mjs`) but in a **child `node` process** with **kernel-enforced** capability denial. Risk IDs **P1-SEC-027** (enforcement) / **P1-SEC-028** (host-mediated key material + the core SSRF guard). Design: `docs/current/release-1.1-implementation-scope.md`.
+
+What is enforced (empirically validated on Node 26):
+
+- **Zero OS grants** — spawned `node --permission --disable-proto=delete -e <harness>` with **no** `--allow-fs-read`/`--allow-child-process`/`--allow-worker`/`--allow-addons`/`--allow-wasi`/`--allow-net`. The kernel denies the plugin's `fs`/`child_process`/`worker` and (on a `--allow-net` Node) `net`/`fetch`/`dns` **and the `process.binding('tcp_wrap')` bypass** — all `ERR_ACCESS_DENIED`.
+- **Network = the kernel `--allow-net` denial, never a JS harness.** A "delete `node:net`/fetch" harness is NOT containment: `process.binding('tcp_wrap')` opens a live socket and a fresh `import('node:net')` re-resolves the builtin past any cache deletion. So the default **`netEnforcement: "require-permission"` fails closed** — `netEnforcementSupported()` behavior-probes (a `--permission` child must see `net.connect` denied) and `createProcessIsolatedAuthProvider` **throws at construction** on a Node that can't enforce it (Node 22 LTS). The fail-closed detection shipped in PR1 because CI on Node 22 proved net is ungated there.
+- **stdio fully closed** — `stdio: ['ignore','ignore','ignore','ipc']`: no stdout/stderr/inheritable fd, so a plugin writing the credential to stderr reaches no host sink (a leak channel `--allow-net` does not gate). The only channel is the dedicated IPC.
+- **No fs grant at load** — the verified plugin bytes cross over IPC and load from a `data:` URL (the mechanism the worker uses), so there is no temp-dir / realpath / symlink / TOCTOU surface and no fs grant at all.
+- **env scrubbed** to `{}` (no inherited host secrets, no `NODE_OPTIONS` flag injection); **JSON-string-only IPC** (`serialization: "json"`) + the shared null-proto claims sanitizer; single-occupancy serialization; timeout→kill→lazy re-verify-on-respawn; a **spawn-storm circuit breaker** (N kills within a window → permanent fail-closed deny, exponential backoff); a close-during-spawn guard that cannot resurrect a child after `close()`.
+
+**Host-mediated key material** (P1-SEC-028): a custom-credential plugin that needs a key document does not fetch it (net is denied) — the **host** fetches the **operator-declared** URL through the new core node:-only **`haechi/ssrf`** module (`isBlockedAddress` + `guardedFetch`: https-only, post-DNS re-check, `redirect:"error"`, bounded body; `createGuardedKeyFetcher`: TTL cache + cooldown) and injects it over the IPC as the plugin's second `authenticate(credential, { keyMaterial })` argument. The plugin **never names a URL** (no plugin-driven SSRF). The satellites keep their **deliberate** local `isBlockedAddress` copies (a crypto/auth package must not runtime-depend on core-ssrf; `crypto-kms/ssrf-parity.test.mjs`) — the core re-import is **deferred**, drift guarded by a core-vs-`auth-jwt` parity test.
+
+**Audit:** process lifecycle events carry **host-computed/enum-only** `isolation: "process"` (a discriminator, never child-supplied), and `load.accepted` adds `netEnforcement` + `grants: []` (zero OS grants). All outside the frozen protect-event schema.
+
+**Residual (process-isolated):** a Node without `--allow-net` (fail-closed, not contained); a `networkEgress`-granted plugin; the host-fetch DNS-rebinding window; credential + injected key material in child memory (core-dump/swap); a V8/Node escape (`--permission` is a runtime control, not an OS sandbox).
 
 ## The Ed25519 signed-manifest trust gate (`verifySignedPlugin`)
 

@@ -1,6 +1,10 @@
 # Haechi 1.1 구현 범위
 
-- 상태: Draft 0.2 (설계 — 아직 미구현; Node 26 실측을 동반한 3-렌즈 적대적 검토 후 강화, 2026-06-11)
+- 상태: **구현 + 출시 완료** (2026-06-12; PR #54/#55/#56 + 이 릴리스 컷, core 1.0.0 → 1.1.0). 설계는 Node 26 실측을 동반한 3-렌즈 적대적 검토 후 강화됨.
+- 구현 노트(설계 원문 대비 차이):
+  - **fail-closed `--allow-net` 기능 탐지**(`netEnforcementSupported` + 기본값 `netEnforcement: "require-permission"`)는 PR3가 아니라 **PR1**에서 출시됨 — 런타임 안전에 본질적이기 때문: Node 22(--allow-net 없음) CI가 이것 없이는 런타임이 net 미봉쇄로 동작함을 입증했고, 이는 이 설계가 거부하는 "봉쇄하는 척" 실패다. 탐지는 동작을 probe한다(`--permission` 자식에서 `net.connect`가 거부되어야 함) — 플래그가 나열됐지만 강제되지 않는 Node에 면역.
+  - 승격된 SSRF 가드의 **satellite 재import**(§2.3)는 **연기됨**: `haechi-auth-jwt`/`haechi-auth-oidc`/`haechi-crypto-kms`가 `haechi/ssrf`를 import하게 하면 그들의 `haechi` peer floor가 1.1로 올라가고, 의도적 "교차 패키지 SSRF 결합 금지" 결정(`crypto-kms/ssrf-parity.test.mjs`)을 뒤집는다. 대신 코어 복사본은 코어-대-`auth-jwt` parity 테스트로 정직하게 유지된다; drift는 제거가 아니라 가드됨.
+  - 리스크 ID는 **P1-SEC-026/027 → P1-SEC-027/028**로 재번호됨(제안된 P1-SEC-026이 기존 0.9 OIDC 브로커 리스크와 충돌).
 - 날짜: 2026-06-11
 - 대상 버전: 1.1.0 (1.0.0 이후)
 - 유형: 플러그인 샌드박스의 capability **강제(enforcement)** (1.0의 정직한 잔여 위험을 닫음)
@@ -100,7 +104,7 @@ Additive + opt-in. `worker-isolated`, injection, 모든 provider 계약, frozen 
 | 새 필드 통한 감사 평문 유출 | 호스트 계산/enum 전용 필드, 고정 reason enum, 자식 자유 텍스트 없음 | 실질적으로 없음 |
 | Spawn-storm DoS | 워밍 자식 + 서킷 브레이커 + 백오프 | trip된 브레이커는 운영자 reset까지 거부(fail-closed) |
 
-제안 리스크 ID: **P1-SEC-026**(process-isolated capability **강제** — P1-SEC-024의 worker 잔여를 강화: fs/exec/net/stdio가 이제 강제됨), **P1-SEC-027**(호스트 중개 키 자료 + 코어 SSRF 가드). 1.0 P1-SEC-024 행에 "`--allow-net` Node의 `process-isolated`에 대해 1.1에서 강제됨" 주석. 새 §4 제외: `--allow-net` 없는 Node에서의 네트워크 봉쇄(fail-closed), `networkEgress:true` 플러그인, core-dump/swap, OS 수준 탈출.
+리스크 ID(최종): **P1-SEC-027**(process-isolated capability **강제** — P1-SEC-024의 worker 잔여를 강화: fs/exec/net/stdio가 이제 강제됨), **P1-SEC-028**(호스트 중개 키 자료 + 코어 SSRF 가드). *(제안된 026/027에서 재번호 — P1-SEC-026은 기존 0.9 OIDC 브로커 리스크.)* 1.0 P1-SEC-024 행에 "`--allow-net` Node의 `process-isolated`에 대해 1.1에서 강제됨" 주석. 새 §4 제외: `--allow-net` 없는 Node에서의 네트워크 봉쇄(fail-closed), `networkEgress:true` 플러그인, core-dump/swap, OS 수준 탈출.
 
 ## 7. 테스트 기준(PR 분해에 매핑)
 
