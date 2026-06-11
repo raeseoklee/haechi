@@ -1,6 +1,6 @@
 {
   "name": "haechi-crypto-kms",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "KMS-backed cryptoProvider satellite for Haechi (keys.provider: external) — envelope encryption with an injected KMS client.",
   "license": "Apache-2.0",
   "type": "module",
@@ -27,11 +27,17 @@
   "main": "index.mjs",
   "exports": {
     ".": "./index.mjs",
-    "./aws": "./aws.mjs"
+    "./aws": "./aws.mjs",
+    "./gcp": "./gcp.mjs",
+    "./azure": "./azure.mjs",
+    "./vault": "./vault.mjs"
   },
   "files": [
     "index.mjs",
     "aws.mjs",
+    "gcp.mjs",
+    "azure.mjs",
+    "vault.mjs",
     "README.md"
   ],
   "scripts": {
@@ -39,15 +45,28 @@
   },
   "peerDependencies": {
     "haechi": ">=0.8.0 <1.0.0",
-    "@aws-sdk/client-kms": "^3"
+    "@aws-sdk/client-kms": "^3",
+    "@google-cloud/kms": "^4 || ^5",
+    "@azure/keyvault-keys": "^4",
+    "@azure/identity": "^4"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-kms": {
       "optional": true
+    },
+    "@google-cloud/kms": {
+      "optional": true
+    },
+    "@azure/keyvault-keys": {
+      "optional": true
+    },
+    "@azure/identity": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "haechi": "*"
+    "haechi": "*",
+    "haechi-auth-jwt": "*"
   },
   "engines": {
     "node": ">=22"

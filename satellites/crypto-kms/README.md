@@ -60,6 +60,51 @@ npm install haechi-crypto-kms @aws-sdk/client-kms
 
 It is imported lazily, so consumers on the in-memory or an injected client never pull the SDK. For tests, inject `createAwsKmsClient({ keyId, client })` with a `{ encrypt, decrypt }` mock — no SDK or network required.
 
+## Google Cloud KMS (`haechi-crypto-kms/gcp`)
+
+```js
+import { createGcpKmsClient } from "haechi-crypto-kms/gcp";
+
+const kms = createGcpKmsClient({
+  keyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k",
+  hmacRootCiphertext: process.env.HAECHI_HMAC_ROOT // base64url, Cloud KMS-encrypted 32-byte root; omit for encrypt-only
+});
+```
+
+Same envelope model as AWS: a CSPRNG 32-byte data key is wrapped via the crypto-key's `Encrypt`/`Decrypt`. The SDK (`@google-cloud/kms`) is an **optional peer**, imported lazily and adapted from its array-return shape (`[{ ciphertext }]` / `[{ plaintext }]`) only when no `client` is injected. For tests, inject `createGcpKmsClient({ keyName, client })` with an `{ encrypt({ name, plaintext }), decrypt({ name, ciphertext }) }` mock.
+
+## Azure Key Vault (`haechi-crypto-kms/azure`)
+
+```js
+import { createAzureKmsClient } from "haechi-crypto-kms/azure";
+
+const kms = createAzureKmsClient({
+  keyId: "https://my-vault.vault.azure.net/keys/my-key/version",
+  wrapAlgorithm: "RSA-OAEP-256",                  // default
+  hmacRootCiphertext: process.env.HAECHI_HMAC_ROOT // base64url, Azure-wrapped 32-byte root; omit for encrypt-only
+});
+```
+
+Azure **natively** wraps/unwraps the data key via the vault key's `CryptographyClient` (no local GCM envelope of the data key). `@azure/keyvault-keys` + `@azure/identity` are **optional peers**, imported lazily and constructed with `DefaultAzureCredential()` only when no `client` is injected. For tests, inject `createAzureKmsClient({ keyId, client })` with a `{ wrapKey(alg, key), unwrapKey(alg, encryptedKey) }` mock.
+
+## HashiCorp Vault Transit (`haechi-crypto-kms/vault`)
+
+```js
+import { createVaultKmsClient } from "haechi-crypto-kms/vault";
+
+const kms = createVaultKmsClient({
+  address: "https://vault.example.com:8200",      // https required (http only for an explicit loopback dev address)
+  token: process.env.VAULT_TOKEN,
+  keyName: "haechi-root",                          // a NON-DERIVED transit key (no per-context derivation)
+  namespace: process.env.VAULT_NAMESPACE,         // optional (Vault Enterprise)
+  hmacRootCiphertext: process.env.HAECHI_HMAC_ROOT // a "vault:v1:…" transit ciphertext of a 32-byte root; omit for encrypt-only
+});
+```
+
+The **dependency-lightest** backend: **zero optional peer** — it talks to the Transit HTTP API with `node:` `fetch` only. `wrap` `POST`s the data key as **standard base64** to `/v1/transit/encrypt/{keyName}` and returns the `vault:v1:…` ciphertext verbatim; `unwrap` `POST`s it to `/v1/transit/decrypt/{keyName}` and standard-base64-decodes `data.plaintext` back to the data key. The transit key **must be non-derived** so a fixed plaintext round-trips without a `context`.
+
+The Vault egress is **SSRF-hardened**: every request parses `address`, requires https (loopback-http carve-out documented), runs a post-DNS `lookup` → `isBlockedAddress` re-check (refusing private/loopback/link-local/metadata ranges incl. `169.254.169.254`), and uses `redirect: "error"` + a bounded response body + a fetch timeout — defending against an operator `VAULT_ADDR` that rebinds to cloud metadata. `isBlockedAddress` is a satellite-local copy (a key-custody package must not depend on the auth package); inject `fetchImpl`/`lookupImpl` in tests.
+
 ## Usage
 
 ```js

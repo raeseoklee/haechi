@@ -37,7 +37,9 @@ export function createKmsCryptoProvider({ kms }) {
 
   return {
     id: "haechi.crypto.kms-reference",
-    version: "0.1.0",
+    // No `version` field: it was a hard-coded literal that drifted from the
+    // package version (reported "0.1.0" while the package was 0.1.1). Consumers
+    // that need the version read it from the installed package's package.json.
     capabilities: {
       readsPlaintext: true,
       networkEgress: true,   // a real KMS adapter calls out to the KMS
