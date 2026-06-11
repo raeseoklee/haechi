@@ -10,7 +10,7 @@ import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
 import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
 import { createBearerAuthProvider } from "../auth/index.mjs";
-import { createSandboxedAuthProviderSync } from "../plugin/index.mjs";
+import { createSandboxedAuthProviderSync, createProcessIsolatedAuthProviderSync } from "../plugin/index.mjs";
 import { DEFAULT_PROXY_PORT } from "../proxy/index.mjs";
 
 // Capability keys an operator may allowlist for a plugin. Mirrors the plugin
@@ -501,14 +501,51 @@ function validatePluginAuthConfig(merged) {
     throw new Error("auth.plugin.allowCapabilities must include readsCredentials for an authProvider");
   }
 
+  // isolation: "worker" (default, 1.0 worker_threads — memory/crash isolation) or
+  // "process" (1.1 — a --permission child with real capability enforcement).
+  const isolation = plugin.isolation ?? "worker";
+  if (!["worker", "process"].includes(isolation)) {
+    throw new Error(`auth.plugin.isolation must be "worker" or "process" (got: ${JSON.stringify(plugin.isolation)})`);
+  }
+
   if (!Number.isInteger(plugin.timeoutMs) || plugin.timeoutMs <= 0) {
     throw new Error("auth.plugin.timeoutMs must be a positive integer");
   }
 
-  const limits = plugin.resourceLimits;
-  if (!limits || typeof limits !== "object" || Array.isArray(limits)
-    || !Number.isInteger(limits.maxOldGenerationSizeMb) || limits.maxOldGenerationSizeMb <= 0) {
-    throw new Error("auth.plugin.resourceLimits.maxOldGenerationSizeMb must be a positive integer");
+  if (isolation === "worker") {
+    // worker_threads resourceLimits (heap bound). Required for the worker runtime.
+    const limits = plugin.resourceLimits;
+    if (!limits || typeof limits !== "object" || Array.isArray(limits)
+      || !Number.isInteger(limits.maxOldGenerationSizeMb) || limits.maxOldGenerationSizeMb <= 0) {
+      throw new Error("auth.plugin.resourceLimits.maxOldGenerationSizeMb must be a positive integer");
+    }
+  } else {
+    // process-isolated: resourceLimits is N/A (the child is OS-bounded). Validate
+    // the network-enforcement policy and the optional host-mediated key material.
+    const netEnforcement = plugin.netEnforcement ?? "require-permission";
+    if (netEnforcement !== "require-permission") {
+      throw new Error(`auth.plugin.netEnforcement must be "require-permission" (got: ${JSON.stringify(plugin.netEnforcement)})`);
+    }
+    if (plugin.keyMaterial !== undefined && plugin.keyMaterial !== null) {
+      const km = plugin.keyMaterial;
+      if (typeof km !== "object" || Array.isArray(km) || typeof km.url !== "string" || !km.url.trim()) {
+        throw new Error("auth.plugin.keyMaterial must be an object with an operator-declared url string");
+      }
+      let keyUrl;
+      try {
+        keyUrl = new URL(km.url);
+      } catch {
+        throw new Error("auth.plugin.keyMaterial.url must be a valid URL");
+      }
+      if (keyUrl.protocol !== "https:") {
+        throw new Error("auth.plugin.keyMaterial.url must be https");
+      }
+      for (const field of ["ttlMs", "cooldownMs", "timeoutMs", "maxBytes"]) {
+        if (km[field] !== undefined && (typeof km[field] !== "number" || km[field] < 0)) {
+          throw new Error(`auth.plugin.keyMaterial.${field} must be a non-negative number`);
+        }
+      }
+    }
   }
 
   if (plugin.maxPendingCalls !== undefined
@@ -573,7 +610,7 @@ function resolveAuthProvider(config, providers, cryptoProvider, auditSink) {
   }
   if (config.auth.provider === "plugin") {
     const plugin = config.auth.plugin;
-    return createSandboxedAuthProviderSync({
+    const common = {
       manifestPath: plugin.manifestPath,
       trustAnchors: normalizeTrustAnchors(plugin.trustAnchors),
       allowCapabilities: plugin.allowCapabilities,
@@ -583,12 +620,21 @@ function resolveAuthProvider(config, providers, cryptoProvider, auditSink) {
       timeoutMs: plugin.timeoutMs,
       maxPendingCalls: plugin.maxPendingCalls,
       maxMessageBytes: plugin.maxMessageBytes,
-      resourceLimits: plugin.resourceLimits,
       coreVersion: plugin.coreVersion ?? null,
       cryptoProvider,
       auditSink,
       allowedLabelKeys: config.auth.allowedLabelKeys
-    });
+    };
+    if ((plugin.isolation ?? "worker") === "process") {
+      // 1.1 capability enforcement. Construction fails closed on a Node that
+      // cannot enforce --allow-net (netEnforcement: require-permission).
+      return createProcessIsolatedAuthProviderSync({
+        ...common,
+        netEnforcement: plugin.netEnforcement ?? "require-permission",
+        keyMaterial: plugin.keyMaterial ?? null
+      });
+    }
+    return createSandboxedAuthProviderSync({ ...common, resourceLimits: plugin.resourceLimits });
   }
   return null;
 }
