@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createProcessIsolatedAuthProvider
 } from "../packages/plugin/index.mjs";
+import { netEnforcementSupported } from "../packages/plugin/process-sandbox.mjs";
 import {
   buildSignedPlugin,
   sandboxOptions,
@@ -16,18 +17,47 @@ import {
   NONDETERMINISTIC_PLUGIN_SOURCE
 } from "./helpers/sandbox-fixtures.mjs";
 
-// Build a PROCESS-isolated signed plugin (the only difference from the worker
-// fixtures is the manifest runtime string).
+// The process-isolated runtime fails closed (refuses to construct) on a Node that
+// cannot enforce --allow-net (e.g. Node 22 LTS) — capability containment is not
+// honest without it. The behavioral tests below therefore only run on a Node that
+// enforces it; the fail-closed contract itself is tested on ALL Nodes via the
+// `detectNetSupport` seam. (Node 26 enforces --allow-net; Node 22 does not.)
+const SUPPORTED = netEnforcementSupported();
+const skip = SUPPORTED ? false : "requires a Node that enforces the --allow-net permission (e.g. Node >=24)";
+const itNet = (name, fn) => test(name, { skip }, fn);
+
 function buildProcessPlugin(overrides = {}) {
   return buildSignedPlugin({ runtime: "process-isolated", ...overrides });
 }
+
+// ---------------------------------------------------------------------------
+// Fail-closed network contract — runs on EVERY Node (forces the seam)
+// ---------------------------------------------------------------------------
+
+test("require-permission fails closed on a Node that cannot enforce --allow-net", async () => {
+  const built = buildProcessPlugin();
+  await assert.rejects(
+    createProcessIsolatedAuthProvider(sandboxOptions(built, { detectNetSupport: () => false })),
+    /requires a Node that enforces|refusing to construct/i,
+    "construction must throw (not silently run uncontained) when --allow-net is unsupported"
+  );
+});
+
+test("an unsupported netEnforcement value is rejected", async () => {
+  const built = buildProcessPlugin();
+  await assert.rejects(
+    createProcessIsolatedAuthProvider(sandboxOptions(built, { netEnforcement: "allow-harness", detectNetSupport: () => true })),
+    /unsupported netEnforcement/i,
+    "only require-permission is supported in 1.1"
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Happy path: load (data: URL, no fs grant), conformance in the child, host
 // keyed-HMAC identity
 // ---------------------------------------------------------------------------
 
-test("process-isolated signed plugin loads from a data: URL (no fs grant), passes conformance, builds a PII-safe identity", async () => {
+itNet("process-isolated signed plugin loads from a data: URL (no fs grant), passes conformance, builds a PII-safe identity", async () => {
   const built = buildProcessPlugin();
   const audit = createRecordingAuditSink();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit }));
@@ -68,7 +98,7 @@ async function runProbe(provider, rec) {
   return JSON.parse(entry.data);
 }
 
-test("a process-isolated plugin is DENIED fs read, child_process spawn, and worker creation (--permission, zero grants)", async () => {
+itNet("a process-isolated plugin is DENIED fs read, child_process spawn, and worker creation (--permission, zero grants)", async () => {
   const built = buildProcessPlugin({ entrySource: PROCESS_PROBE_PLUGIN_SOURCE });
   const rec = createRecordingCrypto();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { cryptoProvider: rec }));
@@ -87,7 +117,7 @@ test("a process-isolated plugin is DENIED fs read, child_process spawn, and work
 // bypass all kernel-DENIED (no --allow-net) → no credential exfil over the network.
 // ---------------------------------------------------------------------------
 
-test("a process-isolated plugin is DENIED net.connect, fetch, dns, and the tcp_wrap bypass (no --allow-net)", async () => {
+itNet("a process-isolated plugin is DENIED net.connect, fetch, dns, and the tcp_wrap bypass (no --allow-net)", async () => {
   const built = buildProcessPlugin({ entrySource: PROCESS_PROBE_PLUGIN_SOURCE });
   const rec = createRecordingCrypto();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { cryptoProvider: rec }));
@@ -110,7 +140,7 @@ test("a process-isolated plugin is DENIED net.connect, fetch, dns, and the tcp_w
 // reaches NO host-visible sink (stdio: ['ignore','ignore','ignore','ipc']).
 // ---------------------------------------------------------------------------
 
-test("a plugin writing the credential to stdout/stderr/console reaches no host sink (stdio ignored)", async () => {
+itNet("a plugin writing the credential to stdout/stderr/console reaches no host sink (stdio ignored)", async () => {
   const built = buildProcessPlugin({ entrySource: PROCESS_PROBE_PLUGIN_SOURCE });
   const rec = createRecordingCrypto();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { cryptoProvider: rec }));
@@ -137,6 +167,7 @@ test("a plugin writing the credential to stdout/stderr/console reaches no host s
 
 // ---------------------------------------------------------------------------
 // Fail-closed LOAD matrix — construction rejects + plugin.load.refused{reason}
+// (the shared load gate; runs where the runtime can construct)
 // ---------------------------------------------------------------------------
 
 async function expectRefusedLoad(label, built, options, reason) {
@@ -150,28 +181,27 @@ async function expectRefusedLoad(label, built, options, reason) {
   assert.equal(refused[0].reason, reason, `${label}: expected reason ${reason}, got ${refused[0].reason}`);
 }
 
-test("a worker-isolated manifest fed to the process factory is refused (manifest-invalid)", async () => {
-  // expectedRuntime mismatch: the process sandbox requires runtime process-isolated.
+itNet("a worker-isolated manifest fed to the process factory is refused (manifest-invalid)", async () => {
   const built = buildSignedPlugin({ runtime: "worker-isolated" });
   await expectRefusedLoad("runtime-mismatch", built, {}, "manifest-invalid");
 });
 
-test("unsigned process manifest is refused (manifest-invalid)", async () => {
+itNet("unsigned process manifest is refused (manifest-invalid)", async () => {
   const built = buildProcessPlugin({ unsigned: true });
   await expectRefusedLoad("unsigned", built, {}, "manifest-invalid");
 });
 
-test("wrong-signer process plugin is refused (unknown-signer)", async () => {
+itNet("wrong-signer process plugin is refused (unknown-signer)", async () => {
   const built = buildProcessPlugin({ wrongSigner: true });
   await expectRefusedLoad("wrong-signer", built, {}, "unknown-signer");
 });
 
-test("tampered entry (path unchanged) is refused (tampered-entry)", async () => {
+itNet("tampered entry (path unchanged) is refused (tampered-entry)", async () => {
   const built = buildProcessPlugin({ tamperEntry: true });
   await expectRefusedLoad("tampered", built, {}, "tampered-entry");
 });
 
-test("a non-deterministic process plugin fails conformance (conformance-failed)", async () => {
+itNet("a non-deterministic process plugin fails conformance (conformance-failed)", async () => {
   const built = buildProcessPlugin({ entrySource: NONDETERMINISTIC_PLUGIN_SOURCE });
   await expectRefusedLoad("conformance", built, {}, "conformance-failed");
 });
@@ -180,7 +210,7 @@ test("a non-deterministic process plugin fails conformance (conformance-failed)"
 // Runtime behavior matrix (timeout / deny / sanitizer / single-occupancy)
 // ---------------------------------------------------------------------------
 
-test("a hanging process plugin times out -> null + child terminated + respawn", async () => {
+itNet("a hanging process plugin times out -> null + child terminated + respawn", async () => {
   const built = buildProcessPlugin({ entrySource: HANGING_PLUGIN_SOURCE });
   const audit = createRecordingAuditSink();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit, timeoutMs: 400 }));
@@ -191,7 +221,6 @@ test("a hanging process plugin times out -> null + child terminated + respawn", 
     assert.ok(terminated.some((e) => e.cause === "timeout"), "expected a terminated{timeout} lifecycle event");
     const denied = audit.eventsOfType("plugin.authenticate.deny");
     assert.ok(denied.some((e) => e.reason === "timeout"), "expected authenticate.deny{timeout}");
-    // Respawns lazily (re-running the full gate).
     const after = await provider.authenticate(bearer("good"));
     assert.ok(after, "the child respawns after a timeout-terminate");
   } finally {
@@ -199,7 +228,7 @@ test("a hanging process plugin times out -> null + child terminated + respawn", 
   }
 });
 
-test("a process plugin that denies/throws -> null + authenticate.deny", async () => {
+itNet("a process plugin that denies/throws -> null + authenticate.deny", async () => {
   const built = buildProcessPlugin();
   const audit = createRecordingAuditSink();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit }));
@@ -214,7 +243,7 @@ test("a process plugin that denies/throws -> null + authenticate.deny", async ()
   }
 });
 
-test("a hostile claims object (__proto__/extra keys) is sanitized over the process IPC", async () => {
+itNet("a hostile claims object (__proto__/extra keys) is sanitized over the process IPC", async () => {
   const built = buildProcessPlugin({ entrySource: POLLUTING_PLUGIN_SOURCE });
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built));
   try {
@@ -230,7 +259,7 @@ test("a hostile claims object (__proto__/extra keys) is sanitized over the proce
   }
 });
 
-test("two concurrent authenticate calls with distinct cids never cross responses (single-occupancy)", async () => {
+itNet("two concurrent authenticate calls with distinct cids never cross responses (single-occupancy)", async () => {
   const built = buildProcessPlugin();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built));
   try {
@@ -248,7 +277,7 @@ test("two concurrent authenticate calls with distinct cids never cross responses
   }
 });
 
-test("kill-switch: closing the provider terminates the child and subsequent calls fail closed", async () => {
+itNet("kill-switch: closing the provider terminates the child and subsequent calls fail closed", async () => {
   const built = buildProcessPlugin();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built));
   const ok = await provider.authenticate(bearer("good-token-x"));

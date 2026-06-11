@@ -30,7 +30,7 @@
 // Zero runtime dependency: node:child_process + node:crypto + the in-repo
 // haechi/plugin (load gate) and haechi/auth (identity + conformance).
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { assertAuthProviderConformance, buildExternalIdentity } from "../auth/index.mjs";
 import {
@@ -95,6 +95,42 @@ const PROCESS_HARNESS = [
   "process.send(JSON.stringify({ t: 'ready' }));"
 ].join("\n");
 
+// Detect whether THIS Node enforces network containment under --permission. The
+// permission model only gates net if the `--allow-net` flag exists (Node >= 24 /
+// experimental in some 22.x lines do not have it). Without it, --permission denies
+// fs/exec/worker but NOT net — so a malicious plugin could still exfiltrate the
+// credential over the network. We therefore fail closed (refuse to construct) on
+// a Node that cannot enforce it, rather than pretend to contain.
+//
+// Detection (memoized; NO version parsing — we probe BEHAVIOR):
+//   1. Fast path: if --allow-net isn't even a recognized flag, net is not gated.
+//   2. Authoritative: spawn a `--permission` child with NO --allow-net and confirm
+//      net.connect is actually DENIED (ERR_ACCESS_DENIED). This is immune to a Node
+//      that lists the flag but does not enforce it — we verify the denial, not the
+//      flag. Exit 0 = net is enforced/denied (supported); anything else = not.
+let _netSupportMemo;
+export function netEnforcementSupported() {
+  if (_netSupportMemo !== undefined) {
+    return _netSupportMemo;
+  }
+  try {
+    if (!process.allowedNodeEnvironmentFlags?.has?.("--allow-net")) {
+      _netSupportMemo = false;
+      return false;
+    }
+    const probeCode =
+      "const n=require('net');const s=n.connect({host:'127.0.0.1',port:1});"
+      + "s.on('error',e=>process.exit(e&&e.code==='ERR_ACCESS_DENIED'?0:3));"
+      + "s.on('connect',()=>{try{s.destroy();}catch{}process.exit(3);});"
+      + "setTimeout(()=>process.exit(3),500);";
+    const probe = spawnSync(process.execPath, ["--permission", "-e", probeCode], { stdio: "ignore" });
+    _netSupportMemo = probe.status === 0;
+  } catch {
+    _netSupportMemo = false;
+  }
+  return _netSupportMemo;
+}
+
 // Env scrubbing: the permission model does NOT protect inherited env, so a child
 // that could be made to read process.env would see host secrets. We pass a fresh,
 // EMPTY env — no inherited vars, and critically no NODE_OPTIONS (which could inject
@@ -118,7 +154,14 @@ function createProcessIsolatedAuthProviderHandle({
   coreVersion = null,
   now = Date.now,
   allowedLabelKeys,
-  execPath = process.execPath
+  execPath = process.execPath,
+  // Network containment policy. "require-permission" (the only PR1 mode, and the
+  // default) means: this Node MUST enforce --allow-net, else construction throws
+  // — the credential-containment guarantee is not honest without it. The
+  // best-effort "allow-harness" fallback is deferred to a later minor (see the
+  // 1.1 scope doc §2.2). `detectNetSupport` is an injectable seam for tests.
+  netEnforcement = "require-permission",
+  detectNetSupport = netEnforcementSupported
 } = {}) {
   if (!manifestPath || typeof manifestPath !== "string") {
     throw new Error("createProcessIsolatedAuthProvider requires a manifestPath string");
@@ -137,6 +180,19 @@ function createProcessIsolatedAuthProviderHandle({
   }
   if (!Number.isInteger(maxMessageBytes) || maxMessageBytes < 1) {
     throw new Error("maxMessageBytes must be a positive integer");
+  }
+  // Fail-closed network containment. PR1 supports only the "require-permission"
+  // mode; if this Node cannot enforce --allow-net, refuse to construct rather than
+  // run a plugin whose network egress is uncontained.
+  if (netEnforcement !== "require-permission") {
+    throw new Error(`unsupported netEnforcement: ${JSON.stringify(netEnforcement)} (1.1 supports only "require-permission")`);
+  }
+  if (!detectNetSupport()) {
+    throw new Error(
+      "process-isolated requires a Node that enforces the --allow-net permission "
+      + "(netEnforcement: require-permission); this Node cannot contain plugin network "
+      + "egress, so refusing to construct — use worker-isolated, or run on a Node with --allow-net"
+    );
   }
   const nowFn = typeof now === "function" ? now : () => now;
   const audit = makeFireAndForgetAudit(auditSink);
