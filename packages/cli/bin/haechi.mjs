@@ -660,7 +660,7 @@ function printHelp(topic) {
     "plugin-validate", "mcp-stdio", "mcp-wrap", "auth", "config"
   ];
   const lines = order.map((name) => `  ${name.padEnd(16)}${COMMAND_HELP[name].summary}`);
-  console.log(`Haechi — self-hosted AI context enforcement (developer preview)
+  console.log(`Haechi — self-hosted AI context enforcement
 
 Usage:
   haechi <command> [options]
