@@ -323,6 +323,48 @@ itNet("a host key fetch to a private/metadata address fails closed (the plugin n
   assert.equal(fetched, false, "the SSRF guard must refuse before any fetch to a blocked address");
 });
 
+// ---------------------------------------------------------------------------
+// Lifecycle audit fields (host-computed/enum-only) + spawn-storm circuit breaker
+// ---------------------------------------------------------------------------
+
+itNet("load.accepted carries host-computed isolation/netEnforcement/grants fields", async () => {
+  const built = buildProcessPlugin();
+  const audit = createRecordingAuditSink();
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit }));
+  try {
+    const accepted = audit.eventsOfType("plugin.load.accepted")[0];
+    assert.ok(accepted, "a load.accepted event was emitted");
+    assert.equal(accepted.isolation, "process");
+    assert.equal(accepted.netEnforcement, "require-permission");
+    assert.deepEqual(accepted.grants, [], "the child is spawned with zero OS permission grants");
+  } finally {
+    await provider.close();
+  }
+});
+
+itNet("the spawn-storm circuit breaker trips after repeated kills and then fails closed", async () => {
+  const built = buildProcessPlugin({ entrySource: HANGING_PLUGIN_SOURCE });
+  const audit = createRecordingAuditSink();
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, {
+    auditSink: audit,
+    timeoutMs: 150,
+    respawnMaxKills: 2,
+    respawnWindowMs: 5000,
+    respawnBackoffMs: 5
+  }));
+  try {
+    await provider.authenticate(bearer("hang")); // kill 1
+    await provider.authenticate(bearer("hang")); // kill 2 → trip
+    const stormy = audit.eventsOfType("plugin.worker.terminated").some((e) => e.cause === "respawn-storm");
+    assert.ok(stormy, "expected a respawn-storm termination event after repeated kills");
+    // A tripped breaker denies permanently — even a good credential fails closed.
+    const after = await provider.authenticate(bearer("good"));
+    assert.equal(after, null, "a tripped breaker fails closed");
+  } finally {
+    await provider.close();
+  }
+});
+
 itNet("kill-switch: closing the provider terminates the child and subsequent calls fail closed", async () => {
   const built = buildProcessPlugin();
   const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built));

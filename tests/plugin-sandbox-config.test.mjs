@@ -64,6 +64,35 @@ for (const [name, build] of badCases) {
   });
 }
 
+// --- isolation: "process" (1.1 capability enforcement) ---------------------
+// normalizeConfig validates shape only (no construction / no --allow-net probe),
+// so these run on any Node.
+
+test("normalizeConfig accepts isolation:process without resourceLimits", () => {
+  const config = normalizeConfig(pluginAuthConfig({ plugin: { isolation: "process", resourceLimits: undefined } }));
+  assert.equal(config.auth.plugin.isolation, "process");
+});
+
+test("normalizeConfig accepts isolation:process with an operator-declared keyMaterial https url", () => {
+  const config = normalizeConfig(pluginAuthConfig({
+    plugin: { isolation: "process", resourceLimits: undefined, keyMaterial: { url: "https://keys.example.com/jwks", ttlMs: 60_000 } }
+  }));
+  assert.equal(config.auth.plugin.keyMaterial.url, "https://keys.example.com/jwks");
+});
+
+const processBadCases = [
+  ["isolation bad value", () => pluginAuthConfig({ plugin: { isolation: "vm" } })],
+  ["process netEnforcement allow-harness (unsupported)", () => pluginAuthConfig({ plugin: { isolation: "process", resourceLimits: undefined, netEnforcement: "allow-harness" } })],
+  ["process keyMaterial non-https url", () => pluginAuthConfig({ plugin: { isolation: "process", resourceLimits: undefined, keyMaterial: { url: "http://keys.example.com/jwks" } } })],
+  ["process keyMaterial missing url", () => pluginAuthConfig({ plugin: { isolation: "process", resourceLimits: undefined, keyMaterial: { ttlMs: 1000 } } })],
+  ["process keyMaterial negative ttl", () => pluginAuthConfig({ plugin: { isolation: "process", resourceLimits: undefined, keyMaterial: { url: "https://k.example.com/x", ttlMs: -1 } } })]
+];
+for (const [name, build] of processBadCases) {
+  test(`normalizeConfig rejects: ${name}`, () => {
+    assert.throws(() => normalizeConfig(build()), Error, `expected ${name} to throw`);
+  });
+}
+
 test("plugins.enabled:false kill-switch refuses to construct via createRuntime", () => {
   assert.throws(
     () => normalizeConfig(pluginAuthConfig({ top: { plugins: { enabled: false } } })),

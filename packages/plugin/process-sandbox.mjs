@@ -173,7 +173,15 @@ function createProcessIsolatedAuthProviderHandle({
   // (no plugin-driven SSRF), and net is denied in the child so it cannot fetch
   // keys itself. The fetch is TTL-cached + cooldown-bounded (no outbound pump).
   // Shape: { url, ttlMs?, cooldownMs?, timeoutMs?, maxBytes?, fetchImpl?, lookupImpl? }.
-  keyMaterial = null
+  keyMaterial = null,
+  // Spawn-storm circuit breaker (anti-DoS): if the child is killed (timeout/crash)
+  // respawnMaxKills times within respawnWindowMs, trip to a PERMANENT fail-closed
+  // deny (operator reset = recreate the provider). respawnBackoffMs is the base for
+  // an exponential backoff between respawns so a flapping plugin cannot become a
+  // spawn storm.
+  respawnMaxKills = 5,
+  respawnWindowMs = 10_000,
+  respawnBackoffMs = 100
 } = {}) {
   if (!manifestPath || typeof manifestPath !== "string") {
     throw new Error("createProcessIsolatedAuthProvider requires a manifestPath string");
@@ -207,7 +215,12 @@ function createProcessIsolatedAuthProviderHandle({
     );
   }
   const nowFn = typeof now === "function" ? now : () => now;
-  const audit = makeFireAndForgetAudit(auditSink);
+  // Every process lifecycle event carries isolation:"process" (a host-computed,
+  // fixed-enum discriminator — never child-supplied) so an audit consumer can tell
+  // a process-isolated decision from a worker-isolated one. All audit fields here
+  // are host-computed/enum-only; no child free-text ever enters an event.
+  const auditBase = makeFireAndForgetAudit(auditSink);
+  const audit = (event) => auditBase({ isolation: "process", ...event });
 
   // Optional host-mediated key-material fetcher (operator-declared URL only). The
   // core guarded fetcher validates the https URL at construction and SSRF-guards
@@ -250,6 +263,10 @@ function createProcessIsolatedAuthProviderHandle({
   let respawning = null; // single-flight respawn guard
   let chain = Promise.resolve();
   let queueDepth = 0;
+  // Spawn-storm circuit breaker: timestamps of recent kills (pruned to the window)
+  // and a permanent trip flag.
+  let killTimes = [];
+  let breakerTripped = false;
 
   // Spawn the child, await the {t:'ready'} handshake, hand it the verified plugin
   // bytes as a data: URL over IPC, and await {t:'loaded'}. Bounded by timeoutMs;
@@ -338,12 +355,21 @@ function createProcessIsolatedAuthProviderHandle({
 
   // Drop the live child (audit the cause), failing any matched in-flight call
   // closed. Respawn happens lazily on the next call (re-running the full gate).
+  // A kill feeds the spawn-storm circuit breaker: too many within the window trips
+  // to a permanent fail-closed deny (operator reset = recreate the provider).
   function terminateChild(cause) {
     const terminated = child;
     child = null;
     if (terminated) {
       audit({ type: "plugin.worker.terminated", decision: "plugin.worker.terminated", pluginId, cause });
       try { terminated.kill("SIGKILL"); } catch { /* already gone */ }
+      const t = nowFn();
+      killTimes.push(t);
+      killTimes = killTimes.filter((ts) => (t - ts) < respawnWindowMs);
+      if (!breakerTripped && killTimes.length >= respawnMaxKills) {
+        breakerTripped = true;
+        audit({ type: "plugin.worker.terminated", decision: "plugin.worker.terminated", pluginId, cause: "respawn-storm" });
+      }
     }
     for (const [, settle] of pending) {
       settle(null);
@@ -352,14 +378,28 @@ function createProcessIsolatedAuthProviderHandle({
   }
 
   // LAZY (re)spawn behind a single-flight guard that RE-RUNS THE FULL PR2 GATE.
+  // A tripped circuit breaker fails closed permanently (the operator must recreate
+  // the provider). Respawns are exponentially backed off so a flapping plugin
+  // cannot become a spawn storm.
   async function ensureChild() {
     if (child || closed) {
       return;
+    }
+    if (breakerTripped) {
+      throw new Error("process plugin respawn-storm circuit breaker is tripped (fail-closed; recreate the provider to reset)");
     }
     if (respawning) {
       return respawning;
     }
     respawning = (async () => {
+      const recentKills = killTimes.length;
+      if (recentKills > 0 && respawnBackoffMs > 0) {
+        const backoff = respawnBackoffMs * (2 ** Math.min(recentKills - 1, 6));
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+        if (closed || breakerTripped) {
+          throw new Error("provider closed or breaker tripped during backoff");
+        }
+      }
       const loaded = preloaded ?? loadAndVerify();
       preloaded = null;
       await spawnAndLoad(loaded);
@@ -545,7 +585,12 @@ function createProcessIsolatedAuthProviderHandle({
         signerKeyId: initial.signerKeyId,
         capabilitiesGranted: Object.entries(initial.verified.capabilities)
           .filter(([, v]) => v === true)
-          .map(([k]) => k)
+          .map(([k]) => k),
+        // Host-computed, enum-only capability-enforcement facts (never child input):
+        // the child is spawned with ZERO OS permission grants, and net is contained
+        // by the require-permission --allow-net denial.
+        netEnforcement,
+        grants: []
       });
       return provider;
     });
