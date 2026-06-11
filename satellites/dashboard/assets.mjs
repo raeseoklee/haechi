@@ -175,7 +175,7 @@ export const APP_JS = `"use strict";
     var table = el("table");
     var thead = el("thead");
     var hr = el("tr");
-    ["seq", "time", "protocol", "operation", "mode", "blocked", "detections"].forEach(function (h) {
+    ["seq", "time", "protocol", "operation", "actor", "mode", "blocked", "detections"].forEach(function (h) {
       hr.appendChild(el("th", h));
     });
     thead.appendChild(hr);
@@ -187,6 +187,9 @@ export const APP_JS = `"use strict";
       tr.appendChild(el("td", ev.timestamp));
       tr.appendChild(el("td", ev.protocol));
       tr.appendChild(el("td", ev.operation));
+      // PII-safe actor: identity.id is provider:subjectHash[:16] (keyed-HMAC),
+      // never the raw subject/email; dash when no auth was configured.
+      tr.appendChild(el("td", ev.identity && ev.identity.id ? ev.identity.id : "—", "mono"));
       tr.appendChild(el("td", ev.mode));
       tr.appendChild(el("td", String(ev.blocked)));
       var dcell = el("td");
