@@ -1,0 +1,52 @@
+{
+  "name": "haechi-dashboard",
+  "version": "0.1.0",
+  "description": "Zero-dependency, read-only audit viewer satellite for Haechi — a node:http server over the audit JSONL and its hash-chain status.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raeseoklee/haechi.git",
+    "directory": "satellites/dashboard"
+  },
+  "homepage": "https://github.com/raeseoklee/haechi/tree/main/satellites/dashboard#readme",
+  "bugs": {
+    "url": "https://github.com/raeseoklee/haechi/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "haechi",
+    "audit",
+    "dashboard",
+    "observability",
+    "viewer"
+  ],
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "bin": {
+    "haechi-dashboard": "./bin/haechi-dashboard.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "assets.mjs",
+    "bin/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "haechi": ">=0.8.0 <1.0.0"
+  },
+  "devDependencies": {
+    "haechi": "*"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
