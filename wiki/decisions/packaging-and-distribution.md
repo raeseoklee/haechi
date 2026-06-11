@@ -5,9 +5,11 @@ tags: [decision, distribution]
 
 # Packaging and Distribution
 
-## Current (0.3.2)
+## Current (1.0.0 — first stable)
 
-Single npm package `haechi` (unscoped), zero runtime dependencies, subpath exports per module (`haechi/proxy`, `haechi/audit`, …). First published 2026-06-10 via local passkey authentication (0.3.2, unattested); from 0.4.0 onward releases publish through GitHub Actions trusted publishing with SLSA provenance attestations (verified on npm). SBOM omits dev dependencies so it describes the shipped artifact only.
+Single npm package `haechi` (unscoped), zero runtime dependencies, subpath exports per module (`haechi/proxy`, `haechi/audit`, `haechi/plugin`, …). **Core bumps to `1.0.0` in the 1.0 cut — the first stable release** ([[release-roadmap]]); behavior is additive (the opt-in [[plugin-sandbox]] + a `schemaVersion`/`FORBIDDEN_KEYS` extension), the rest declared frozen. First published 2026-06-10 via local passkey authentication (0.3.2, unattested); from 0.4.0 onward releases publish through GitHub Actions trusted publishing with SLSA provenance attestations (verified on npm). SBOM omits dev dependencies so it describes the shipped artifact only.
+
+**PR0 prerequisite for 1.0:** core `1.0.0` violated every satellite's old `<1.0.0` peer range, so PR #46 widened all four satellites' `haechi` peer range to `>=0.8.0 <2.0.0` (and auth-oidc's `haechi-auth-jwt` peer likewise to `<2.0.0`), bumping versions to auth-jwt `0.2.1` / crypto-kms `0.2.1` / dashboard `0.1.2` / auth-oidc `0.1.2`. A new `scripts/check-satellite-peer-ranges.mjs` preflight gate fails `release:preflight` if `!semver.satisfies(coreVersionToPublish, satelliteRange)` for any satellite (risk **P2-OPS-006** — satellite peer-range / major-tracking). Satellites now track core by **major** rather than pinning a minor, so a core minor bump never breaks a satellite install again.
 
 ## Satellite package strategy
 
@@ -18,16 +20,16 @@ Single npm package `haechi` (unscoped), zero runtime dependencies, subpath expor
 - **Dashboard: fully separate.** Read-only consumer of the audit JSONL (reads files directly; no audit query API on the proxy — don't grow its attack surface). UI dependencies must not contaminate core's zero-dep posture. Shows [[audit-integrity]] chain status as a feature. Shipped 0.9 as [[dashboard-audit-viewer]] — verified zero-dep (`node:http` + a static page, no framework/build).
 - **First two published satellites are 0.8:** `haechi-crypto-kms` (real AWS KMS client) and `haechi-auth-jwt` (headless JWKS). `haechi-auth-oidc` + `haechi-dashboard` moved to 0.9 to keep 0.8 code-light ([[release-roadmap]]).
 
-## The four satellites (after 0.9)
+## The four satellites (after 1.0 / PR0)
 
-| Satellite | Version | Runtime deps | Concept | Tag glob |
-|---|---|---|---|---|
-| `haechi-crypto-kms` | `0.2.0` | zero (optional peers for AWS/GCP/Azure SDKs) | [[key-management]] | `crypto-kms-v<semver>` |
-| `haechi-auth-jwt` | `0.2.0` | zero | [[identity-and-auth]] | `auth-jwt-v<semver>` |
-| `haechi-auth-oidc` | `0.1.0` (new) | zero | [[oidc-session-broker]] | `auth-oidc-v<semver>` |
-| `haechi-dashboard` | `0.1.0` (new) | zero | [[dashboard-audit-viewer]] | `dashboard-v<semver>` |
+| Satellite | Version | Core peer range | Runtime deps | Concept | Tag glob |
+|---|---|---|---|---|---|
+| `haechi-crypto-kms` | `0.2.1` | `>=0.8.0 <2.0.0` | zero (optional peers for AWS/GCP/Azure SDKs) | [[key-management]] | `crypto-kms-v<semver>` |
+| `haechi-auth-jwt` | `0.2.1` | `>=0.8.0 <2.0.0` | zero | [[identity-and-auth]] | `auth-jwt-v<semver>` |
+| `haechi-auth-oidc` | `0.1.2` | `>=0.8.0 <2.0.0` (+ `haechi-auth-jwt >=0.2.0 <2.0.0`) | zero | [[oidc-session-broker]] | `auth-oidc-v<semver>` |
+| `haechi-dashboard` | `0.1.2` | `>=0.8.0 <2.0.0` | zero | [[dashboard-audit-viewer]] | `dashboard-v<semver>` |
 
-Each has its own per-package publish workflow (`.github/workflows/<name>-publish.yml`), guarded `if: startsWith(tag, '<prefix>-v')` + a strict `^<prefix>-v[0-9]+\.[0-9]+\.[0-9]+$` regex + tag-version-must-equal-package-version, so the four workflows (and core's `v*`) never cross-fire. Core (`haechi`) bumps to `0.9.0` for the cut; its behavior is unchanged.
+All four peer ranges widened to `<2.0.0` in PR0 (#46) so core `1.0.0` keeps installing against them; the `check-satellite-peer-ranges.mjs` preflight gate enforces it going forward. Each satellite has its own per-package publish workflow (`.github/workflows/<name>-publish.yml`), guarded `if: startsWith(tag, '<prefix>-v')` + a strict `^<prefix>-v[0-9]+\.[0-9]+\.[0-9]+$` regex + tag-version-must-equal-package-version, so the four workflows (and core's `v*`) never cross-fire.
 
 ### 0.9 satellite additions
 
