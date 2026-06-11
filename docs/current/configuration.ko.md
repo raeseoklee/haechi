@@ -53,11 +53,12 @@ upstream JSON 응답을 검사한다(기본적으로 꺼져 있음 — 모델로
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
 | `responseProtection.enabled` | boolean | `false` | 마스터 스위치. `detokenizeResponses`가 작동하려면 반드시 활성화되어 있어야 한다. |
-| `responseProtection.mode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | 응답 방향의 집행 모드. **실제 LLM upstream엔 `report-only` 권장:** envelope 메타데이터(id, unix 타임스탬프 `created`, 긴 숫자 필드)가 PII/secret 모양으로 보일 수 있어 `enforce`면 정상 완성 응답을 502로 막는다. `report-only`도 탐지·감사·`detokenizeResponses`는 그대로 동작. (Haechi는 응답에서 자체 `[TOKEN:…]`/`[HAECHI_ENC:…]` 마커를 제외하고 phone 규칙도 맨 타임스탬프를 무시하지만, Luhn 통과하는 긴 숫자는 여전히 `card` 매치 가능.) |
+| `responseProtection.mode` | `dry-run` \| `report-only` \| `enforce` | `enforce` | 응답 방향의 집행 모드. **실제 LLM upstream엔 `report-only` 권장:** envelope 메타데이터(id, unix 타임스탬프 `created`, 긴 숫자 필드)가 PII/secret 모양으로 보일 수 있어 `enforce`면 정상 완성 응답을 502로 막는다. `report-only`도 탐지·감사·`detokenizeResponses`는 그대로 동작. (Haechi는 응답에서 자체 `[TOKEN:…]`/`[HAECHI_ENC:…]` 마커를 제외하고, phone 규칙도 맨 타임스탬프를 무시하며, 응답의 bare JSON number leaf는 검사하지 않으므로 실제 vLLM/Ollama 응답은 clean. 응답 *텍스트*까지 검사하려면 `enforce`가 더 엄격.) |
 | `responseProtection.failureMode` | `fail-closed` \| `allow` | `fail-closed` | *검사 불가능한* 응답(비JSON, 잘못된 JSON, 압축)에 대한 처리 방식. `fail-closed`는 502를 반환하고, `allow`는 통과시킨다(audit 기록됨). |
 | `responseProtection.allowNonJson` | boolean | `false` | 비JSON 응답을 검사 없이 통과시킨다. |
 | `responseProtection.allowCompressed` | boolean | `false` | 압축 응답을 검사 없이 통과시킨다. |
 | `responseProtection.maxBytes` | 양의 정수 | `1048576` | 응답 크기의 상한. `failureMode: allow` 상태에서도 적용되며, 크기를 초과한 응답은 항상 거부된다. |
+| `responseProtection.scanNumbers` | boolean | `false` | 응답의 **bare JSON number leaf**에 탐지를 돌릴지 여부. 기본 off — 응답 숫자는 추론서버 메타데이터(`*_duration`, count, timestamp)라 검사하면 `card`/`kr_rrn` 오탐만 발생. 모델이 숫자 필드로 유출할 수 있다고 보는 엄격 위협모델에서만 `true`; `mode: report-only`와 함께 써서 차단 없이 감사만. 요청 방향은 항상 숫자 검사. |
 
 ## `streaming`
 
@@ -230,4 +231,4 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## 검증 요약
 
-다음은 로드 시 오류(fail-closed)를 발생시킨다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도.
+다음은 로드 시 오류(fail-closed)를 발생시킨다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; boolean이 아닌 `responseProtection.scanNumbers`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도.

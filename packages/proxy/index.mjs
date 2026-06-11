@@ -438,6 +438,9 @@ async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, a
     ...authContext,
     operation: `response:${routeContext.operation}`,
     direction: "response",
+    // Opt-in: scan bare number leaves on the response (off by default — they are
+    // inference-server metadata; see the filter engine's number-leaf skip).
+    scanNumbers: runtime.config.responseProtection.scanNumbers,
     mode: runtime.config.responseProtection.mode ?? runtime.config.policy.mode ?? runtime.config.mode
   });
 

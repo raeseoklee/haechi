@@ -119,6 +119,19 @@ export function createDefaultFilterEngine({ customRules = [] } = {}) {
 
 export function detectEntry(entry, rules, context = {}) {
   const detections = [];
+  // On the RESPONSE direction, a bare JSON NUMBER leaf is inference-server
+  // metadata (a nanosecond `*_duration`, a token count, a numeric id/timestamp) —
+  // never a model-leaked card/phone/RRN. Scanning it only yields false positives:
+  // a long Luhn-passing duration matches `card`, a 13-digit one matches `kr_rrn`.
+  // The REQUEST direction still scans numbers (a client CAN send a card as a
+  // number); model-leaked PII lands in generated TEXT (string leaves), which are
+  // still inspected. (Accepted residual: a hostile model could exfiltrate a value
+  // as a bare response number — response inspection is a secondary defense.) A
+  // strict deployment can opt back in with `responseProtection.scanNumbers: true`
+  // (threaded as context.scanNumbers), accepting the metadata false positives.
+  if (context?.direction === "response" && entry.kind === "number" && !context?.scanNumbers) {
+    return detections;
+  }
   // On the RESPONSE direction only, skip Haechi's own transform markers so they
   // aren't re-detected: a tokenized round-trip echoes `[TOKEN:tok_…]` back, which
   // reads like a `token:<secret>` assignment — without this, Haechi blocks its
