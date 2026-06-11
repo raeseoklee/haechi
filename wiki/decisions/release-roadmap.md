@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-10
+updated: 2026-06-11
 tags: [decision, roadmap]
 ---
 
@@ -15,7 +15,7 @@ Agreed 2026-06-10 between maintainer and assistant; recorded in `risk-register-r
 | 0.6.0 ✅ | Auth + per-client controls | Shipped 2026-06-10 (PRs #17–#19): bearer auth, named policy profiles, model allowlist, request rate limit, PII-safe identity in audit ([[identity-and-auth]]). Heavier ops items in 0.7 |
 | 0.7.0 ✅ | Ops hardening | Shipped 2026-06-10 (PRs #22–#24): audit head-hash anchoring ([[audit-integrity]]) + external sink contract, cryptoProvider contract hardening + `assertCryptoProviderConformance` + reference KMS adapter, signed/checksummed release artifacts |
 | 0.8.0 ✅ | Ecosystem foundation + satellites | Shipped 2026-06-10 (PRs #27–#32): npm workspaces monorepo (root self-member `["."]` + satellite peer/dev dual core dep); **published** `haechi@0.8.0` (attested), `haechi-crypto-kms` + `haechi-auth-jwt` (unscoped — `@haechi` scope taken). Core zero-dep via packed-manifest + satellite-packaging gates. Satellite `0.1.0` = manual bootstrap (unattested, to create the name for TP setup); `0.1.1` = first attested CI release (provenance + sigstore verified). ([[packaging-and-distribution]]) |
-| 0.9.0 | Observability + interactive auth | **Design pinned 2026-06-11** (`docs/current/release-0.9-implementation-scope.md`, hardened after an adversarial security review). The 0.9.0 cut is `haechi-dashboard` + `haechi-auth-oidc` **paired**: a **zero-dep vanilla** (`node:http`, no framework/build) read-only audit viewer ([[audit-integrity]] chain status) gated by an **interactive OIDC session broker** (authorization-code + PKCE, server-side sessions). `haechi-auth-jwt` bumps to **0.2.0** to export a shared JWS verifier the broker reuses. `haechi-crypto-kms` Vault/GCP/Azure backends ship **independently** as **`haechi-crypto-kms@0.2.0`** (decoupled from the core cut; Vault is zero-peer via `node:` fetch). Split out of 0.8 to keep that release code-light |
+| 0.9.0 ✅ | Observability + interactive auth | **Shipped 2026-06-11 (PRs #38–#41)** (`docs/current/release-0.9-implementation-scope.md`, hardened after an adversarial security review). The 0.9.0 cut is `haechi-dashboard` + `haechi-auth-oidc` **paired**: a **zero-dep vanilla** (`node:http`, no framework/build) read-only audit viewer ([[dashboard-audit-viewer]], [[audit-integrity]] chain status) gated by an **interactive OIDC session broker** ([[oidc-session-broker]] — authorization-code + PKCE, server-side sessions). PR #38 bumped `haechi-auth-jwt` to **0.2.0** (additive `createJwtVerifier` + `isBlockedAddress` export, behavior-preserving); #39 `haechi-dashboard@0.1.0`; #40 `haechi-auth-oidc@0.1.0`; #41 `haechi-crypto-kms@0.2.0` (Vault/GCP/Azure backends, shipped **independently** of the core cut — Vault is zero-peer via `node:` fetch). Four satellites total now, each zero runtime dependency ([[packaging-and-distribution]]). Split out of 0.8 to keep that release code-light |
 | 1.0.0 | Stable API + plugin sandbox | Only then: dynamic loading of external packages |
 
 ## Principles behind the ordering

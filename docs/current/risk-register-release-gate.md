@@ -1,8 +1,8 @@
 # Haechi Risk Register and Release Gates
 
-- Status: Draft 0.3
-- Date: 2026-06-10
-- Target version: 0.7.0
+- Status: Draft 0.4
+- Date: 2026-06-11
+- Target version: 0.9.0
 - Branch: `main`
 
 ## 1. Current Assessment
@@ -25,6 +25,7 @@
 | G1 | GitHub pre-release | P0 code risks resolved, no production-ready language | Pass |
 | G2 | npm developer preview | P0 resolved, preflight/SBOM/provenance paths ready, npm auth confirmed | Pass (`haechi@0.3.2` published 2026-06-10) |
 | G3 | npm stable | P1 production reference, stream-aware enforcement, API stability hardened | Blocked |
+| G4 | 0.9.0 observability + interactive-auth satellite cut | P1-SEC-009 (0.9) / P1-OPS-005 (0.9) mitigated and P2-CRYPTO-001 (0.9) accepted; `haechi-dashboard` + `haechi-auth-oidc` + `haechi-crypto-kms@0.2.0` tests green; satellite tarballs zero-dep; core bumped to 0.9.0 (only an additive FORBIDDEN_KEYS audit hardening) | Pass |
 
 ## 3. P0 Distribution-Blocking Risk Status
 
@@ -95,6 +96,16 @@
 | P2-DOC-005 | Default dry-run + responseProtection off could be mistaken for "protection active" | Resolved | Proxy startup and `protect` output explicitly warn when enforcement is inactive |
 
 Base64/encoded-value decode inspection, query-string inspection, and audit tail truncation detection are explicitly excluded and documented in the threat model (0.4+ backlog).
+
+## 5.3 0.9.0 Observability + Interactive-Auth Risk Status
+
+These IDs are scoped to the 0.9.0 satellite cut (`haechi-dashboard`, `haechi-auth-oidc`, `haechi-crypto-kms@0.2.0`); they are namespaced by the 0.9.0 section and are distinct from the like-numbered P0/P1 rows above. Evidence is the satellite source, its test suite, and the adversarial security review captured in `docs/current/release-0.9-implementation-scope.md` §6.
+
+| ID | Risk | Status | Resolution evidence |
+|---|---|---|---|
+| P1-SEC-009 (0.9) | OIDC broker session/login security: login CSRF, authorization-code injection, open-redirect, session fixation, and mix-up (wrong IdP/RP) in `haechi-auth-oidc` | Mitigated | `satellites/auth-oidc/index.mjs`: state-first `/auth/callback` (atomic `take()` of a pre-auth-cookie-bound pending record + constant-time `state` compare before any egress), PKCE S256, fresh session id minted at callback (no fixation), `returnToAllowlist` (no open-redirect), issuer/endpoint pinning + RFC 9207 `iss` check + ID-token `aud`/`azp` profile via the shared `createJwtVerifier` (mix-up), CSRF-gated non-GET logout. `satellites/auth-oidc/auth-oidc.test.mjs` exercises each deny case; adversarial review in scope §6. **Residual:** multi-origin IdP out of scope |
+| P1-OPS-005 (0.9) | Dashboard audit exposure: stored XSS via `detections[].path`, future-field audit leak, DNS-rebinding read of a localhost viewer, and unauthenticated read on remote bind in `haechi-dashboard` | Mitigated | `satellites/dashboard/index.mjs` + `assets.mjs`: strict CSP (`require-trusted-types-for 'script'`) + `textContent`-only rendering (XSS), recursive key-by-key allowlist projection over `FORBIDDEN_KEYS` (field leak), per-request anti-rebinding `Host` allowlist + CORP/COOP same-origin (rebinding), fail-closed remote bind requiring `sessionGuard` **and** TLS termination (unauthenticated remote read). `satellites/dashboard/dashboard.test.mjs`; adversarial review in scope §6. **Residual:** operator must terminate TLS for remote bind |
+| P2-CRYPTO-001 (0.9) | KMS backend egress: the `haechi-crypto-kms@0.2.0` Vault/GCP/Azure backends could leak key material or provider/key-path detail or reach an unintended (metadata) endpoint | Accepted | `satellites/crypto-kms/{vault,gcp,azure}.mjs`: optional-peer + injected-client model with faithful-mock `assertCryptoProviderConformance` (cross-key + corrupted-blob rejection, HMAC determinism/domain-separation), satellite-local `isBlockedAddress` SSRF guard on the Vault `fetch` (kept honest by the dev-only `satellites/crypto-kms/ssrf-parity.test.mjs` vs auth-jwt), generic fail-closed provider-error mapping (no provider/key-ARN in audit). `{vault,gcp,azure}.test.mjs` + `crypto-kms.test.mjs`; adversarial review in scope §6. **Residual accepted:** live-backend (real Vault/GCP/Azure) validation is out of CI; the published tarball stays zero runtime dependency |
 
 ## 6. P2 Product/Documentation Risk Status
 

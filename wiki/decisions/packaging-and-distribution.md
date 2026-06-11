@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-10
+updated: 2026-06-11
 tags: [decision, distribution]
 ---
 
@@ -15,8 +15,28 @@ Single npm package `haechi` (unscoped), zero runtime dependencies, subpath expor
 - Core keeps the unscoped `haechi` name.
 - **Reference-then-publish:** a satellite ships first as a repo example/source (e.g. `examples/crypto-kms-reference/` in 0.7), then is promoted to a published `haechi-*` package once workspaces land (0.8). This keeps core zero-dep while the adapter exists and is testable.
 - **Auth: contract in core, implementations as satellites** ([[identity-and-auth]]) — security-critical interfaces must be core-owned.
-- **Dashboard: fully separate.** Read-only consumer of the audit JSONL (reads files directly; no audit query API on the proxy — don't grow its attack surface). UI dependencies must not contaminate core's zero-dep posture. Shows [[audit-integrity]] chain status as a feature.
+- **Dashboard: fully separate.** Read-only consumer of the audit JSONL (reads files directly; no audit query API on the proxy — don't grow its attack surface). UI dependencies must not contaminate core's zero-dep posture. Shows [[audit-integrity]] chain status as a feature. Shipped 0.9 as [[dashboard-audit-viewer]] — verified zero-dep (`node:http` + a static page, no framework/build).
 - **First two published satellites are 0.8:** `haechi-crypto-kms` (real AWS KMS client) and `haechi-auth-jwt` (headless JWKS). `haechi-auth-oidc` + `haechi-dashboard` moved to 0.9 to keep 0.8 code-light ([[release-roadmap]]).
+
+## The four satellites (after 0.9)
+
+| Satellite | Version | Runtime deps | Concept | Tag glob |
+|---|---|---|---|---|
+| `haechi-crypto-kms` | `0.2.0` | zero (optional peers for AWS/GCP/Azure SDKs) | [[key-management]] | `crypto-kms-v<semver>` |
+| `haechi-auth-jwt` | `0.2.0` | zero | [[identity-and-auth]] | `auth-jwt-v<semver>` |
+| `haechi-auth-oidc` | `0.1.0` (new) | zero | [[oidc-session-broker]] | `auth-oidc-v<semver>` |
+| `haechi-dashboard` | `0.1.0` (new) | zero | [[dashboard-audit-viewer]] | `dashboard-v<semver>` |
+
+Each has its own per-package publish workflow (`.github/workflows/<name>-publish.yml`), guarded `if: startsWith(tag, '<prefix>-v')` + a strict `^<prefix>-v[0-9]+\.[0-9]+\.[0-9]+$` regex + tag-version-must-equal-package-version, so the four workflows (and core's `v*`) never cross-fire. Core (`haechi`) bumps to `0.9.0` for the cut; its behavior is unchanged.
+
+### 0.9 satellite additions
+
+- **`haechi-auth-jwt` 0.1.1 → 0.2.0** — *additive, behavior-preserving*: exports a reusable JWS verifier `createJwtVerifier` (carved out of `createJwtAuthProvider`'s internals) and `isBlockedAddress`. `createJwtAuthProvider` is reimplemented on the verifier and unchanged externally (all 0.8 tests green). The minor bump is mandatory because the publish workflow's tag==package-version gate requires it.
+- **`haechi-auth-oidc` 0.1.0** (new) — interactive OIDC session broker ([[oidc-session-broker]]). Dual peer `{ haechi: ">=0.8.0 <1.0.0", "haechi-auth-jwt": ">=0.2.0 <1.0.0" }` — core peer stays `>=0.8.0` (uses only `buildExternalIdentity`; not over-tightened), auth-jwt peer is `>=0.2.0` for the verifier export. Reuses auth-jwt's `isBlockedAddress` (the auth ecosystem shares **one** SSRF predicate).
+- **`haechi-dashboard` 0.1.0** (new) — zero-dep read-only audit viewer ([[dashboard-audit-viewer]]). Peer `{ haechi: ">=0.8.0 <1.0.0" }`, own `haechi-dashboard` bin. Imports only `haechi/audit` + `haechi/proxy` from core; no peer dependency on auth-oidc (the `sessionGuard` is injected). Ships its own tiny rate limiter and loopback predicate because proxy's `createRateLimiter`/`isLoopbackHost` are private — a documented deviation that keeps 0.9 with **no core change**.
+- **`haechi-crypto-kms` 0.1.1 → 0.2.0** — additive GCP/Azure/Vault backends (see [[key-management]]). New subpath exports `./gcp` (optional peer `@google-cloud/kms`), `./azure` (optional peers `@azure/keyvault-keys` + `@azure/identity`), `./vault` (**zero optional-peer** — Vault Transit over `node:` `fetch`). The Vault backend keeps its **own** satellite-local `isBlockedAddress` rather than runtime-depend on `haechi-auth-jwt` — a key-custody package must not pull in the auth ecosystem just for an IP predicate; a **dev-only cross-package parity test** (auth-jwt as a `devDependency`) asserts the two copies agree on the range table so they can't drift, while the published tarball stays zero runtime dependency. The stale hard-coded provider `version` field was removed (it reported `"0.1.0"` while the package was `0.1.1`). Reuses the existing `crypto-kms-v<semver>` tag + Trusted Publisher.
+
+The two core touches are both additive, behavior-preserving: auth-jwt's verifier export and `packages/audit` adding broker token/claim keys to `FORBIDDEN_KEYS`. `assertSafeProxyBind` is reused from `haechi/proxy` as already exported (no relocation). Core stays zero runtime dependency; the packed-manifest + satellite-packaging gates are unaffected.
 
 ## npm workspaces mechanic (verified 2026-06-10, design 0.8)
 

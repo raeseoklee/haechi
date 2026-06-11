@@ -69,6 +69,8 @@ npm audit signatures
 | `.github/workflows/npm-publish.yml` | `haechi` | `v<semver>` | npm provenance publish + checksummed/attested release assets |
 | `.github/workflows/crypto-kms-publish.yml` | `haechi-crypto-kms` | `crypto-kms-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/auth-jwt-publish.yml` | `haechi-auth-jwt` | `auth-jwt-v<semver>` | satellite publish, same signed-artifacts path |
+| `.github/workflows/dashboard-publish.yml` | `haechi-dashboard` | `dashboard-v<semver>` | satellite publish, same signed-artifacts path |
+| `.github/workflows/auth-oidc-publish.yml` | `haechi-auth-oidc` | `auth-oidc-v<semver>` | satellite publish, same signed-artifacts path |
 
 Each publish workflow triggers on `release: published` but is **guarded** so the two never cross-fire: the core job runs only for tags starting `v` (and re-validates `^v[0-9]+\.[0-9]+\.[0-9]+$`); the satellite job runs only for `crypto-kms-v…` (and re-validates `^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$` **and** that the tag version equals the satellite's `package.json` version). The npmjs.com Trusted Publisher for each package is bound to its **specific workflow filename** — renaming a workflow file breaks its OIDC publish until the npm config is updated.
 
@@ -89,6 +91,8 @@ No manual `npm publish` from a laptop is needed. Because the names are unscoped 
 |---|---|---|---|
 | `haechi-crypto-kms` | `crypto-kms-v<semver>` | `crypto-kms-publish.yml` | `satellites/crypto-kms/package.json` |
 | `haechi-auth-jwt` | `auth-jwt-v<semver>` | `auth-jwt-publish.yml` | `satellites/auth-jwt/package.json` |
+| `haechi-dashboard` | `dashboard-v<semver>` | `dashboard-publish.yml` | `satellites/dashboard/package.json` |
+| `haechi-auth-oidc` | `auth-oidc-v<semver>` | `auth-oidc-publish.yml` | `satellites/auth-oidc/package.json` |
 
 **Verify a satellite release** (same anchors as core):
 
@@ -97,7 +101,9 @@ gh attestation verify haechi-crypto-kms-<version>.tgz --repo raeseoklee/haechi
 npm view haechi-crypto-kms --json   # dist.attestations present; access "public"
 ```
 
-**Dependency note:** `haechi-crypto-kms` keeps core zero-dependency — `@aws-sdk/client-kms` is an **optional peer dependency**, imported lazily only when a real AWS client is used and not injected. Consumers who use the in-memory or an injected client never install the SDK.
+**Dependency note:** `haechi-crypto-kms` keeps core zero-dependency — `@aws-sdk/client-kms` is an **optional peer dependency**, imported lazily only when a real AWS client is used and not injected. Consumers who use the in-memory or an injected client never install the SDK. The 0.2.0 `./gcp` (`@google-cloud/kms`) and `./azure` (`@azure/keyvault-keys` + `@azure/identity`) backends follow the same optional-peer/lazy-import model; the `./vault` backend has zero optional peer (`node:` `fetch` only).
+
+**0.9 satellites (new unscoped names — configure Trusted Publisher *before* the first tag):** `haechi-dashboard` and `haechi-auth-oidc` are first-published in 0.9 and follow the same per-satellite bootstrap order above. As with the 0.8 satellites, the unscoped name is claimed on first OIDC publish, so the npmjs.com Trusted Publisher for each must be configured **before** its first tag — link `raeseoklee/haechi` and the exact workflow filename (`dashboard-publish.yml` for `haechi-dashboard`, `auth-oidc-publish.yml` for `haechi-auth-oidc`), then push the prefixed tag (`dashboard-v0.1.0`, `auth-oidc-v0.1.0`) and publish the GitHub Release. The two existing satellites ride their already-bootstrapped tags/workflows: `haechi-auth-jwt@0.2.0` on `auth-jwt-v<semver>` (`auth-jwt-publish.yml`) and `haechi-crypto-kms@0.2.0` on `crypto-kms-v<semver>` (`crypto-kms-publish.yml`) — no new Trusted Publisher configuration is required for those two.
 
 ## 6. Deployment block conditions
 

@@ -232,3 +232,106 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 ## Validation cheatsheet
 
 These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`.
+
+# Satellite operator configuration (0.9)
+
+The two sections below document the **independently published satellite packages** introduced in 0.9 — `haechi-dashboard` and `haechi-auth-oidc`. **These are not keys of the core `haechi.config.json` / `normalizeConfig` schema.** Each satellite is configured by passing an **options object** to its factory function (`createDashboardServer(options)` / `createOidcSessionBroker(options)`), validated by its own `normalizeDashboardConfig` / `normalizeOidcConfig`. Validation is the same **strict, fail-closed** discipline as core: an unknown option key throws, and every field below lists its fail-closed throw condition. Source: `satellites/dashboard/index.mjs`, `satellites/auth-oidc/index.mjs`. Threat-model coverage: **P1-OPS-005** (dashboard audit exposure / DNS-rebinding / remote bind) and **P1-SEC-009** (broker session/login security), per `docs/current/release-0.9-implementation-scope.md` §6.
+
+## `haechi-dashboard` (satellite)
+
+A zero-dependency, **read-only** audit viewer (`node:http`) that serves the audit JSONL and its hash-chain status. It takes **paths**, not a runtime. Configured via `createDashboardServer(options)`; `normalizeDashboardConfig(options)` validates and returns the effective config. Source: `satellites/dashboard/index.mjs`.
+
+| Option | Type / values | Default | Notes / fail-closed throw |
+|---|---|---|---|
+| `auditPath` | non-empty string | **required** | Path to the audit JSONL. Throws if missing or not a non-empty string. |
+| `anchorPath` | string \| `null` | `null` | Anchor stream path passed to `verifyAuditChain` for tail-truncation detection. Throws if present but not a non-empty string. |
+| `host` | non-empty string | `127.0.0.1` | Bind address. Non-loopback requires `allowRemoteBind` **and** the remote-bind preconditions below. Throws if present but empty/non-string. |
+| `port` | integer 0–65535 | `1018` | Listen port; `0` = OS-assigned ephemeral (intentional affordance). Throws if not an integer in `[0,65535]`. |
+| `allowRemoteBind` | boolean | `false` | Permit a non-loopback `host`. Throws if non-boolean. Config alone is not enough — see remote-bind preconditions. |
+| `sessionGuard` | object \| `null` | `null` | A guard implementing `authenticate(req) -> session\|null` and an optional `handlers` map. Throws if non-object or `authenticate` is not a function. `handlers` keys may **only** be the fixed broker paths `/auth/login`, `/auth/callback`, `/auth/logout` — any other key (notably `/api/*`, `/healthz`, `/`) throws, closing the auth-bypass where a guard exempts an audit route from the gate. Satisfied by injecting a `haechi-auth-oidc` broker (see below). |
+| `window` | integer 4096–67108864 | `1048576` | Tail-read window (max bytes) for `/api/events` and `/api/summary`. Throws if not an integer in `[4096, 67108864]` (4 KiB–64 MiB). |
+| `tlsContext` | object \| `null` | `null` | TLS material for the dashboard to terminate HTTPS itself. Throws if non-object, or if non-null but lacking **usable material** — it must carry `(key && cert)` or `pfx` (an empty `{}` is rejected so it can't green-light a non-loopback plaintext listener). |
+| `trustProxy` | string \| `null` | `null` | Names a trusted fronting-proxy address/CIDR. Throws if non-string, empty, or a falsy-looking string (`"false"`/`"0"`). **`trustProxy` alone never authorizes a non-loopback bind** — only a real `tlsContext` does. |
+
+### Routes
+
+All routes are **GET/HEAD only** (any other method → `405`); the asset map is fixed in-code (no filesystem traversal):
+
+- `/api/events` — bounded tail read of the audit JSONL, newest-first. `limit` is an integer in `[1,200]` (default 50); `cursor` is the opaque `auditIntegrity.sequence` (never a filesystem offset). Each event is rebuilt by a **recursive key-by-key allowlist projection** (no blind spread; identity carries only `subjectHash`/`issuerHash`, never scopes/labels/raw subject). Returns `windowExceeded` when a requested page predates the retained window.
+- `/api/chain` — wraps `verifyAuditChain`; surfaces a derived `truncationDetected` boolean (the raw failure reason is **never** returned). mtime+size cached (no concurrent re-walk); over the 32 MiB cap returns `413` with `{valid:null}`; `HEAD` returns headers only without forcing a walk.
+- `/api/summary` — aggregated detection counts (`byType`/`byAction`/`detectionCount`) over the tail window.
+- `/healthz` — liveness only (`{status:"ok"}`); no session required even off-loopback.
+
+### Security defaults
+
+- **Loopback bind by default.** `host` defaults to `127.0.0.1`; binding a non-loopback host reuses core's `assertSafeProxyBind` (re-worded) and requires `allowRemoteBind`.
+- **Remote bind is fail-closed.** A non-loopback bind requires **all** of: `allowRemoteBind: true`, a `sessionGuard`, **and** a valid `tlsContext` (the dashboard terminates TLS itself). `trustProxy` does not satisfy this — a non-loopback plaintext listener would serve audit data in cleartext while emitting HSTS, so it is refused. HSTS is emitted **only** when the server actually serves HTTPS.
+- **Anti-DNS-rebinding Host allowlist** is the unconditional first gate on every request (including `/api/*`, `/healthz`, and any method); a bad/duplicate `Host` header → `403` before the method check.
+- **Strict CSP + Trusted Types** (`require-trusted-types-for 'script'`, `textContent` rendering) plus `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy`/`-Opener-Policy: same-origin`, `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store`; CORS headers are intentionally never set.
+- **sessionGuard seam.** When a guard is present, every `/api/*` route is gated behind `authenticate()`; an unauthenticated request gets `401` (never a `302` redirect). The auth-exempt set is the **intersection** of the fixed broker-path allowlist and the guard's declared handlers (exact match) — a guard can never exempt an audit-data route.
+- **Generic errors.** A 5xx returns `{error:"internal"}` only — never a stack, OS code, or filesystem path. A satellite-local fixed-window rate limiter (120 req/60s per source) fronts `/api/*`.
+
+The bin `haechi-dashboard` (workspace) launches the server; the publish workflow is `.github/workflows/dashboard-publish.yml` (tag `dashboard-v<semver>`). `peerDependencies: { haechi: ">=0.8.0 <1.0.0" }`.
+
+## `haechi-auth-oidc` (satellite)
+
+A zero-dependency **interactive OIDC session broker** (authorization-code + PKCE) — the dashboard's human-login mechanism. It produces an opaque server-side session and **satisfies the dashboard `sessionGuard` contract by injection** (`{ authenticate(req), handlers: { "/auth/login", "/auth/callback", "/auth/logout" } }`). It is **not** a per-request bearer validator (that role stays with `haechi-auth-jwt`). Configured via `createOidcSessionBroker(options)`; `normalizeOidcConfig(options)` validates. Source: `satellites/auth-oidc/index.mjs`. `peerDependencies: { haechi: ">=0.8.0 <1.0.0", haechi-auth-jwt: ">=0.2.0 <1.0.0" }`.
+
+| Option | Type / values | Default | Notes / fail-closed throw |
+|---|---|---|---|
+| `cryptoProvider` | object with `hmac()` | **required** | Supplies the keyed-HMAC for PII-safe identity hashes and `sessionIdHash`. Throws if `hmac` is not a function. |
+| `issuer` | HTTPS URL string | **required** | OIDC issuer; pinned for exact string-equal discovery and single-origin endpoint checks. Throws if missing or not `https`. |
+| `clientId` | non-empty string | **required** | OAuth client id (also the expected ID-token `aud`). Throws if missing/empty. |
+| `clientSecret` | string \| omitted | omitted | Present ⇒ confidential client; omitted ⇒ public (PKCE-only) client. Throws if present but empty. |
+| `redirectUri` | absolute URL string | **required** | Must be `https` (or **loopback** `http` under the carve-out), **same-origin** with the broker, and path exactly `/auth/callback`. Throws otherwise. |
+| `scopes` | string array | `["openid"]` | `openid` is force-included (deduped); `offline_access` is stripped (refresh rotation is out of scope for 0.9). Throws if not an array of non-empty strings. |
+| `returnToAllowlist` | string array | `["/"]` | Allowlist of **relative same-origin** return paths (must start with a single `/`, no scheme/host/`//`/backslash). Throws on a non-array or any non-conforming entry. |
+| `sessionTtlSeconds` | integer 1–2592000 | `28800` (8h) | Absolute session lifetime. Throws if out of `[1, 2592000]` (30d ceiling). |
+| `idleTtlSeconds` | integer 1–2592000 | `1800` (30m) | Idle timeout (sliding `lastSeen`). Throws if out of range. |
+| `maxAgeSeconds` | integer 1–2592000 \| `null` | `null` | If set, sends OIDC `max_age` and requires `auth_time` within `maxAge + skew`. Throws if present but out of range. |
+| `tokenEndpointAuthMethod` | `client_secret_basic` \| `client_secret_post` | `client_secret_basic` | Token-endpoint auth method. Throws on an unknown value, **or** if set without a `clientSecret` (only valid for a confidential client). |
+| `secureCookies` | `true` \| `false` \| `"auto"` | `"auto"` | Forces or auto-derives the cookie `Secure`/`__Host-` hardening from the externally-visible scheme. Throws on any other value. |
+| `trustProxy` | string \| `null` | `null` | Names a TLS-terminating fronting proxy; treats the browser-facing scheme as HTTPS (folds into cookie hardening). Throws if non-string or empty. |
+| `algorithms` | non-empty string array | `["RS256","ES256"]` | Allowed JWS algorithms (passed to the verifier). Throws if not a non-empty array. |
+| `clockSkewSeconds` | number 0–300 | (verifier default) | Leeway for ID-token time claims. Throws if out of `[0,300]`. |
+| `prompt` | string \| `null` | `null` | Optional OIDC `prompt`. Throws if present but empty/non-string. |
+| `pendingTtlSeconds` | integer 1–3600 | `600` (10m) | Time to complete a login (pre-auth record TTL). Throws if out of `[1,3600]`. |
+| `pendingCap` | integer 1–1000000 | `1024` | Hard cap on concurrent in-flight logins; a full store rejects **new** logins and never evicts an in-flight auth (fail-closed). Throws if out of range. |
+| `rateLimitMax` | integer 1–1000000 | `60` | `/auth/login`+`/auth/callback` per source per 60s window. Throws if out of range. |
+| `fetchTimeoutMs` | integer 1–120000 | `5000` | Per-egress timeout (discovery / token / JWKS). Throws if out of range. |
+| `fetchImpl` / `lookupImpl` / `now` | function | injected/global | Injectable `fetch` / DNS `lookup` / clock seams. Throws if present but not a function. |
+| `sessionStore` | object | in-memory | Opaque-id → session store; must implement `get`/`set`/`delete`. Throws if present but non-conforming. |
+| `pendingStore` | object | in-memory | Pre-auth record store; must implement `set`/`take` (atomic single-use `take`). Throws if present but non-conforming. |
+| `auditSink` | function \| object with `record()` | none | PII-safe event sink. Throws if present but neither a function nor an object with `record()`. |
+
+### Cookie hardening semantics
+
+Sessions are **server-side only** — the cookie carries only an opaque id, never claims or tokens. Two cookies are used (a pre-auth cookie binding the pending record, and the session cookie). When the externally-visible scheme is HTTPS (an `https` `redirectUri`, `secureCookies: true`, or a non-null `trustProxy`), cookies use the **`__Host-` prefix + `Secure` + `HttpOnly` + `SameSite=Lax`** (`Path=/`, no `Domain`); `SameSite=Lax` lets the IdP top-level GET to `/auth/callback` carry the cookie. Under the documented **loopback-`http` carve-out** the `__Host-`/`Secure` attributes are dropped (a plaintext listener cannot set `Secure`), using the bare cookie names. An **off-loopback broker without confirmed HTTPS fails closed at construction** — a `Secure`/`__Host-` cookie is never sent over plaintext, so login would silently break. At `/auth/callback` a **fresh** session id is minted (no fixation); `/auth/logout` is non-GET, CSRF-header gated (`x-haechi-csrf`), and destroys server-side state. The access token is discarded (never stored). Audit events (`oidc.login.start`/`success`/`failure{reasonCode}`/`logout`/`session.evict`) carry only keyed-HMAC `subjectHash`/`issuerHash`/`sessionIdHash` + `provider` + a coarse `reasonCode` + timestamp.
+
+### Wiring into the dashboard
+
+Inject the broker as the dashboard's `sessionGuard`:
+
+```js
+import { createDashboardServer } from "haechi-dashboard";
+import { createOidcSessionBroker } from "haechi-auth-oidc";
+
+const broker = createOidcSessionBroker({
+  cryptoProvider,
+  issuer: "https://idp.example.com",
+  clientId: "haechi-dashboard",
+  clientSecret: "…",
+  redirectUri: "https://dash.example.com/auth/callback",
+  returnToAllowlist: ["/"]
+});
+
+const dashboard = createDashboardServer({
+  auditPath: ".haechi/audit.jsonl",
+  host: "0.0.0.0",
+  allowRemoteBind: true,
+  tlsContext: { key, cert },   // remote bind: dashboard terminates TLS itself
+  sessionGuard: broker         // gates /api/* behind authenticate(); mounts /auth/* handlers
+});
+```
+
+The broker's `handlers` map mounts only at the fixed broker paths the dashboard exempts from its auth gate; every `/api/*` route is gated behind `broker.authenticate(req)`. Publish workflow: `.github/workflows/auth-oidc-publish.yml` (tag `auth-oidc-v<semver>`).

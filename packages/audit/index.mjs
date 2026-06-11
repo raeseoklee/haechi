@@ -5,7 +5,18 @@ import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 
-const FORBIDDEN_KEYS = new Set(["value", "plaintext", "payload", "content", "message", "prompt", "secret"]);
+const FORBIDDEN_KEYS = new Set([
+  "value", "plaintext", "payload", "content", "message", "prompt", "secret",
+  // OIDC-broker / OAuth token, secret, and authorization-flow parameter keys.
+  // These are never part of a current audit event shape; the membership is a
+  // defense-in-depth guard so a future audit field can never leak a token,
+  // client secret, or flow parameter through the core sink. `sub`/`email` are
+  // intentionally NOT listed — they can be legitimate non-secret field names
+  // elsewhere, and the broker already self-guards them via its own allowlist
+  // projection.
+  "access_token", "id_token", "refresh_token", "code", "code_verifier",
+  "client_secret", "state", "nonce"
+]);
 
 export function createJsonlAuditSink({ path, anchor = null }) {
   if (!path) {

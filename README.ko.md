@@ -167,7 +167,14 @@ haechi auth revoke <id>
 - **Rate limit**: identity별 분당 요청 수 → `429` (인메모리, 프로세스별).
 - Audit 이벤트는 **PII-safe** `identity`(keyed-HMAC subject/issuer, 원시 값 아님)와 resolve된 `profile`을 포함하며, `auth_denied` / `model_not_allowed` / `rate_limited` 결정에는 credentials가 포함되지 않는다. `/__haechi/health`는 인증 없이 접근 가능하다.
 
-JWT/JWKS 인증과 KMS 기반 key custody는 `haechi-*` 위성 패키지로 제공된다(0.8): [`haechi-auth-jwt`](satellites/auth-jwt/)(헤드리스 JWKS bearer 검증)와 [`haechi-crypto-kms`](satellites/crypto-kms/)(실제 AWS KMS 클라이언트 기반 envelope 암호화). 둘 다 기본 `node:` 전용이며 core를 zero-dependency로 유지한다; 대화형 OIDC와 대시보드는 0.9.
+JWT/JWKS 인증과 KMS 기반 key custody는 `haechi-*` 위성 패키지로 제공되며, 각각 core와 독립적으로 버저닝·발행된다:
+
+- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.8) — 헤드리스 JWKS bearer 검증; 0.2.0은 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 추가 export한다.
+- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.8) — 실제 KMS 클라이언트 기반 envelope 암호화; 0.2.0은 AWS에 더해 GCP(`./gcp`), Azure(`./azure`), HashiCorp Vault Transit(`./vault`, `node:` 전용) 백엔드를 추가한다.
+- [`haechi-dashboard`](satellites/dashboard/) (0.9, 신규) — audit 로그와 hash chain 상태에 대한 zero-dependency 읽기 전용 audit 뷰어(`node:http`).
+- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.9, 신규) — 대시보드의 사람 로그인을 제공하는 대화형 OIDC 세션 브로커(authorization-code + PKCE).
+
+위성들은 기본 `node:` 전용이며(무거운 SDK는 optional peer) core를 zero-dependency로 유지한다.
 
 ## 설정
 
@@ -269,3 +276,5 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 0.7.0은 운영 강화(ops-hardening) 릴리스이다: 꼬리 절단을 탐지하는 audit head-hash anchoring(`audit.anchor`), `assertCryptoProviderConformance`와 reference KMS adapter를 포함한 강화된 외부 `cryptoProvider` 계약, 그리고 서명/체크섬된 GitHub release artifact. `docs/current/release-0.7-implementation-scope.md` 참고.
 
 0.8.0은 `haechi-*` 에코시스템을 세운다: npm workspaces 모노레포(core는 unscoped `haechi` 유지, zero runtime dependency, 패킹 매니페스트 CI 게이트로 강제) + 첫 두 위성 — [`haechi-crypto-kms`](satellites/crypto-kms/)(실제 AWS KMS 클라이언트 기반 envelope 암호화; AWS SDK는 optional peer)와 [`haechi-auth-jwt`](satellites/auth-jwt/)(헤드리스 JWKS bearer 검증, `node:` 전용). 각각 자체 provenance + sigstore attest 워크플로로 독립 발행한다. `docs/current/release-0.8-implementation-scope.md` 참고.
+
+0.9.0은 관측성(observability) + 대화형 인증 테마이다: 두 개의 새 위성 — [`haechi-dashboard`](satellites/dashboard/)(audit 로그와 hash chain 상태에 대한 zero-dependency 읽기 전용 `node:http` audit 뷰어; anti-DNS-rebinding Host allowlist, 엄격한 CSP/Trusted Types, fail-closed loopback/remote-bind 가드 포함)와 [`haechi-auth-oidc`](satellites/auth-oidc/)(대시보드의 사람 로그인을 제공하는 대화형 OIDC 세션 브로커 — authorization-code + PKCE + 서버측 세션). 기존 위성도 additive minor를 발행한다: `haechi-auth-jwt@0.2.0`은 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 export하고, `haechi-crypto-kms@0.2.0`은 GCP/Azure/Vault 백엔드를 추가한다. core는 `0.9.0`으로 bump되며, 추가적인 `FORBIDDEN_KEYS` audit 새니타이즈 강화(현재 이벤트 출력은 바뀌지 않는 심층 방어)만 포함한다. `docs/current/release-0.9-implementation-scope.md` 참고.
