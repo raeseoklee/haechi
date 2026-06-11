@@ -1,0 +1,50 @@
+{
+  "name": "haechi-auth-oidc",
+  "version": "0.1.0",
+  "description": "Interactive OIDC session broker (authorization-code + PKCE) satellite for Haechi — node: builtins only, server-side sessions, PII-safe audit.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raeseoklee/haechi.git",
+    "directory": "satellites/auth-oidc"
+  },
+  "homepage": "https://github.com/raeseoklee/haechi/tree/main/satellites/auth-oidc#readme",
+  "bugs": {
+    "url": "https://github.com/raeseoklee/haechi/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "haechi",
+    "oidc",
+    "pkce",
+    "session",
+    "auth",
+    "login"
+  ],
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "haechi": ">=0.8.0 <1.0.0",
+    "haechi-auth-jwt": ">=0.2.0 <1.0.0"
+  },
+  "devDependencies": {
+    "haechi": "*",
+    "haechi-auth-jwt": "*"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
