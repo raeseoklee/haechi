@@ -24,6 +24,20 @@ First validation of the proxy against **real self-hosted inference backends** (a
 
 Echo proof (vLLM): with thinking disabled, the model returned `please email [TOKEN:tok_email_…] today` — it never saw the raw address.
 
+## Auth + per-client controls (2026-06-11, live vs real vLLM)
+
+The 0.6 auth stack and the `haechi-auth-jwt` satellite, validated end-to-end in front of the real vLLM. (Auth/profile/allowlist/rate run in the proxy gate *before* forwarding, so they are upstream-agnostic — Ollama takes the identical path.)
+
+| Behaviour | Result |
+|---|---|
+| Bearer auth gate (built-in) | no token / bad token → **401** before body read; valid token → **200** forwarded |
+| Named policy profile (`profileBinding` scope→profile) | `team:eng`→`eng`, `tier:limited`→`limited` resolved per identity |
+| Model allowlist | `eng` allows only the real model → a `gpt-4` request → **403** `model_not_allowed` |
+| Per-identity rate limit (`rate.requestsPerMinute: 2`) | req 1–2 → 200, req 3–4 → **429** `rate_limited` (exactly bounded) |
+| KR-PII | KR phone+email → **tokenize**+forward (200); a checksum-valid KR **RRN** → **403** block |
+| Audit decisions | `auth_denied`, `model_not_allowed`, `rate_limited` recorded; **no raw phone/email/RRN/subject** in the log |
+| **`haechi-auth-jwt`** (RS256, stubbed JWKS, external injection) | no/garbage/expired JWT → **401**; a valid RS256 JWT → **200** forwarded to vLLM, with a **PII-safe identity** (`provider:"jwt"`, keyed-HMAC `subjectHash`, non-PII `id`, raw `sub` never in audit) |
+
 ## Findings (and what shipped)
 
 1. **Response-direction false positives (FIXED).** With `responseProtection: enforce`, real responses were 502-blocked because (a) the unix-timestamp `created` (10-digit) matched the **phone** rule, and (b) the echoed `[TOKEN:…]` matched the **secret** rule (`TOKEN:` reads like a `token:<secret>` assignment) — Haechi blocking its own token. Fixes in `packages/filter/index.mjs`: the KR phone rule rejects bare separator-less non-`0`-led digit runs; detection skips Haechi's own markers **on the response direction only** (request-side stays full-scan so a fake marker can't smuggle a secret). After the fix the round-trip works under `enforce` (verified live: caller gets the restored email, no 502). See [[protect-pipeline]].
@@ -33,4 +47,4 @@ Echo proof (vLLM): with thinking disabled, the model returned `please email [TOK
 
 ## Status
 
-Core security behaviours validated on both real adapters. The false-positive fix is committed with unit tests (`tests/filter.test.mjs`: marker-not-re-detected, request-side-no-bypass, phone-ignores-timestamps).
+Core security behaviours validated on both real adapters; the auth stack (bearer + named profiles + model allowlist + per-identity rate limit) and the `haechi-auth-jwt` satellite validated end-to-end in front of the real vLLM. The false-positive fix is committed with unit tests (`tests/filter.test.mjs`). No bugs found in the auth/JWT/KR-PII pass — those tests passed as-is, so this section is a validation record (no code change).

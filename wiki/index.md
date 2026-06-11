@@ -26,4 +26,4 @@ Every page must be listed here with a one-line summary. Update this index on eve
 ## Reviews
 
 - [[2026-06-10-full-security-review]] — full-codebase security review that produced the 0.3.2 hardening release (16 findings)
-- [[2026-06-11-real-environment-validation]] — live proxy validation against real vLLM + Ollama backends; fixed response-direction detection false positives
+- [[2026-06-11-real-environment-validation]] — live proxy validation against real vLLM + Ollama: pipeline, auth (bearer + JWT) + per-client controls + KR-PII; fixed response-direction detection false positives
