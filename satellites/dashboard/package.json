@@ -29,7 +29,7 @@
     ".": "./index.mjs"
   },
   "bin": {
-    "haechi-dashboard": "./bin/haechi-dashboard.mjs"
+    "haechi-dashboard": "bin/haechi-dashboard.mjs"
   },
   "files": [
     "index.mjs",
