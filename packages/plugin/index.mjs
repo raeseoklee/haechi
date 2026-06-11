@@ -12,6 +12,11 @@ export {
   createSandboxedAuthProviderSync
 } from "./sandbox.mjs";
 
+export {
+  createProcessIsolatedAuthProvider,
+  createProcessIsolatedAuthProviderSync
+} from "./process-sandbox.mjs";
+
 const VALID_KINDS = new Set([
   "crypto-provider",
   "key-provider",
@@ -34,10 +39,13 @@ const CAPABILITY_KEYS = [
   "auditWrite",
   "externalSecrets"
 ];
-// manifest-only is the historical, behavior-preserving path. worker-isolated is
-// the 1.0 dynamic-loading runtime — permitted ONLY for kind authProvider and
-// only with the Ed25519 signed envelope (see validateWorkerIsolatedManifest).
-const VALID_RUNTIMES = new Set(["manifest-only", "worker-isolated"]);
+// manifest-only is the historical, behavior-preserving path. worker-isolated
+// (1.0) and process-isolated (1.1) are the dynamic-loading runtimes — both
+// permitted ONLY for kind authProvider and only with the Ed25519 signed envelope
+// (see validateSignedDynamicManifest). They share the same manifest contract; the
+// difference is the isolation mechanism (worker_threads vs a --permission child).
+const VALID_RUNTIMES = new Set(["manifest-only", "worker-isolated", "process-isolated"]);
+const SIGNED_DYNAMIC_RUNTIMES = new Set(["worker-isolated", "process-isolated"]);
 
 export async function validatePluginManifestFile(path) {
   const manifest = JSON.parse(await readFile(path, "utf8"));
@@ -65,11 +73,12 @@ export function validatePluginManifest(manifest) {
       errors.push("dynamic plugin execution is not supported; set runtime to manifest-only");
     }
 
-    if (plugin.runtime === "worker-isolated") {
-      // The 1.0 dynamic-loading path: a separate, stricter contract (signed
-      // Ed25519 envelope + a validity window + authProvider-only). Kept apart
-      // from the manifest-only checks so the historical path is untouched.
-      validateWorkerIsolatedManifest(plugin, errors);
+    if (SIGNED_DYNAMIC_RUNTIMES.has(plugin.runtime)) {
+      // The dynamic-loading path (worker-isolated 1.0 / process-isolated 1.1): a
+      // separate, stricter contract (signed Ed25519 envelope + a validity window +
+      // authProvider-only). Kept apart from the manifest-only checks so the
+      // historical path is untouched.
+      validateSignedDynamicManifest(plugin, errors);
     } else {
       // manifest-only (and any other declared-but-rejected runtime): the
       // historical, behavior-preserving contract — UNCHANGED.
@@ -103,13 +112,14 @@ export function validatePluginManifest(manifest) {
   };
 }
 
-// The worker-isolated runtime is dynamic code-loading; it is permitted ONLY for
-// kind authProvider and ONLY with the Ed25519 signed envelope fields. A
-// worker-isolated manifest that is not an authProvider, or is missing the signed
-// fields / validity window / readsCredentials, is rejected with a clear error.
-function validateWorkerIsolatedManifest(plugin, errors) {
+// The signed-dynamic runtimes (worker-isolated 1.0 / process-isolated 1.1) are
+// dynamic code-loading; both are permitted ONLY for kind authProvider and ONLY
+// with the Ed25519 signed envelope fields. A manifest that is not an authProvider,
+// or is missing the signed fields / validity window / readsCredentials, is
+// rejected with a clear error. The two runtimes share this identical contract.
+function validateSignedDynamicManifest(plugin, errors) {
   if (plugin.kind !== "authProvider") {
-    errors.push("worker-isolated runtime is only supported for kind authProvider");
+    errors.push(`${plugin.runtime} runtime is only supported for kind authProvider`);
   }
 
   // The signed-envelope fields that bind authorship and the exact entry bytes.
@@ -131,14 +141,14 @@ function validateWorkerIsolatedManifest(plugin, errors) {
   const hasNotBefore = plugin.notBefore !== undefined && plugin.notBefore !== null;
   const hasNotAfter = plugin.notAfter !== undefined && plugin.notAfter !== null;
   if (!hasNotBefore && !hasNotAfter) {
-    errors.push("worker-isolated manifest requires a validity window (notBefore and/or notAfter)");
+    errors.push(`${plugin.runtime} manifest requires a validity window (notBefore and/or notAfter)`);
   }
 
   if (!plugin.capabilities || typeof plugin.capabilities !== "object" || Array.isArray(plugin.capabilities)) {
     errors.push("missing capabilities");
   } else if (plugin.capabilities.readsCredentials !== true) {
     // An authProvider sees the bearer token, so it MUST declare readsCredentials.
-    errors.push("worker-isolated authProvider must declare capabilities.readsCredentials = true");
+    errors.push(`${plugin.runtime} authProvider must declare capabilities.readsCredentials = true`);
   }
 }
 

@@ -200,6 +200,9 @@ export function buildSignedPlugin(overrides = {}) {
   const now = overrides.now ?? Date.now();
   const capabilities = overrides.capabilities ?? { readsCredentials: true, networkEgress: true };
   const coreVersionRange = overrides.coreVersionRange ?? ">=1.0.0 <2.0.0";
+  // The signed-dynamic runtime: "worker-isolated" (1.0) by default so the existing
+  // worker suite is unaffected; the process-isolated suite passes "process-isolated".
+  const runtime = overrides.runtime ?? "worker-isolated";
 
   const signingKeys = generateKeyPairSync("ed25519");
   const anchorKeys = overrides.wrongSigner ? generateKeyPairSync("ed25519") : signingKeys;
@@ -233,7 +236,7 @@ export function buildSignedPlugin(overrides = {}) {
       id: pluginId,
       version,
       kind: "authProvider",
-      runtime: "worker-isolated",
+      runtime,
       entrypoint,
       signerKeyId: signed.signerKeyId,
       signature: signed.signature,
@@ -273,6 +276,65 @@ export function buildSignedPlugin(overrides = {}) {
     signed
   };
 }
+
+// A cryptoProvider whose hmac() RECORDS every {data, domain} it is asked to hash,
+// then delegates to referenceCrypto. buildExternalIdentity hashes the raw subject
+// and issuer (domain "haechi:identity:hash:v1"), so a process-isolated probe plugin
+// can smuggle its capability-probe result back in the SUBJECT and the test reads it
+// verbatim here — no hash-guessing, full diagnostics on which capability leaked.
+export function createRecordingCrypto() {
+  const hashed = [];
+  return {
+    hashed,
+    async hmac(args) {
+      hashed.push({ data: args.data, domain: args.domain });
+      return referenceCrypto.hmac(args);
+    },
+    encrypt: referenceCrypto.encrypt,
+    decrypt: referenceCrypto.decrypt
+  };
+}
+
+// A process-isolated red-team plugin. It LOADS (handles the conformance vectors),
+// and on the trigger credential "probe" it ATTEMPTS to escape the sandbox —
+// fs read, net.connect, fetch, the process.binding('tcp_wrap') bypass, dns,
+// child_process spawn, a worker — and to leak the credential via stdout/stderr/
+// console. The capability-probe result is returned in the SUBJECT (a bounded JSON
+// string) so a recording crypto captures it; the stdio leaks must reach no host
+// sink because the child's stdio is ['ignore','ignore','ignore','ipc'].
+export const PROCESS_PROBE_PLUGIN_SOURCE = `
+async function probe(credential) {
+  const r = {};
+  const norm = (e) => (e && e.code) ? e.code : (e && e.message) ? e.message : 'ERR';
+  try { const fs = await import('node:fs'); fs.readFileSync('/etc/hosts'); r.fs = 'ALLOWED'; } catch (e) { r.fs = norm(e); }
+  try {
+    const net = await import('node:net');
+    await new Promise((res, rej) => { const s = net.connect({ host: '127.0.0.1', port: 9 }, () => { s.destroy(); res(); }); s.on('error', rej); setTimeout(() => rej(new Error('timeout')), 400); });
+    r.net = 'ALLOWED';
+  } catch (e) { r.net = norm(e); }
+  try { await fetch('http://127.0.0.1:9/'); r.fetch = 'ALLOWED'; } catch (e) { r.fetch = (e && e.cause && e.cause.code) || norm(e); }
+  try { process.binding('tcp_wrap'); r.tcpwrap = 'ALLOWED'; } catch (e) { r.tcpwrap = norm(e); }
+  try { const dns = await import('node:dns'); await dns.promises.lookup('example.com'); r.dns = 'ALLOWED'; } catch (e) { r.dns = norm(e); }
+  try { const cp = await import('node:child_process'); cp.execSync('echo hi'); r.spawn = 'ALLOWED'; } catch (e) { r.spawn = norm(e); }
+  try { const wt = await import('node:worker_threads'); const w = new wt.Worker('0', { eval: true }); w.terminate(); r.worker = 'ALLOWED'; } catch (e) { r.worker = norm(e); }
+  try { process.stderr.write('STDERR_LEAK:' + credential + '\\n'); } catch {}
+  try { process.stdout.write('STDOUT_LEAK:' + credential + '\\n'); } catch {}
+  try { console.error('CONSOLE_LEAK:' + credential); } catch {}
+  try { console.log('CONSOLELOG_LEAK:' + credential); } catch {}
+  return r;
+}
+export default async function authenticate(credential) {
+  if (typeof credential !== 'string' || credential.length === 0) return { deny: true };
+  if (credential.startsWith('throw.')) throw new Error('boom');
+  if (credential.startsWith('expired.') || credential.startsWith('notyet.') || credential.startsWith('~malformed~')) return { deny: true };
+  if (credential.startsWith('valid.')) {
+    const p = credential.split('.');
+    return { subject: p[3] || 's', issuer: p[4] || 'i', type: 'user', scopes: [], labels: {} };
+  }
+  const r = await probe(credential);
+  return { subject: JSON.stringify(r), issuer: 'probe-issuer', type: 'user', scopes: [], labels: {} };
+}
+`;
 
 // Standard sandbox options around a built plugin.
 export function sandboxOptions(built, overrides = {}) {
