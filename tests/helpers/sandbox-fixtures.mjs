@@ -336,6 +336,25 @@ export default async function authenticate(credential) {
 }
 `;
 
+// A plugin that ECHOES the host-injected key material (the second authenticate
+// argument) back via the subject, so a test can confirm the host fetched an
+// operator-declared key document and injected it over the IPC (the plugin never
+// names a URL; net is denied in the child). Handles the conformance vectors so it
+// LOADS.
+export const KEYMATERIAL_PLUGIN_SOURCE = `
+export default async function authenticate(credential, context) {
+  if (typeof credential !== "string" || credential.length === 0) return { deny: true };
+  if (credential.startsWith("throw.")) throw new Error("boom");
+  if (credential.startsWith("expired.") || credential.startsWith("notyet.") || credential.startsWith("~malformed~")) return { deny: true };
+  if (credential.startsWith("valid.")) {
+    const p = credential.split(".");
+    return { subject: p[3] || "s", issuer: p[4] || "i", type: "user", scopes: [], labels: {} };
+  }
+  const km = (context && typeof context.keyMaterial === "string") ? context.keyMaterial : "NO_KEY_MATERIAL";
+  return { subject: "km:" + km, issuer: "km-issuer", type: "user", scopes: [], labels: {} };
+}
+`;
+
 // Standard sandbox options around a built plugin.
 export function sandboxOptions(built, overrides = {}) {
   return {

@@ -33,6 +33,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { assertAuthProviderConformance, buildExternalIdentity } from "../auth/index.mjs";
+import { createGuardedKeyFetcher } from "../ssrf/index.mjs";
 import {
   bearerCredentialFromRequest,
   loadAndVerifyPlugin,
@@ -82,7 +83,10 @@ const PROCESS_HARNESS = [
   "    const cid = msg.cid;",
   "    try {",
   "      if (typeof __plugin !== 'function') { process.send(JSON.stringify({ t: 'auth', cid, deny: true })); return; }",
-  "      const out = await __plugin(msg.credential);",
+  // The host injects operator-declared key material (the plugin NEVER names a URL;
+  // net is denied in the child, so it cannot fetch keys itself). Plugins that do
+  // not need it simply ignore the second argument.
+  "      const out = await __plugin(msg.credential, { keyMaterial: (msg.keyMaterial !== undefined ? msg.keyMaterial : null) });",
   "      if (!out || out.deny === true || typeof out !== 'object') { process.send(JSON.stringify({ t: 'auth', cid, deny: true })); return; }",
   "      process.send(JSON.stringify({ t: 'auth', cid, claims: out }));",
   "    } catch (err) {",
@@ -161,7 +165,15 @@ function createProcessIsolatedAuthProviderHandle({
   // best-effort "allow-harness" fallback is deferred to a later minor (see the
   // 1.1 scope doc §2.2). `detectNetSupport` is an injectable seam for tests.
   netEnforcement = "require-permission",
-  detectNetSupport = netEnforcementSupported
+  detectNetSupport = netEnforcementSupported,
+  // Optional host-mediated key material (1.1 §2.3): for a CUSTOM-credential plugin
+  // that needs a key document (e.g. a JWKS-like doc) to validate its credential.
+  // The HOST fetches it from this OPERATOR-declared URL through the SSRF-hardened
+  // core guarded fetch and injects it over the IPC — the plugin never names a URL
+  // (no plugin-driven SSRF), and net is denied in the child so it cannot fetch
+  // keys itself. The fetch is TTL-cached + cooldown-bounded (no outbound pump).
+  // Shape: { url, ttlMs?, cooldownMs?, timeoutMs?, maxBytes?, fetchImpl?, lookupImpl? }.
+  keyMaterial = null
 } = {}) {
   if (!manifestPath || typeof manifestPath !== "string") {
     throw new Error("createProcessIsolatedAuthProvider requires a manifestPath string");
@@ -196,6 +208,17 @@ function createProcessIsolatedAuthProviderHandle({
   }
   const nowFn = typeof now === "function" ? now : () => now;
   const audit = makeFireAndForgetAudit(auditSink);
+
+  // Optional host-mediated key-material fetcher (operator-declared URL only). The
+  // core guarded fetcher validates the https URL at construction and SSRF-guards
+  // every fetch; TTL cache + cooldown bound the outbound rate.
+  let keyFetcher = null;
+  if (keyMaterial !== null && keyMaterial !== undefined) {
+    if (typeof keyMaterial !== "object" || Array.isArray(keyMaterial) || typeof keyMaterial.url !== "string") {
+      throw new Error("keyMaterial must be an object with an operator-declared https url");
+    }
+    keyFetcher = createGuardedKeyFetcher({ ...keyMaterial, now: nowFn });
+  }
 
   // Read+validate the manifest + run the FULL PR2 gate (shared with the worker
   // runtime). Re-run on every (re)spawn — the gate is not a one-time check.
@@ -360,9 +383,22 @@ function createProcessIsolatedAuthProviderHandle({
       return null;
     }
     const cid = randomUUID();
-    const message = JSON.stringify({ t: "auth", cid, credential });
-    if (Buffer.byteLength(message, "utf8") > maxMessageBytes) {
+    const baseMessage = JSON.stringify({ t: "auth", cid, credential });
+    if (Buffer.byteLength(baseMessage, "utf8") > maxMessageBytes) {
       return { __oversized: true };
+    }
+    // Host-mediated key material (if configured). The credential is bounded by
+    // maxMessageBytes above; the key document is separately bounded by the
+    // fetcher's maxBytes, so it is added AFTER the credential bound check.
+    let message = baseMessage;
+    if (keyFetcher) {
+      let doc;
+      try {
+        doc = await keyFetcher.get();
+      } catch {
+        return { __keyfetch: true }; // host key fetch failed (SSRF refusal / cooldown) → deny
+      }
+      message = JSON.stringify({ t: "auth", cid, credential, keyMaterial: doc });
     }
     return new Promise((resolve) => {
       let done = false;
@@ -419,6 +455,10 @@ function createProcessIsolatedAuthProviderHandle({
 
       if (reply && reply.__oversized) {
         audit({ type: "plugin.authenticate.deny", decision: "plugin.authenticate.deny", pluginId, reason: "oversized" });
+        return null;
+      }
+      if (reply && reply.__keyfetch) {
+        audit({ type: "plugin.authenticate.deny", decision: "plugin.authenticate.deny", pluginId, reason: "key-material-unavailable" });
         return null;
       }
       if (!reply || reply.__timeout) {
