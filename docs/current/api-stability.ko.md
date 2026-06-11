@@ -1,61 +1,107 @@
 # Haechi API Stability Policy
 
-- 문서 상태: Draft 0.1
-- 작성일: 2026-06-10
-- 기준 버전: 0.7.0
+- 문서 상태: Draft 0.2 (1.0 계약 — API freeze)
+- 작성일: 2026-06-11
+- 기준 버전: 1.0.0
 
 ## 1. 버전 해석
 
-0.x 버전은 developer preview다. public exports는 사용 가능하지만, stable API로 간주하지 않는다.
+0.x 버전은 developer preview였다: public exports는 사용 가능했지만 stable API가 **아니었다**. **1.0.0이 첫 stable 릴리스**다 — 아래 계약을 선언하고 **strict semver**를 채택한다(§2 참조). `tests/api-contract.test.mjs` freeze guard가 frozen 표면을 핀한다; frozen export·audit 필드·config key를 제거/이름 변경하면 CI가 실패한다(이것이 breaking change임을 의식적으로 알리는 신호다).
 
 | 버전 범위 | 의미 |
 |---|---|
-| `0.3.x` | local inference/proxy safety patch line |
-| `0.4.x` | token round-trip and adoption line |
-| `0.5.x` | streaming hardening target |
-| `0.6.x` | auth 및 운영 통제 target |
-| `1.0.0` | API compatibility contract를 선언할 수 있는 첫 stable 후보 |
+| `0.3.x` | local inference/proxy safety patch line (preview) |
+| `0.4.x` | token round-trip and adoption line (preview) |
+| `0.5.x` | streaming hardening target (preview) |
+| `0.6.x` | auth 및 운영 통제 target (preview) |
+| `0.7.x` – `0.9.x` | dashboard / KMS / OIDC 위성 + pre-1.0 하드닝 (preview) |
+| `1.0.0` | **첫 stable 릴리스.** §2의 API 계약을 strict semver 하에 frozen으로 선언한다. |
 
-## 2. 변경 정책
+## 2. 1.0 안정성 계약
 
-| 변경 유형 | 0.x 처리 |
+### 2.1 Frozen public surface (IN / OUT)
+
+모든 `package.json` `exports` subpath과 CLI를 분류한다. 더 이상 "0.x는 preview"라는 암묵적 latitude는 없다.
+
+| 표면 | 1.0 상태 |
 |---|---|
-| 보안 기본값 강화 | patch에서 허용 |
-| unsafe config 차단 | patch에서 허용 |
-| export 제거/이름 변경 | minor에서 허용, README에 migration note 필요 |
-| policy action 의미 변경 | minor 이상 필요 |
-| audit schema 변경 | minor 이상 필요 |
-| crypto envelope format 변경 | minor 이상 필요, backward handling 필요 |
+| `haechi` / `haechi/core` — `createHaechi().protectJson`, `createHaechi().createStreamProtector`, `collectStringEntries`, `pathToString`, `safePathToString`, `shapeOnly`, `summarize` | **FROZEN** (breaking change = major) |
+| `haechi/runtime` — `createRuntime`, `normalizeConfig` (config shape), `defaultConfig`, `loadConfig`, `writeDefaultConfig`, `isValidPort`, `DEFAULT_CONFIG_PATH` | **FROZEN** |
+| `haechi/auth` — `authProvider` 계약, `buildIdentity`, `buildExternalIdentity`, `validateLabels`, `createBearerAuthProvider`, token store (`readAuthStore`, `addToken`, `listTokens`, `revokeToken`), `DEFAULT_ALLOWED_LABEL_KEYS` | **FROZEN** |
+| `haechi/crypto` — `cryptoProvider` 계약, `assertCryptoProviderConformance`, `canonicalize`, `createLocalCryptoProvider`, `initLocalKeyFile` | **FROZEN** |
+| `haechi/audit` — audit **event schema** (§2.3), `verifyAuditChain`, `sanitizeAudit`, `createJsonlAuditSink`, `readAuditSummary`, `FORBIDDEN_KEYS` | **FROZEN** |
+| `haechi/policy` — `buildPolicy`, `createPolicyEngine`, `createPolicyProfiles`, `validatePolicy`, `ACTION_STRENGTH` (action ordering) | **FROZEN** |
+| `haechi/filter` — `createDefaultFilterEngine`, `detectEntry`, 그리고 **rule/detection shape** | **FROZEN** |
+| `haechi/token-vault` — `createLocalTokenVault`, `readVault`, token format, reveal-governance 계약 | **FROZEN** |
+| `haechi/protocol-adapters` — `createProtocolAdapter`, `knownProtocolAdapters`, adapter classification 계약 | **FROZEN** |
+| `haechi/plugin` — `validatePluginManifest`, `validatePluginManifestFile`, manifest schema, 1.0 signed-plugin sandbox 표면 | **FROZEN** |
+| `haechi/proxy` — `createHaechiProxy`, `assertSafeProxyBind`, `DEFAULT_PROXY_PORT` | **FROZEN BEHAVIOR + wire/contract** (사람이 읽는 log/error **텍스트**는 변경 가능) |
+| `haechi/mcp-stdio` — `protectMcpJsonRpcMessage`, `runMcpStdioFilter`, `wrapMcpChild` | **FROZEN BEHAVIOR + wire/contract** |
+| `haechi/stream-filter` — `inspectResponseStream`, `getByPath`, `setByPath`, `buildPathObject` | **FROZEN BEHAVIOR + wire/contract** |
+| `haechi/policy-bundle` — `signPolicyBundle(File)`, `verifyPolicyBundle(File)`, `loadVerifiedPolicyBundleFileSync` | **FROZEN BEHAVIOR + wire/contract** (signed-bundle 포맷 frozen) |
+| `haechi/privacy-profiles` — `listPrivacyProfiles`, `getPrivacyProfile`, `applyPrivacyProfile` | **FROZEN BEHAVIOR + wire/contract** |
+| **CLI** — `bin/haechi.mjs` 명령 이름, 플래그, **exit code**, 기계가 읽는(JSON) 출력 | **FROZEN BEHAVIOR + wire/contract**; 사람이 읽는 help/log/status **텍스트**는 계약이 아니며 변경 가능 |
 
-## 3. Experimental exports
+**FROZEN** = export 이름·시그니처·동작이 major 버전 계약의 일부다. **FROZEN BEHAVIOR + wire/contract** = wire 포맷·exit code·기계가 읽는 출력·보안 동작은 frozen이지만, 사람이 읽는 CLI/log **텍스트**는 명시적으로 계약이 *아니며* minor/patch에서 변경될 수 있다.
 
-다음 export는 0.4.0에서 preview로 취급한다.
+### 2.2 Strict semver + deprecation 정책
 
-- `haechi/runtime`
-- `haechi/proxy`
-- `haechi/protocol-adapters`
-- `haechi/privacy-profiles`
-- `haechi/plugin`
-- `haechi/mcp-stdio` `wrapMcpChild`
-- `haechi/token-vault` `detokenize`, deterministic tokenization 옵션
-- `injection` detection type과 휴리스틱 룰
-- `identity` audit 필드와 `authProvider` 계약 (0.4 예약, 0.6 구현 — 그 전까지 형태 변경 가능)
-- `status` / `audit-verify` CLI 출력 형태
-- `haechi/stream-filter` (`inspectResponseStream`, path helpers) 및 `createStreamProtector` (스트리밍 검사 내부 구현)
-- `haechi/auth` (`createBearerAuthProvider`, token store, `buildIdentity`, `buildExternalIdentity`) 및 `authProvider` 계약
-- `policy.profiles`/`policy.profileBinding`/`modelAllowlist`/`rate` 및 `identity`/`profile` audit 필드
-- `assertCryptoProviderConformance` 및 강화된 cryptoProvider 계약 (envelope base shape + provider 확장)
-- `audit.anchor` 설정 및 `verifyAuditChain(path, { anchorPath })`
-- `scripts/release-checksums.mjs` (SHA256SUMS 생성/검증)
+1.0부터 "0.x minor가 깰 수 있다"는 latitude는 **끝난다**. 버저닝은 strict semver다:
+
+| 변경 유형 | 릴리스 |
+|---|---|
+| Breaking change (frozen export·필드·config key 제거/이름 변경; frozen 시그니처·wire 포맷 변경) | **major** |
+| Additive change (새 export, 새 optional config key, 새 additive audit 필드) | **minor** |
+| Bug fix / default 값 하드닝 (shape 변경 없음) | **patch** |
+
+**Deprecation 정책.** deprecated된 export / audit 필드 / config 옵션은:
+
+1. deprecation 후 **최소 1 minor 동안 유지**되고,
+2. **문서화된 migration note**(`docs/current/release-*.md` 또는 README)와 함께 배포되며,
+3. **안정 `code` prefix `HAECHI_DEPRECATION_*`**(예: `HAECHI_DEPRECATION_CONFIG_<key>`, `HAECHI_DEPRECATION_EXPORT_<name>`)를 가진 **일회성 런타임 `process.emitWarning`**를 발생시킨다. **경고 `code`와 그 텍스트 자체가 계약의 일부다** — 소비자가 매칭할 수 있는 안정 식별자이며, 다음 major에서만 변경된다.
+
+deprecated 표면은 **다음 major에서만 제거**된다.
+
+**보안 예외 (허용되는 단 하나의 in-minor break).** **공개된(disclosed)** 취약점을 닫기 위해 필요한 변경은 **minor 안에서** frozen 표면을 깨거나 제거할 수 있으며, **보안 권고(advisory) + migration path**와 함께 배포된다. 이는 오래된 "unsafe config 차단은 patch에서 강화 가능" latitude를 그대로 반영한다 — 보안 태세는 deprecation 창보다 빠르게 강화될 수 있다.
+
+### 2.3 Frozen audit event schema (중첩 sub-schema 포함)
+
+audit event(`packages/core/index.mjs`의 `buildAuditEvent`가 생성, `packages/audit`가 무결성 스탬프)는 top-level뿐 아니라 **중첩 sub-schema까지** frozen이다:
+
+- **top-level**: `{ schemaVersion, id, timestamp, protocol, operation, identity, profile, mode, enforced, blocked, payloadShapeHash, detections, summary, auditIntegrity }`
+- `detections[]`: `{ type, ruleId, path, kind, confidence, action, enforced }`
+- `identity` (**PII-safe** 투영): `{ id, type, subjectHash, issuerHash, provider }` — `scopes` / `labels` / raw subject은 frozen audit identity의 **일부가 아니다**(keyed-HMAC `subjectHash`/`issuerHash`가 유일한 subject/issuer 표면이다). 단, 실제 온디스크 `identity` 객체에는 `scopes`와 `labels`가 함께 포함될 수 있어 총 7개의 키를 가질 수 있으나, 해당 필드들은 frozen 계약의 **일부가 아니다** — audit 로그 소비자는 이 필드들의 존재에 의존해서는 안 된다. auth 미설정 시 `identity`는 `null`이다.
+- `summary`: `{ byType, byAction, detectionCount }`
+- `auditIntegrity`: `{ alg, canonicalization, sequence, previousHash, eventHash }`
+
+규칙:
+
+- **`schemaVersion`**은 명시적 top-level reader-facing 필드(1.0 라인에서 값 `"1"`)로, 소비자가 `auditIntegrity`를 파싱하지 않고도 분기할 수 있게 한다. **additive**이며 canonicalize 대상 객체의 일부다.
+- **새 필드는 additive-only이고 기존 필드의 canonicalization을 절대 바꾸지 않는다.** `canonicalize`는 리터럴 객체를 해싱하고 `verifyAuditChain`은 *동일한* 저장 객체로 `eventHash`를 재계산하므로, future-additive 필드를 담은 1.x event도 그 레코드를 읽는 1.0 `verifyAuditChain` 하에서 여전히 검증된다 — 보장은 "future-additive 필드가 새 레코드를 읽는 옛 verifier를 깨뜨리지 않는다"이다.
+- **canonicalization 변경**은 **major** event-schema bump다: **새 `canonicalization` 태그**(현재 값 `json-stable-v1`)와 **reader-migration path**를 함께 배포한다. 기존 필드의 해시 기반이 바뀔 수 있는 유일한 방법이다.
+
+### 2.4 Config schema freeze 단위
+
+**config key 존재 + shape**가 frozen이다(top-level key `mode`, `target`, `proxy`, `responseProtection`, `streaming`, `limits`, `policy`, `filters`, `keys`, `audit`, `tokenVault`, `privacy`, `auth`, `mcp` 및 그 중첩 shape). **default *값*은 여전히 하드닝될 수 있다** — 더 안전한 default(예: 더 엄격한 `failureMode`)는 breaking change가 **아니다**. **알 수 없는 key는 여전히 throw한다**(fail-closed): `normalizeConfig`는 엄격한 enumerated 검증을 수행하며, 그 fail-closed 태세가 계약의 일부다.
+
+## 3. Graduated / 잔존 preview exports
+
+0.x "experimental exports" 목록은 1.0에서 **해소**된다 — 모든 항목은 **graduated**(이제 §2.1 FROZEN / FROZEN-BEHAVIOR 표면의 일부)되거나 명시적 이유와 함께 **1.0 이후에도 preview로 유지**된다. 암묵적 모호함은 없다.
+
+**Graduated (이제 §2.1에 따라 FROZEN):** `haechi/runtime`, `haechi/proxy`, `haechi/protocol-adapters`, `haechi/privacy-profiles`, `haechi/plugin`, `haechi/mcp-stdio` (`wrapMcpChild`), `haechi/token-vault` (`detokenize` / deterministic tokenization 옵션), `identity` audit 필드와 `authProvider` 계약, `haechi/stream-filter`와 `createStreamProtector`, `haechi/auth` (`createBearerAuthProvider`, token store, `buildIdentity`, `buildExternalIdentity`), `assertCryptoProviderConformance`와 강화된 `cryptoProvider` 계약, `audit.anchor` + `verifyAuditChain(path, { anchorPath })`, `scripts/release-checksums.mjs`, `policy.profiles` / `policy.profileBinding` / `modelAllowlist` / `rate`와 `identity` / `profile` audit 필드. `status` / `audit-verify` CLI 출력의 기계가 읽는 형태는 frozen이다(FROZEN BEHAVIOR — 사람이 읽는 텍스트는 아님).
+
+**1.0 이후에도 preview로 유지 (이유 명시):**
+
+- **`injection` detection type과 그 휴리스틱 룰** — 휴리스틱 집합은 계속 진화할 것으로 예상되며 **기본 report-only**다(명시적 escalate 없이는 response 방향에서 action `allow`로 고정). 따라서 그 *룰 멤버십 / confidence*는 frozen이 아니지만, 그것이 생성하는 detection *shape*는 frozen `detections[]` shape다. `injection` 룰 추가/변경은 breaking change가 아니다.
 
 ## 4. Migration note 기준
 
-다음 변경이 있으면 `docs/current/release-*.md` 또는 README에 migration note를 남긴다.
+다음 변경이 있으면 `docs/current/release-*.md` 또는 README에 migration note를 남긴다. 1.0부터 이 목록의 변경이 **FROZEN** 표면에 가해지면 **major** 이벤트(또는 §2.2의 보안 예외 minor)이며, deprecation 창이 적용되는 경우 `HAECHI_DEPRECATION_*` 런타임 경고를 동반하고 `tests/api-contract.test.mjs`를 갱신한다.
 
 - config key 추가/삭제
 - default enforcement 변경
 - CLI flag 추가/삭제
-- audit event 필드 변경
+- audit event 필드 변경 (top-level 또는 중첩)
 - token format 변경
 - plugin manifest schema 변경
 

@@ -428,6 +428,7 @@ function projectIntegrity(integrity) {
 
 function projectEvent(event) {
   const out = pick(event, [
+    "schemaVersion",
     "id",
     "timestamp",
     "protocol",

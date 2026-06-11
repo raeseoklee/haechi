@@ -387,6 +387,12 @@ async function replacementFor(segment, detection, decision, { context, cryptoPro
 
 function buildAuditEvent({ context, mode, enforced, blocked, payload, detections, decisions }) {
   return {
+    // Reader-facing audit-event schema version (frozen as part of the 1.0 API
+    // contract — see docs/current/api-stability.md). Additive-only: a new field
+    // bumps nothing here; only a canonicalization change is a MAJOR schema bump
+    // (a new value + a reader migration). It is part of the canonicalized object
+    // and so is self-consistent for hash-chain verification of new events.
+    schemaVersion: "1",
     id: randomUUID(),
     timestamp: new Date().toISOString(),
     protocol: context.protocol ?? "custom",
