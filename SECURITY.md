@@ -2,7 +2,7 @@
 
 ## Scope
 
-This repository is an experimental self-hosted security toolkit. It is not production-ready and is not a compliance certification, legal opinion, or assurance report.
+This repository is a self-hosted security toolkit. It is not a compliance certification, legal opinion, or assurance report.
 
 Release risk tracking is maintained in `docs/current/risk-register-release-gate.md`. npm release checks must pass `npm run release:preflight`; actual npm publication additionally requires `npm run release:preflight:npm` from an authenticated npm account.
 
