@@ -1,9 +1,15 @@
 // haechi-auth-jwt — headless JWKS bearer verification for Haechi.
 //
+// createJwtVerifier(...) is the standalone, audited JWS/JWKS verification
+// primitive: verify(jwt) -> validated claims | null (fail-closed). It is the
+// ONE verification path reused by createJwtAuthProvider here and by the future
+// haechi-auth-oidc broker (see release-0.9-implementation-scope.md §2.2).
+//
 // createJwtAuthProvider(...) implements the authProvider contract
-// (authenticate(request) -> identity | null, fail-closed) using node: builtins
-// only (no `jose`): JWKS fetched via global fetch, JWK->key via
-// crypto.createPublicKey({ format: "jwk" }), signatures verified via crypto.verify.
+// (authenticate(request) -> identity | null, fail-closed) on top of the
+// verifier, using node: builtins only (no `jose`): JWKS fetched via global
+// fetch, JWK->key via crypto.createPublicKey({ format: "jwk" }), signatures
+// verified via crypto.verify.
 //
 // Every security decision below is a DECISION, not implementation discretion;
 // see docs/current/release-0.8-implementation-scope.md §2.4. The verifier never
@@ -125,18 +131,26 @@ function rsaModulusBits(jwk) {
   return (n.length - i - 1) * 8 + topBits;
 }
 
-// --- the provider ----------------------------------------------------------
-
-export function createJwtAuthProvider(options = {}) {
+// --- the verifier primitive ------------------------------------------------
+//
+// createJwtVerifier(options) is the standalone, audited JWS/JWKS verification
+// path carved out of createJwtAuthProvider so the future haechi-auth-oidc broker
+// reuses ONE verification path (release-0.9-implementation-scope.md §2.2).
+//
+// It owns ALL construction-time validation EXCEPT the cryptoProvider check and
+// claimMappings/allowedLabelKeys handling (those stay in the provider), plus the
+// JWKS cache machinery, publicKeyFor, verifySignature, and audienceMatches.
+//
+// verify(jwt, { expectedNonce } = {}) returns the validated claims OBJECT on
+// success or null on ANY failure (fully fail-closed). nonce is NOT part of the
+// 0.8 bearer surface: it is checked ONLY when expectedNonce !== undefined.
+export function createJwtVerifier(options = {}) {
   const {
     issuer,
     audience,
     jwksUri,
-    cryptoProvider,
     algorithms = DEFAULT_ALGORITHMS,
     clockSkewSeconds = DEFAULT_CLOCK_SKEW_SECONDS,
-    claimMappings = {},
-    allowedLabelKeys,
     jwksTtlMs = DEFAULT_JWKS_TTL_MS,
     jwksCooldownMs = DEFAULT_JWKS_COOLDOWN_MS,
     fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
@@ -146,15 +160,12 @@ export function createJwtAuthProvider(options = {}) {
   } = options;
 
   // ---- construction-time validation (fail closed) ----
-  if (typeof cryptoProvider?.hmac !== "function") {
-    throw new Error("createJwtAuthProvider requires a cryptoProvider with hmac() (for a PII-safe identity)");
-  }
   if (typeof issuer !== "string" || !issuer) {
-    throw new Error("createJwtAuthProvider requires an issuer");
+    throw new Error("createJwtVerifier requires an issuer");
   }
   const issuerUrl = parseHttpsUrl(issuer, "issuer");
   if (typeof audience !== "string" || !audience) {
-    throw new Error("createJwtAuthProvider requires a non-empty audience");
+    throw new Error("createJwtVerifier requires a non-empty audience");
   }
   const jwksUrl = parseHttpsUrl(jwksUri, "jwksUri");
   if (jwksUrl.hostname.toLowerCase() !== issuerUrl.hostname.toLowerCase()) {
@@ -179,10 +190,6 @@ export function createJwtAuthProvider(options = {}) {
   if (typeof doFetch !== "function") {
     throw new Error("global fetch is unavailable; pass fetchImpl");
   }
-
-  const scopeClaim = claimMappings.scope || "scope";
-  const typeClaim = claimMappings.type || null;
-  const labelMap = claimMappings.labels && typeof claimMappings.labels === "object" ? claimMappings.labels : {};
 
   // ---- JWKS cache (bounded + cooldown) ----
   let cache = { keysByKid: new Map(), fetchedAt: 0 };
@@ -304,28 +311,6 @@ export function createJwtAuthProvider(options = {}) {
     return cryptoVerify(spec.digest, data, keyArg, signature);
   }
 
-  function claimType(claims) {
-    if (!typeClaim) return "user";
-    const raw = claims[typeClaim];
-    return typeof raw === "string" ? raw : "user";
-  }
-
-  function claimScopes(claims) {
-    const raw = claims[scopeClaim];
-    if (Array.isArray(raw)) return raw.filter((s) => typeof s === "string" && s.trim());
-    if (typeof raw === "string") return raw.split(/\s+/).filter(Boolean);
-    return [];
-  }
-
-  function claimLabels(claims) {
-    const labels = {};
-    for (const [labelKey, claimKey] of Object.entries(labelMap)) {
-      const v = claims[claimKey];
-      if (typeof v === "string" && v) labels[labelKey] = v;
-    }
-    return labels;
-  }
-
   function audienceMatches(aud) {
     if (typeof aud === "string") return aud === audience;
     // RFC 7519: aud is a string or an array OF STRINGS — reject a heterogeneous
@@ -335,16 +320,13 @@ export function createJwtAuthProvider(options = {}) {
   }
 
   return {
-    id: "haechi.auth.jwt",
-    async authenticate(request) {
+    // verify(jwt, { expectedNonce } = {}) — the same work authenticate() does
+    // between parsing the JWT string and building the identity. Returns the
+    // validated claims OBJECT on success, or null on ANY failure (fail-closed:
+    // the whole body is wrapped so malformed base64url / fetch failures deny).
+    async verify(jwt, { expectedNonce } = {}) {
       try {
-        const header = request?.headers?.authorization ?? request?.headers?.Authorization;
-        if (typeof header !== "string") return null;
-        const m = /^Bearer\s+(.+)$/i.exec(header.trim());
-        if (!m) return null;
-        const jwt = m[1].trim();
-
-        const parts = jwt.split(".");
+        const parts = String(jwt).split(".");
         if (parts.length !== 3) return null;
         const [h, p, s] = parts;
 
@@ -370,6 +352,85 @@ export function createJwtAuthProvider(options = {}) {
         if (typeof claims.exp !== "number" || t > claims.exp + clockSkewSeconds) return null;
         if (typeof claims.nbf !== "number" || t < claims.nbf - clockSkewSeconds) return null;
         if (claims.iat !== undefined && (typeof claims.iat !== "number" || claims.iat - clockSkewSeconds > t)) return null;
+
+        // ---- optional nonce (NOT part of the 0.8 bearer surface) ----
+        // Only checked when the caller passes expectedNonce; the provider's
+        // bearer path omits it, preserving 0.8 behavior exactly.
+        if (expectedNonce !== undefined) {
+          if (typeof claims.nonce !== "string" || claims.nonce !== expectedNonce) return null;
+        }
+
+        return claims;
+      } catch {
+        // Fail closed: any parse/verify error denies, with no detail.
+        return null;
+      }
+    }
+  };
+}
+
+// --- the provider ----------------------------------------------------------
+//
+// createJwtAuthProvider(options) is the authProvider contract reimplemented on
+// top of createJwtVerifier. It keeps the cryptoProvider check FIRST (so its
+// error still fires before any verifier-construction error), owns Bearer-header
+// parsing + claim->identity mapping + the PII-safe identity build, and passes
+// every other option through to the verifier. Observable behavior is UNCHANGED.
+export function createJwtAuthProvider(options = {}) {
+  const {
+    cryptoProvider,
+    claimMappings = {},
+    allowedLabelKeys,
+    ...verifierOptions
+  } = options;
+
+  // ---- construction-time validation (fail closed) ----
+  // cryptoProvider FIRST so this error still fires before any verifier error.
+  if (typeof cryptoProvider?.hmac !== "function") {
+    throw new Error("createJwtAuthProvider requires a cryptoProvider with hmac() (for a PII-safe identity)");
+  }
+
+  const verifier = createJwtVerifier(verifierOptions);
+
+  const scopeClaim = claimMappings.scope || "scope";
+  const typeClaim = claimMappings.type || null;
+  const labelMap = claimMappings.labels && typeof claimMappings.labels === "object" ? claimMappings.labels : {};
+
+  function claimType(claims) {
+    if (!typeClaim) return "user";
+    const raw = claims[typeClaim];
+    return typeof raw === "string" ? raw : "user";
+  }
+
+  function claimScopes(claims) {
+    const raw = claims[scopeClaim];
+    if (Array.isArray(raw)) return raw.filter((s) => typeof s === "string" && s.trim());
+    if (typeof raw === "string") return raw.split(/\s+/).filter(Boolean);
+    return [];
+  }
+
+  function claimLabels(claims) {
+    const labels = {};
+    for (const [labelKey, claimKey] of Object.entries(labelMap)) {
+      const v = claims[claimKey];
+      if (typeof v === "string" && v) labels[labelKey] = v;
+    }
+    return labels;
+  }
+
+  return {
+    id: "haechi.auth.jwt",
+    async authenticate(request) {
+      try {
+        const header = request?.headers?.authorization ?? request?.headers?.Authorization;
+        if (typeof header !== "string") return null;
+        const m = /^Bearer\s+(.+)$/i.exec(header.trim());
+        if (!m) return null;
+        const jwt = m[1].trim();
+
+        // No expectedNonce — a bearer JWT has none; preserves 0.8 behavior.
+        const claims = await verifier.verify(jwt);
+        if (!claims) return null;
 
         return await buildExternalIdentity(
           {
