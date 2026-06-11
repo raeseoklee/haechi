@@ -20,7 +20,7 @@ English is the primary documentation language. Korean translations are maintaine
 - `docs/current/release-0.7-implementation-scope.md`: 0.7 audit anchoring, cryptoProvider contract + reference KMS adapter, signed release artifacts
 - `docs/current/configuration.md`: full configuration reference (every key, defaults, validation, presets, common setups)
 - `docs/current/risk-register-release-gate.md`: release-blocking risks, security/operational risk status, npm release gates (0.3.2 baseline)
-- `docs/current/threat-model.md`: Haechi 0.3.2 trust boundaries, protected assets, key threats and controls
+- `docs/current/threat-model.md`: Haechi trust boundaries, protected assets, key threats and controls
 - `docs/current/shared-responsibility.md`: responsibility split between Haechi and users/operators in self-hosted deployments
 - `docs/current/api-stability.md`: developer preview API stability and migration note criteria
 - `docs/current/release-process.md`: release preflight, SBOM, npm provenance publish procedure

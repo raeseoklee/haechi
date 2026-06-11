@@ -52,7 +52,7 @@ npm run demo:report
 
 The default config runs in `dry-run` mode. It detects sensitive values and writes audit metadata, but it does not modify outbound payloads until policy mode is changed.
 
-`npm run demo:init` writes `haechi.config.json` and `.haechi/dev.keys.json` locally. The generated key file is for local development only. Haechi 0.3.x does not include a production KMS/HSM/Vault key provider. A non-secret template is available at `haechi.config.example.json`.
+`npm run demo:init` writes `haechi.config.json` and `.haechi/dev.keys.json` locally. The generated key file is for local development only. Core ships no production KMS/HSM/Vault key provider; KMS- and Vault-backed key custody is available through the `haechi-crypto-kms` satellite, injected via the external `cryptoProvider` contract. A non-secret template is available at `haechi.config.example.json`.
 
 ## Local Proxy
 
@@ -72,7 +72,7 @@ Upstream requests time out after `limits.upstreamTimeoutMs` (default 120000) and
 
 ## Local Inference Servers
 
-Haechi 0.3 includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ollama, and llama.cpp.
+Haechi includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ollama, and llama.cpp.
 
 ```json
 {

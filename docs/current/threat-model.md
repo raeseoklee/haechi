@@ -76,9 +76,9 @@ The primary assets Haechi protects are:
 
 ## 4. Explicit Exclusions
 
-0.3.2 does not guarantee:
+Haechi does not guarantee:
 
-- A production KMS/HSM/Vault adapter
+- A production KMS/HSM/Vault adapter in core (the `haechi-crypto-kms` satellite provides AWS/GCP/Azure/Vault adapters via the external `cryptoProvider` contract)
 - Authentication/authorization for internet-facing gateways
 - Cross-frame matches longer than `streaming.maxMatchBytes` (may still split across stream frames)
 - Retraction of stream bytes already emitted before a `block` fires
