@@ -1,6 +1,6 @@
 {
   "name": "haechi-crypto-kms",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "KMS-backed cryptoProvider satellite for Haechi (keys.provider: external) — envelope encryption with an injected KMS client.",
   "license": "Apache-2.0",
   "type": "module",
@@ -44,7 +44,7 @@
     "test": "node --test"
   },
   "peerDependencies": {
-    "haechi": ">=0.8.0 <1.0.0",
+    "haechi": ">=0.8.0 <2.0.0",
     "@aws-sdk/client-kms": "^3",
     "@google-cloud/kms": "^4 || ^5",
     "@azure/keyvault-keys": "^4",
