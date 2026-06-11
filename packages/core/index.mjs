@@ -397,10 +397,19 @@ function buildAuditEvent({ context, mode, enforced, blocked, payload, detections
     timestamp: new Date().toISOString(),
     protocol: context.protocol ?? "custom",
     operation: context.operation ?? "protect",
-    // PII-safe identity built by the auth layer (subject/issuer are keyed
-    // HMACs); null when no auth is configured. `profile` is the resolved
-    // policy profile name (or null).
-    identity: context.identity ?? null,
+    // PII-safe identity — projected to the five frozen 1.0 audit-identity keys
+    // (id, type, subjectHash, issuerHash, provider). scopes/labels are available
+    // to the live policy engine via context.identity but are NOT part of the
+    // frozen audit schema (§2.1) and must never be persisted to the hash-chained
+    // log (an untrusted plugin's attacker-controlled label/scope value would
+    // otherwise enter the immutable audit record via this path).
+    identity: context.identity ? {
+      id: context.identity.id,
+      type: context.identity.type,
+      subjectHash: context.identity.subjectHash,
+      issuerHash: context.identity.issuerHash,
+      provider: context.identity.provider
+    } : null,
     profile: context.profile ?? null,
     mode,
     enforced,

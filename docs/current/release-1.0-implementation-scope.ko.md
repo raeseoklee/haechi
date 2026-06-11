@@ -88,7 +88,12 @@ Core는 **zero runtime dependency**를 유지한다 — 샌드박스는 `node:wo
 
 - `plugin.load.accepted` `{ pluginId, version, entrySha256, signerKeyId, capabilitiesGranted }`
 - `plugin.load.refused` `{ reason ∈ missing-signature | unknown-signer | tampered-entry | revoked | below-version-floor | pin-mismatch | expired-window | capability-not-allowlisted | conformance-failed | manifest-invalid, pluginId?, signerKeyId? }`
-- `plugin.authenticate.deny` `{ pluginId, reason ∈ invalid-claims | throw | non-pii-safe-identity | timeout }`
+- `plugin.authenticate.deny` `{ pluginId, reason ∈ deny | invalid-claims | timeout | over-capacity | oversized }`
+  - `deny` — 플러그인이 일반 거부를 반환함 (worker 하네스가 변환한 내부 throw 포함)
+  - `invalid-claims` — 호스트 측 클레임 sanitize 또는 `buildExternalIdentity` 거부 (이전 `non-pii-safe-identity` 레이블 통합)
+  - `timeout` — 호출별 타임아웃 만료; worker 종료 및 재시작
+  - `over-capacity` — `maxPendingCalls` 초과; worker 큐에 진입하기 전에 호출 거부
+  - `oversized` — 크리덴셜 메시지가 `maxMessageBytes`를 초과; worker에 전송되지 않음
 - `plugin.worker.terminated` `{ pluginId, cause ∈ timeout | oom | crash }`
 
 `FORBIDDEN_KEYS`는 플러그인/클레임 표면(`claims`, `subject`, `issuer`, `credential`, `authorization`, `signature`, `entry`)으로 **확장**된다 — 심층 방어로서, 미래의 플러그인 이벤트가 raw 클레임/토큰/서명자 비밀을 체인 로그에 절대 누출하지 못하도록(위의 이벤트는 이미 id/해시만 운반함). 테스트는 거부된 로드와 worker 타임아웃이 각각 정확히 하나의 체인 이벤트를 방출함을 단언하고, raw 클레임이 있는 합성 플러그인 이벤트가 `sanitizeAudit`에 의해 제거됨을 단언한다.

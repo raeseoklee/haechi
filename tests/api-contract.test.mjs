@@ -193,8 +193,9 @@ test("FROZEN: audit event carries every top-level + nested frozen field (+ schem
   }
 
   // --- identity.* frozen sub-schema (the PII-safe projection) ---
-  // scopes/labels/raw-subject are NOT part of the frozen audit identity; we
-  // assert only the five frozen keys are present (a removed one => fail).
+  // The frozen 1.0 audit-identity contract is EXACTLY the five keys below.
+  // scopes/labels/raw-subject are NOT part of it (§2.1): their absence is part
+  // of the contract, not just the presence of the five frozen keys.
   assert.ok(record.identity && typeof record.identity === "object", "identity must be a non-null object in this fixture");
   const IDENTITY = {
     id: "string",
@@ -207,6 +208,13 @@ test("FROZEN: audit event carries every top-level + nested frozen field (+ schem
     assert.ok(key in record.identity, `FROZEN identity.${key} is MISSING (removing it is a BREAKING change)`);
     assert.equal(typeof record.identity[key], type, `FROZEN identity.${key} has wrong type`);
   }
+  // Absence contract: scopes/labels must NEVER appear in the persisted audit
+  // identity even when the live context.identity carries them (e.g. from a
+  // plugin returning attacker-controlled claim values).
+  assert.ok(!("scopes" in record.identity),
+    "CONTRACT VIOLATION: audit identity must NOT contain 'scopes' (frozen contract is exactly the 5 keys)");
+  assert.ok(!("labels" in record.identity),
+    "CONTRACT VIOLATION: audit identity must NOT contain 'labels' (frozen contract is exactly the 5 keys)");
 
   // --- summary.* frozen sub-schema ---
   const summary = record.summary;
