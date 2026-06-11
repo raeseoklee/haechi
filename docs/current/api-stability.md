@@ -1,21 +1,21 @@
 # Haechi API Stability Policy
 
-- Status: Draft 0.2 (1.0 contract — the API freeze)
+- Status: In effect (1.0 contract — the API freeze)
 - Date: 2026-06-11
-- Target version: 1.0.0
+- Applies to version: 1.0.0 (current stable)
 
 ## 1. Version Interpretation
 
-0.x releases were developer previews: public exports were usable but **not** a stable API. **1.0.0 is the first stable release** — it declares the contract below and adopts **strict semver** (see §2). The `tests/api-contract.test.mjs` freeze guard pins the frozen surface; a removed/renamed frozen export, audit field, or config key fails CI (the conscious signal of a breaking change).
+The 0.x line was a developer preview: public exports were usable but **not** a stable API. **1.0.0 is the current stable release**, and the contract below is **in effect now** — Haechi declares this contract and adopts **strict semver** (see §2). The freeze rules in §2 (the frozen `exports`/CLI surface, the audit event schema, and the config key shape) apply to the 1.0 line as released; they are no longer a future commitment. The `tests/api-contract.test.mjs` freeze guard pins the frozen surface; a removed/renamed frozen export, audit field, or config key fails CI (the conscious signal of a breaking change).
 
 | Version range | Meaning |
 |---|---|
-| `0.3.x` | local inference/proxy safety patch line (preview) |
-| `0.4.x` | token round-trip and adoption line (preview) |
-| `0.5.x` | streaming hardening target (preview) |
-| `0.6.x` | auth and operational controls target (preview) |
-| `0.7.x` – `0.9.x` | dashboard / KMS / OIDC satellites + pre-1.0 hardening (preview) |
-| `1.0.0` | **First stable release.** The API contract in §2 is declared frozen under strict semver. |
+| `0.3.x` | local inference/proxy safety patch line (former preview) |
+| `0.4.x` | token round-trip and adoption line (former preview) |
+| `0.5.x` | streaming hardening target (former preview) |
+| `0.6.x` | auth and operational controls target (former preview) |
+| `0.7.x` – `0.9.x` | dashboard / KMS / OIDC satellites + pre-1.0 hardening (former preview) |
+| `1.0.0` | **Current stable release.** The API contract in §2 is frozen and in effect under strict semver. |
 
 ## 2. The 1.0 stability contract
 

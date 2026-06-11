@@ -4,17 +4,19 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-developer%20preview-orange)](docs/current/risk-register-release-gate.md)
+[![status](https://img.shields.io/badge/status-stable%201.0-brightgreen)](docs/current/api-stability.md)
 
 **English** | [한국어](README.ko.md)
 
-Haechi is an experimental developer preview of a self-hosted AI context enforcement layer for protecting LLM, MCP, vLLM, Ollama, and agent payloads before they reach models, tools, logs, or proxies.
+Haechi is a self-hosted AI context enforcement layer for protecting LLM, MCP, vLLM, Ollama, and agent payloads before they reach models, tools, logs, or proxies.
 
 The name comes from Haechi, a Korean guardian figure associated with discernment and protection.
 
-This repository is intended for local development, security design review, and self-hosted integration experiments. It is not production-ready and is not a compliance guarantee.
+This repository is intended for local development, security design review, and self-hosted integration experiments. It is not a compliance guarantee.
 
-The current developer-preview scope focuses on local adoption:
+**1.0.0 is the first stable release.** From 1.0 the public API is a frozen contract under strict semver: the `package.json` `exports` surface, the CLI's machine-readable behavior, the audit event schema, and the config key shape are all part of the major-versioned contract, with a documented deprecation policy and a one in-minor security exception. See [`docs/current/api-stability.md`](docs/current/api-stability.md). The four `haechi-*` satellites stay pre-1.0 and version independently of core.
+
+The current scope focuses on local adoption:
 
 - `haechi init`: create a local key, sample config, and audit path
 - `haechi protect`: inspect and protect an OpenAI-compatible JSON payload
@@ -167,12 +169,12 @@ haechi auth revoke <id>
 - **Rate limit**: per-identity requests-per-minute → `429` (in-memory, per-process).
 - Audit events carry the **PII-safe** `identity` (keyed-HMAC subject/issuer, never raw values) and the resolved `profile`; `auth_denied` / `model_not_allowed` / `rate_limited` decisions never include credentials. `/__haechi/health` stays unauthenticated.
 
-JWT/JWKS auth and KMS-backed key custody ship as `haechi-*` satellite packages, each versioned and published independently of core:
+JWT/JWKS auth and KMS-backed key custody ship as `haechi-*` satellite packages, each versioned and published independently of core. They remain pre-1.0 and declare a `haechi` peer range of `>=0.8.0 <2.0.0` (the upper bound tracks the core major, so core 1.0.0 does not break satellite installs):
 
-- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.8) — headless JWKS bearer verification; 0.2.0 additively exports a reusable JWS verifier (`createJwtVerifier`).
-- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.8) — envelope encryption with a real KMS client; 0.2.0 adds GCP (`./gcp`), Azure (`./azure`), and HashiCorp Vault Transit (`./vault`, `node:`-only) backends alongside AWS.
-- [`haechi-dashboard`](satellites/dashboard/) (0.9, new) — a zero-dependency, read-only audit viewer (`node:http`) over the audit log and its hash-chain status.
-- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.9, new) — an interactive OIDC session broker (authorization-code + PKCE) that provides the dashboard's human login.
+- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.2.1) — headless JWKS bearer verification; additively exports a reusable JWS verifier (`createJwtVerifier`).
+- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.2.1) — envelope encryption with a real KMS client; AWS plus GCP (`./gcp`), Azure (`./azure`), and HashiCorp Vault Transit (`./vault`, `node:`-only) backends.
+- [`haechi-dashboard`](satellites/dashboard/) (0.1.2) — a zero-dependency, read-only audit viewer (`node:http`) over the audit log and its hash-chain status.
+- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.1.2) — an interactive OIDC session broker (authorization-code + PKCE) that provides the dashboard's human login.
 
 The satellites are `node:`-only by default (heavy SDKs are optional peers) and keep core zero-dependency.
 
@@ -253,7 +255,8 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 - Audit tail truncation: set `audit.anchor.mode: file` (on append-only/separate media) so `haechi audit-verify --anchor` detects deletion of trailing records back to the last anchor. On the same writable filesystem an attacker can truncate both files together.
 - Key custody: `keys.provider: external` accepts an injected `cryptoProvider`; validate adapters with `assertCryptoProviderConformance`. The `haechi-crypto-kms` satellite (`satellites/crypto-kms/`) provides an envelope-encryption KMS adapter.
 - Release integrity: published tarballs carry an npm provenance attestation; GitHub release assets add a sigstore attestation and `SHA256SUMS` (verify with `gh attestation verify` and `node scripts/release-checksums.mjs --check`).
-- The package is a developer preview. Do not expose it as an internet-facing production LLM gateway.
+- The 1.0 authProvider plugin sandbox runs a signed plugin in a `worker_threads` worker. This is memory/crash isolation and data-minimization (only the credential slice crosses; the host builds the keyed-HMAC identity), **not** a capability sandbox: a malicious *signed* plugin can still use `fs`/`net` and exfiltrate the credential it receives. The load-bearing control is the trust gate (Ed25519 signature + operator allowlist + version pin/floor + revocation). Default wiring stays dependency injection (`createRuntime(config, providers)`); true capability enforcement (child-process + Node permission model) is a 1.x target.
+- Do not expose Haechi as an internet-facing production LLM gateway without your own network controls and authentication in front.
 
 ## Current Scope
 
@@ -278,3 +281,5 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 0.8.0 stands up the `haechi-*` ecosystem: an npm workspaces monorepo (core stays the unscoped `haechi`, zero runtime dependency, gated by a packed-manifest CI check) plus the first two satellites — [`haechi-crypto-kms`](satellites/crypto-kms/) (envelope encryption with a real AWS KMS client; the AWS SDK is an optional peer) and [`haechi-auth-jwt`](satellites/auth-jwt/) (headless JWKS bearer verification, `node:`-only). Each publishes independently with its own provenance + sigstore-attested workflow. See `docs/current/release-0.8-implementation-scope.md`.
 
 0.9.0 is the observability + interactive-auth theme: two new satellites — [`haechi-dashboard`](satellites/dashboard/) (a zero-dependency, read-only `node:http` audit viewer over the audit log and its hash-chain status, with an anti-DNS-rebinding Host allowlist, strict CSP/Trusted Types, and fail-closed loopback/remote-bind guards) and [`haechi-auth-oidc`](satellites/auth-oidc/) (an interactive OIDC session broker — authorization-code + PKCE + server-side sessions — that provides the dashboard's human login). Existing satellites also ship additive minors: `haechi-auth-jwt@0.2.0` exports a reusable JWS verifier (`createJwtVerifier`) and `haechi-crypto-kms@0.2.0` adds GCP/Azure/Vault backends. Core bumps to `0.9.0`, carrying only an additive `FORBIDDEN_KEYS` audit-sanitization hardening — defense-in-depth that changes no current event output. See `docs/current/release-0.9-implementation-scope.md`.
+
+1.0.0 is the **first stable release**. It declares a frozen API contract under strict semver: the `package.json` `exports` surface, the CLI's machine-readable behavior, the audit event schema (including its nested sub-schemas and `schemaVersion`), and the config key shape are all part of the major-versioned contract, guarded by `tests/api-contract.test.mjs` and governed by a documented deprecation policy (`HAECHI_DEPRECATION_*` runtime warnings, removal only at the next major) with a single in-minor security exception for disclosed vulnerabilities (see [`docs/current/api-stability.md`](docs/current/api-stability.md)). 1.0 also lifts the dynamic-loading ban **narrowly**, for `authProvider` plugins only: an Ed25519-signed (asymmetric `node:crypto` verification with trust-anchor-only key resolution, entry-hash binding, version pin/floor, revocation, and a signing window), capability-gated, `worker_threads`-isolated, fully audited plugin sandbox. Dependency injection (`createRuntime(config, providers)`) stays the default. **Honest residual:** the worker is memory/crash isolation and data-minimization, not a capability sandbox — a malicious *signed* plugin can still use `fs`/`net` and exfiltrate the credential slice it receives, so the load-bearing control is the trust gate; true capability enforcement (child-process + Node permission model) is a 1.x target. The four `haechi-*` satellites (`haechi-auth-jwt@0.2.1`, `haechi-crypto-kms@0.2.1`, `haechi-dashboard@0.1.2`, `haechi-auth-oidc@0.1.2`) stay pre-1.0, version independently, and widen their `haechi` peer range to `>=0.8.0 <2.0.0` so core 1.0.0 does not break their installs. See `docs/current/release-1.0-implementation-scope.md`.

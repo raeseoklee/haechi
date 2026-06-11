@@ -2,7 +2,7 @@
 
 - 문서 상태: Draft 0.1
 - 작성일: 2026-06-10
-- 기준 버전: 0.9.0
+- 기준 버전: 1.0.0
 
 ## 1. 보호 대상
 
@@ -65,6 +65,14 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | 토큰 엔드포인트 POST(및 Vault `fetch`)를 통한 broker SSRF — cloud metadata (0.9) | discovery와 request 사이에 `169.254.169.254`로 DNS-rebind되는 `token_endpoint`(또는 운영자 제공 `VAULT_ADDR`)가 instance-metadata 자격증명을 유출 | 모든 egress(discovery GET, 공유 verifier 경유 JWKS GET, token-exchange POST, end-session redirect, `haechi-crypto-kms` Vault `fetch`)가 **request 직전**(post-DNS) `lookup` 후 `isBlockedAddress` 재검사를 `redirect: "error"`·bounded body·timeout과 함께 수행. 운영자 신뢰 엔드포인트에 한함 |
 | audit/로그로의 token/secret leak (broker) (0.9) | ID/access/refresh token, `client_secret`, `code`, `state`, `nonce`, raw `sub`가 audit 로그나 client 응답에 기록됨 | broker는 모든 audit 이벤트를 자체 allowlist로 projection해 `subjectHash`/`issuerHash`/`sessionIdHash`(keyed-HMAC) + `provider`/`reasonCode`/timestamp만 방출; core `FORBIDDEN_KEYS`를 broker token/claim key까지 확장; access token은 **폐기**(저장·사용 안 함). 실질적 잔여 없음 |
 | KMS backend egress (Vault HTTP, GCP/Azure SDK) (0.9) | `haechi-crypto-kms` Vault/GCP/Azure backend가 key material이나 provider/key-path 상세를 유출하거나 의도치 않은 엔드포인트에 도달 | optional-peer + injected-client 모델과 **faithful-mock conformance**(cross-key·corrupted-blob 거부, HMAC determinism/domain-separation); Vault `fetch`는 위 satellite-local SSRF 가드 수행; 모든 backend는 provider 오류를 generic fail-closed 오류로 매핑하고 provider/key-ARN 상세를 audit에 기록하지 않음. live-backend 검증은 CI 외부 |
+| 동적 로딩된 악의적/침해된 signed plugin (1.0) | signed `authProvider` plugin이 worker sandbox에 로딩된 뒤 실행 중 host를 악용 | `canonicalize({pluginId, kind, version, capabilities, coreVersionRange, entrySha256, notBefore, notAfter})`에 대한 Ed25519 서명, **trust-anchor-only** 키 해석(`signerKeyId`가 allowlist된 anchor가 아니면 verify 이전 거부; 알고리즘은 Ed25519로 고정), pin + `pluginId`별 version-floor + revocation denylist(`revokedSignerKeyIds`/`revokedEntrySha256`) + validity-window 집행, `assertAuthProviderConformance` 정합성 게이트, `node:worker_threads` memory/crash 격리 + per-call timeout-terminate, 전체 lifecycle audit(`plugin.load.*`/`authenticate.deny`/`worker.terminated`). 전체 게이트는 매 respawn마다 재실행. **수용된 잔여:** signed plugin 자신의 `fs`/`fetch`/`process.env`는 차단되지 않으며(`networkEgress: false`는 선언일 뿐 1.0에서 집행 통제 아님) 정당하게 받은 credential을 exfiltrate할 수 있음 — 오직 signing/vetting 신뢰 모델로만 통제됨. 진짜 capability 집행(child-process + Node permission model)은 1.x 경로 |
+| plugin으로의 PII/secret leak (1.0) | request body·crypto 키·token vault·raw claim이 worker 경계를 넘어 유출 | host는 worker에 **credential slice만** 전달(`Authorization` 헤더 / bearer token — request body 절대 안 보냄, crypto 키 절대 안 보냄); wire는 MessagePort 위 평문 JSON 문자열; **null-prototype, own-key-allowlist claims sanitizer**가 `__proto__`/`constructor`/`prototype`을 제거하고 크기를 bound한 뒤 **host**가 `buildExternalIdentity`로 keyed-HMAC identity를 구성(HMAC 키는 worker에 들어가지 않음). **수용된 잔여:** auth plugin이 정당하게 검증하는 credential은 그 plugin에 보임(위 행 참조) |
+| 경계 간 object/proto smuggling (1.0) | 악의적 claims object가 host prototype을 오염시키거나 raw 값을 경계 너머로 밀반입 | JSON-string wire만 사용(structured-clone 없음, `SharedArrayBuffer`/transferables 없음 → shared-memory·object-graph 채널 없음) + `buildExternalIdentity` 이전 null-proto own-key-allowlist sanitizer. 실질적 잔여 없음 |
+| plugin entry의 swap / TOCTOU (1.0) | 서명 검사 후 실행 전에 검증된 entry 바이트가 swap됨(예: symlink 경로 재해석) | 서명이 `entrySha256`을 바인딩; loader는 entry를 **메모리로** 읽어 hash·verify하고 **메모리 내 검증된 소스에서** Worker를 spawn(`eval: true`)하며 검증 후 경로를 재해석하지 않고 symlink entry를 거부. 실질적 잔여 없음 |
+| signer-key confusion / downgrade / rollback / malicious update (1.0) | confused-deputy가 검증 키/알고리즘을 바꾸거나, 신뢰 signer가 같은 anchor로 새/old-vulnerable entry를 조용히 배포 | trust-anchor-only 해석 + Ed25519 알고리즘 고정(alg agility 없음, HS/RS confusion 없음; signer 집합은 별도 curated 목록이며 AES rotation 키 파일이 아님) + pin(`version`/`entrySha256`/`manifestSha256`) + `pluginId`별 version-floor + revocation denylist. **잔여:** 운영자가 anchor/pin을 curate해야 함 |
+| Plugin DoS (1.0) | 버그 있거나 악의적인 signed plugin이 hang/runaway하거나 host를 flood | call별 필수 양의 `timeoutMs`(timeout 시 host가 **worker를 terminate**하고 `null` 반환, lazily respawn), heap `resourceLimits`, `maxPendingCalls`(초과 → deny), `maxMessageBytes`(초과 → deny), single-occupancy worker(per-call terminate가 sibling을 죽일 수 없음). **잔여:** signed plugin이 timeout 내에서 할당된 CPU를 소진할 수 있음(CPU/fd/socket은 1.0에서 bound 안 됨) |
+| 감사되지 않는 code-load (1.0) | tamper-evident 기록 없이 third-party 코드를 로딩/실행 | 모든 load/deny/terminate 결정이 chained audit 이벤트 — `plugin.load.accepted`/`plugin.load.refused{reason}`/`plugin.authenticate.deny{reason}`/`plugin.worker.terminated{cause}`(ids/hashes/counts만); `FORBIDDEN_KEYS`를 확장(`claims`, `subject`, `issuer`, `credential`, `authorization`, `signature`, `entry`, 추가로 `scopes`/`labels`)해 defense-in-depth 적용, audit identity는 frozen 5 키 `{id, type, subjectHash, issuerHash, provider}`로 projection. — |
+| conformance test/prod 괴리 (1.0) | signed plugin이 고정된 conformance 테스트를 감지해 정상 행동한 뒤 운영에서 오작동 | `assertAuthProviderConformance`는 **load별 예측 불가 randomized vectors**를 사용하고, load-bearing하게 **host가 매 call마다 PII-safety를 재검증**(`buildExternalIdentity` + sanitizer가 요청별 실행)하며 load 시점에만 검증하지 않음. **잔여:** conformance-pass가 신뢰성을 함의하지 않음 — 악의적 plugin이 통과 후 오작동 가능(conformance가 아니라 signing+vetting 게이트로 통제) |
 
 ## 4. 명시적 제외
 
@@ -86,6 +94,11 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 - refresh-token rotation / silent renewal / 장수명 broker 세션 — 0.9 세션은 absolute-TTL + idle-timeout만; `offline_access`는 제거되고 access token은 폐기 (0.9)
 - Dashboard write action(reveal, purge, policy edit) — `haechi-dashboard`는 읽기 전용으로 `POST`/`DELETE` surface 없음; mutation은 reveal governance 하의 CLI에 유지 (0.9)
 - OIDC broker의 `at_hash`/`c_hash` 검증 — broker가 access token을 사용하지 않으므로 정확히 범위 외 (0.9)
+- 악의적 signed plugin에 대한 capability *집행*(`fs`/`net`/`process.env` 차단) — Node permission model 하의 child-process 격리가 필요; 1.0 worker 격리는 memory/crash 격리 + data-minimization만 제공 (1.0)
+- signed `authProvider` plugin이 정당하게 받는 credential의 봉쇄 — de-facto network egress가 있어 exfiltrate 가능; 오직 signing/vetting 신뢰 모델로만 통제 (1.0)
+- classifier/filter 및 crypto plugin 로딩 — 1.0에서 동적 로딩 가능한 plugin kind는 `authProvider`뿐; 다른 kind는 injection-only 유지 (1.0)
+- unsigned dev/loader 경로 — unsigned plugin loader는 없음; 개발은 `createRuntime(config, providers)` 주입 사용 (1.0)
+- live revocation feed / CRL — revocation은 다음 load/restart에 적용(global/per-plugin kill-switch가 live plugin을 즉시 force-drop); live CRL은 1.x (1.0)
 
 ## 5. 남은 운영 전제
 

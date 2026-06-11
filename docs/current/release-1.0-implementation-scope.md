@@ -132,7 +132,7 @@ Existing behavior is **unchanged** — every provider contract, the config and (
 | **Conformance test/prod divergence** | Randomized per-load vectors + per-call host re-validation of PII-safety | a malicious plugin can pass conformance then misbehave (covered by signing+vetting, not conformance) |
 | **API/audit-schema drift** | Strict semver + deprecation windows (+ security exception) + additive-only nested-enumerated audit schema + `schemaVersion` | a major bump can break by design (documented migration) |
 
-Proposed risk IDs: **P1-SEC-010** (dynamic plugin execution / sandbox trust model — supersedes P1-SEC-004's manifest-only stance, lifted under the new controls), **P1-SEC-011** (plugin signing/trust-anchor/revocation lifecycle), **P2-API-001** (stable-contract freeze + deprecation policy), **P2-OPS-006** (satellite peer-range / major-tracking gate). New §4 exclusions: capability enforcement vs a malicious signed plugin, credential containment, classifier/crypto plugin loading, unsigned dev loader, live CRL.
+Proposed risk IDs: **P1-SEC-024** (dynamic plugin execution / sandbox trust model — supersedes P1-SEC-004's manifest-only stance, lifted under the new controls), **P1-SEC-025** (plugin signing/trust-anchor/revocation lifecycle), **P2-API-001** (stable-contract freeze + deprecation policy), **P2-OPS-006** (satellite peer-range / major-tracking gate). New §4 exclusions: capability enforcement vs a malicious signed plugin, credential containment, classifier/crypto plugin loading, unsigned dev loader, live CRL.
 
 ## 7. Test criteria (mapped to the PR breakdown)
 

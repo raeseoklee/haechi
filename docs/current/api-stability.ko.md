@@ -1,21 +1,21 @@
 # Haechi API Stability Policy
 
-- 문서 상태: Draft 0.2 (1.0 계약 — API freeze)
+- 문서 상태: 발효 중 (1.0 계약 — API freeze)
 - 작성일: 2026-06-11
-- 기준 버전: 1.0.0
+- 적용 버전: 1.0.0 (현재 stable)
 
 ## 1. 버전 해석
 
-0.x 버전은 developer preview였다: public exports는 사용 가능했지만 stable API가 **아니었다**. **1.0.0이 첫 stable 릴리스**다 — 아래 계약을 선언하고 **strict semver**를 채택한다(§2 참조). `tests/api-contract.test.mjs` freeze guard가 frozen 표면을 핀한다; frozen export·audit 필드·config key를 제거/이름 변경하면 CI가 실패한다(이것이 breaking change임을 의식적으로 알리는 신호다).
+0.x 라인은 developer preview였다: public exports는 사용 가능했지만 stable API가 **아니었다**. **1.0.0이 현재 stable 릴리스**이며, 아래 계약은 **지금 발효 중**이다 — Haechi는 이 계약을 선언하고 **strict semver**를 채택한다(§2 참조). §2의 freeze 규칙(frozen `exports`/CLI 표면, audit event schema, config key shape)은 릴리스된 1.0 라인에 적용되며, 더 이상 미래의 약속이 아니다. `tests/api-contract.test.mjs` freeze guard가 frozen 표면을 핀한다; frozen export·audit 필드·config key를 제거/이름 변경하면 CI가 실패한다(이것이 breaking change임을 의식적으로 알리는 신호다).
 
 | 버전 범위 | 의미 |
 |---|---|
-| `0.3.x` | local inference/proxy safety patch line (preview) |
-| `0.4.x` | token round-trip and adoption line (preview) |
-| `0.5.x` | streaming hardening target (preview) |
-| `0.6.x` | auth 및 운영 통제 target (preview) |
-| `0.7.x` – `0.9.x` | dashboard / KMS / OIDC 위성 + pre-1.0 하드닝 (preview) |
-| `1.0.0` | **첫 stable 릴리스.** §2의 API 계약을 strict semver 하에 frozen으로 선언한다. |
+| `0.3.x` | local inference/proxy safety patch line (former preview) |
+| `0.4.x` | token round-trip and adoption line (former preview) |
+| `0.5.x` | streaming hardening target (former preview) |
+| `0.6.x` | auth 및 운영 통제 target (former preview) |
+| `0.7.x` – `0.9.x` | dashboard / KMS / OIDC 위성 + pre-1.0 하드닝 (former preview) |
+| `1.0.0` | **현재 stable 릴리스.** §2의 API 계약이 strict semver 하에 frozen이며 발효 중이다. |
 
 ## 2. 1.0 안정성 계약
 

@@ -4,17 +4,19 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-developer%20preview-orange)](docs/current/risk-register-release-gate.md)
+[![status](https://img.shields.io/badge/status-stable%201.0-brightgreen)](docs/current/api-stability.md)
 
 [English](README.md) | **한국어**
 
-Haechi는 LLM, MCP, vLLM, Ollama, 그리고 에이전트 payload가 모델, 도구, 로그, 또는 proxy에 도달하기 전에 보호하기 위한 자체 호스팅 AI 컨텍스트 집행 레이어의 실험적 개발자 프리뷰이다.
+Haechi는 LLM, MCP, vLLM, Ollama, 그리고 에이전트 payload가 모델, 도구, 로그, 또는 proxy에 도달하기 전에 보호하기 위한 자체 호스팅 AI 컨텍스트 집행 레이어이다.
 
 이름은 분별력과 보호를 상징하는 한국의 수호 신수 해치에서 유래했다.
 
-이 저장소는 로컬 개발, 보안 설계 검토, 자체 호스팅 통합 실험을 위한 것이다. 운영 환경에 바로 사용할 수 있는 상태가 아니며, 컴플라이언스를 보장하지 않는다.
+이 저장소는 로컬 개발, 보안 설계 검토, 자체 호스팅 통합 실험을 위한 것이다. 컴플라이언스를 보장하지 않는다.
 
-현재 개발자 프리뷰 범위는 로컬 도입에 초점을 맞추고 있다:
+**1.0.0이 첫 stable 릴리스다.** 1.0부터 public API는 strict semver 하의 frozen 계약이다: `package.json` `exports` 표면, CLI의 기계가 읽는 동작, audit event schema, config key shape이 모두 major 버전 계약의 일부이며, 문서화된 deprecation 정책과 단 하나의 in-minor 보안 예외가 함께한다. [`docs/current/api-stability.md`](docs/current/api-stability.md) 참고. 네 개의 `haechi-*` 위성은 pre-1.0으로 유지되며 core와 독립적으로 버저닝한다.
+
+현재 범위는 로컬 도입에 초점을 맞추고 있다:
 
 - `haechi init`: 로컬 키, 샘플 설정, audit 경로를 생성한다
 - `haechi protect`: OpenAI 호환 JSON payload를 검사하고 보호한다
@@ -167,12 +169,12 @@ haechi auth revoke <id>
 - **Rate limit**: identity별 분당 요청 수 → `429` (인메모리, 프로세스별).
 - Audit 이벤트는 **PII-safe** `identity`(keyed-HMAC subject/issuer, 원시 값 아님)와 resolve된 `profile`을 포함하며, `auth_denied` / `model_not_allowed` / `rate_limited` 결정에는 credentials가 포함되지 않는다. `/__haechi/health`는 인증 없이 접근 가능하다.
 
-JWT/JWKS 인증과 KMS 기반 key custody는 `haechi-*` 위성 패키지로 제공되며, 각각 core와 독립적으로 버저닝·발행된다:
+JWT/JWKS 인증과 KMS 기반 key custody는 `haechi-*` 위성 패키지로 제공되며, 각각 core와 독립적으로 버저닝·발행된다. 위성들은 pre-1.0으로 유지되며 `haechi` peer 범위를 `>=0.8.0 <2.0.0`으로 선언한다(상한이 core major를 추적하므로 core 1.0.0이 위성 설치를 깨뜨리지 않는다):
 
-- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.8) — 헤드리스 JWKS bearer 검증; 0.2.0은 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 추가 export한다.
-- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.8) — 실제 KMS 클라이언트 기반 envelope 암호화; 0.2.0은 AWS에 더해 GCP(`./gcp`), Azure(`./azure`), HashiCorp Vault Transit(`./vault`, `node:` 전용) 백엔드를 추가한다.
-- [`haechi-dashboard`](satellites/dashboard/) (0.9, 신규) — audit 로그와 hash chain 상태에 대한 zero-dependency 읽기 전용 audit 뷰어(`node:http`).
-- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.9, 신규) — 대시보드의 사람 로그인을 제공하는 대화형 OIDC 세션 브로커(authorization-code + PKCE).
+- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.2.1) — 헤드리스 JWKS bearer 검증; 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 추가 export한다.
+- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.2.1) — 실제 KMS 클라이언트 기반 envelope 암호화; AWS에 더해 GCP(`./gcp`), Azure(`./azure`), HashiCorp Vault Transit(`./vault`, `node:` 전용) 백엔드.
+- [`haechi-dashboard`](satellites/dashboard/) (0.1.2) — audit 로그와 hash chain 상태에 대한 zero-dependency 읽기 전용 audit 뷰어(`node:http`).
+- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.1.2) — 대시보드의 사람 로그인을 제공하는 대화형 OIDC 세션 브로커(authorization-code + PKCE).
 
 위성들은 기본 `node:` 전용이며(무거운 SDK는 optional peer) core를 zero-dependency로 유지한다.
 
@@ -253,7 +255,8 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 - Audit tail truncation: `audit.anchor.mode: file`을 설정하면(추가 전용/별도 미디어에서) `haechi audit-verify --anchor`가 마지막 anchor 이후 꼬리 레코드 삭제를 탐지한다. 동일한 쓰기 가능 파일시스템에서는 공격자가 두 파일을 함께 잘라낼 수 있다.
 - Key custody: `keys.provider: external`은 주입된 `cryptoProvider`를 허용한다; `assertCryptoProviderConformance`로 adapter를 검증한다. envelope 암호화 KMS adapter는 `haechi-crypto-kms` satellite(`satellites/crypto-kms/`)가 제공한다.
 - Release integrity: 배포된 tarball에는 npm provenance attestation이 포함되며, GitHub release asset에는 sigstore attestation과 `SHA256SUMS`가 추가된다(`gh attestation verify`와 `node scripts/release-checksums.mjs --check`로 검증한다).
-- 이 패키지는 개발자 프리뷰이다. 인터넷에 노출된 운영 LLM 게이트웨이로 사용하지 않는다.
+- 1.0 authProvider 플러그인 샌드박스는 서명된 플러그인을 `worker_threads` worker에서 실행한다. 이는 메모리/크래시 격리와 데이터 최소화(credential 슬라이스만 넘어가고, host가 keyed-HMAC identity를 만든다)이며 capability 샌드박스가 **아니다**: 악의적인 *서명된* 플러그인은 여전히 `fs`/`net`을 사용해 받은 credential을 유출할 수 있다. load-bearing 통제는 trust gate(Ed25519 서명 + 운영자 allowlist + 버전 pin/floor + revocation)다. 기본 배선은 dependency injection(`createRuntime(config, providers)`)으로 유지되며, 진정한 capability 강제(child-process + Node permission model)는 1.x 목표다.
+- 자체 네트워크 통제와 인증을 앞에 두지 않고 Haechi를 인터넷에 노출된 운영 LLM 게이트웨이로 사용하지 않는다.
 
 ## 현재 범위
 
@@ -278,3 +281,5 @@ Haechi는 로컬 정책 부트스트래핑을 위한 기본 지역별 Privacy Pr
 0.8.0은 `haechi-*` 에코시스템을 세운다: npm workspaces 모노레포(core는 unscoped `haechi` 유지, zero runtime dependency, 패킹 매니페스트 CI 게이트로 강제) + 첫 두 위성 — [`haechi-crypto-kms`](satellites/crypto-kms/)(실제 AWS KMS 클라이언트 기반 envelope 암호화; AWS SDK는 optional peer)와 [`haechi-auth-jwt`](satellites/auth-jwt/)(헤드리스 JWKS bearer 검증, `node:` 전용). 각각 자체 provenance + sigstore attest 워크플로로 독립 발행한다. `docs/current/release-0.8-implementation-scope.md` 참고.
 
 0.9.0은 관측성(observability) + 대화형 인증 테마이다: 두 개의 새 위성 — [`haechi-dashboard`](satellites/dashboard/)(audit 로그와 hash chain 상태에 대한 zero-dependency 읽기 전용 `node:http` audit 뷰어; anti-DNS-rebinding Host allowlist, 엄격한 CSP/Trusted Types, fail-closed loopback/remote-bind 가드 포함)와 [`haechi-auth-oidc`](satellites/auth-oidc/)(대시보드의 사람 로그인을 제공하는 대화형 OIDC 세션 브로커 — authorization-code + PKCE + 서버측 세션). 기존 위성도 additive minor를 발행한다: `haechi-auth-jwt@0.2.0`은 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 export하고, `haechi-crypto-kms@0.2.0`은 GCP/Azure/Vault 백엔드를 추가한다. core는 `0.9.0`으로 bump되며, 추가적인 `FORBIDDEN_KEYS` audit 새니타이즈 강화(현재 이벤트 출력은 바뀌지 않는 심층 방어)만 포함한다. `docs/current/release-0.9-implementation-scope.md` 참고.
+
+1.0.0은 **첫 stable 릴리스**다. strict semver 하의 frozen API 계약을 선언한다: `package.json` `exports` 표면, CLI의 기계가 읽는 동작, audit event schema(중첩 sub-schema와 `schemaVersion` 포함), config key shape이 모두 major 버전 계약의 일부이며, `tests/api-contract.test.mjs`가 이를 가드하고 문서화된 deprecation 정책(`HAECHI_DEPRECATION_*` 런타임 경고, 제거는 다음 major에서만)과 공개된 취약점에 대한 단 하나의 in-minor 보안 예외가 이를 규율한다([`docs/current/api-stability.md`](docs/current/api-stability.md) 참고). 1.0은 또한 dynamic-loading 금지를 **좁게** 해제한다 — `authProvider` 플러그인에 한해: Ed25519 서명(trust-anchor 전용 키 해석, entry-hash 바인딩, 버전 pin/floor, revocation, 서명 윈도우를 갖춘 비대칭 `node:crypto` 검증), capability-gated, `worker_threads` 격리, 완전 감사되는 플러그인 샌드박스. dependency injection(`createRuntime(config, providers)`)이 기본으로 유지된다. **정직한 잔존 위험:** worker는 메모리/크래시 격리와 데이터 최소화이며 capability 샌드박스가 아니다 — 악의적인 *서명된* 플러그인은 여전히 `fs`/`net`을 사용해 받은 credential 슬라이스를 유출할 수 있으므로 load-bearing 통제는 trust gate다; 진정한 capability 강제(child-process + Node permission model)는 1.x 목표다. 네 개의 `haechi-*` 위성(`haechi-auth-jwt@0.2.1`, `haechi-crypto-kms@0.2.1`, `haechi-dashboard@0.1.2`, `haechi-auth-oidc@0.1.2`)은 pre-1.0으로 유지되고 독립적으로 버저닝하며, `haechi` peer 범위를 `>=0.8.0 <2.0.0`으로 넓혀 core 1.0.0이 그 설치를 깨뜨리지 않게 한다. `docs/current/release-1.0-implementation-scope.md` 참고.
