@@ -1,6 +1,6 @@
 {
   "name": "haechi-auth-oidc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Interactive OIDC session broker (authorization-code + PKCE) satellite for Haechi — node: builtins only, server-side sessions, PII-safe audit.",
   "license": "Apache-2.0",
   "type": "module",

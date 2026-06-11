@@ -1224,3 +1224,31 @@ test("remote-bound dashboard with stubbed TLS gates /api but answers /healthz un
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("/api/events surfaces the PII-safe actor and the client renders an actor column", async () => {
+  const dir = await tempDir();
+  try {
+    const { auditPath } = await writeAuditFixture(dir, { count: 1 });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      // Data: the projected event carries the PII-safe identity (id / provider /
+      // subjectHash) — never a raw subject, scopes, or labels.
+      const { status, body } = await fetchJson(base, "/api/events?limit=1");
+      assert.equal(status, 200);
+      const ev = body.events[0];
+      assert.equal(ev.identity.id, "id-1");
+      assert.equal(ev.identity.provider, "jwt");
+      assert.equal(ev.identity.subjectHash, "deadbeef");
+      assert.equal(ev.identity.scopes, undefined);
+      assert.equal(ev.identity.labels, undefined);
+      // UI: the served client JS renders an "actor" column and reads identity.id.
+      const js = await (await fetch(`${base}/assets/app.js`, { headers: { host: new URL(base).host } })).text();
+      assert.match(js, /"actor"/);
+      assert.match(js, /identity\.id/);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
