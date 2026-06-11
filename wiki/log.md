@@ -2,6 +2,10 @@
 
 Append-only changelog. Format: `## [YYYY-MM-DD] operation | Title`.
 
+## [2026-06-11] design | 0.9 scope pinned (dashboard + auth-oidc + crypto-kms backends)
+
+Authored `docs/current/release-0.9-implementation-scope.md` (+ `.ko`) after a maintainer scoping interview (4 recommended choices: paired dashboard+oidc cut / zero-dep vanilla dashboard / interactive OIDC session broker / audit-viewer-only scope) and a 4-lens adversarial security review (45 findings — incorporated all material ones). Notable corrections from the review, verified against code: the dashboard projection/`/api/chain` shapes were rewritten to the **real** `buildAuditEvent` schema and `verifyAuditChain` return (`{valid,records,headHash,anchored}`; no `truncationDetected` field — derived from a `reason` that must not be surfaced); added an anti-DNS-rebinding Host-header allowlist, a token_endpoint SSRF egress guard, broker login/logout audit events + `FORBIDDEN_KEYS` extension, `aud`/`azp` ID-token profile, state↔pre-auth-cookie binding, session rotation, remote-bind TLS requirement, and `normalize*Config` fail-closed validation parity. `assertSafeProxyBind` is reused from `haechi/proxy` (no core change); `haechi-auth-jwt` bumps 0.1.1→0.2.0 for the extracted verifier; `haechi-crypto-kms@0.2.0` ships independently. Updated `[[release-roadmap]]` 0.9.0 row. Implementation deferred to PRs.
+
 ## [2026-06-10] ingest | Initial wiki seeded
 
 Created the wiki layer with 11 pages compiled from the 0.3.2 hardening cycle: architecture (protect pipeline, runtime composition), concepts (fail-closed, token vault, audit integrity, key management, streaming gap), decisions (release roadmap, identity/auth contract, packaging), and the 2026-06-10 full security review record. Sources: packages/*, docs/current/*, risk register 5.1–5.2, PR #1–#3 discussions.
