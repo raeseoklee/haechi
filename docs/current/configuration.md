@@ -304,7 +304,7 @@ Detection is regex + optional validator (no ML). Every rule is **anchored tightl
 | `secret` | PEM private key | `-----BEGIN … PRIVATE KEY-----` armor header | The header presence is the signal; prose mentioning "private key" is not matched. |
 | `injection` | prompt-injection heuristics | response-direction only, `allow` by default | See [Action strength](#action-strength); report-only. |
 
-Detection covers string values, JSON number leaves (request direction), and object keys. Base64/encoded values and URL query strings are documented exclusions (see `docs/current/threat-model.md`). On the response direction, Haechi's own transform markers and bare JSON number leaves are skipped (request direction is always full-scan).
+Detection covers string values, JSON number leaves (request direction), and object keys. Each **string leaf is NFKC-normalized before matching**, so Unicode-evasion forms (full-width digits `４２４２…`, full-width `＠`, mathematical/enclosed alphanumerics) are folded to their ASCII compatibility form and still detected. When the fold preserves UTF-16 length the exact evaded span is redacted/blocked; when it changes length (e.g. mathematical digits, ligatures) detection fails closed and the whole leaf is redacted/blocked. Base64/percent-encoded values (after decoding) and URL query strings remain documented exclusions (see `docs/current/threat-model.md`). On the response direction, Haechi's own transform markers and bare JSON number leaves are skipped (request direction is always full-scan).
 
 Actions (weakest → strongest):
 

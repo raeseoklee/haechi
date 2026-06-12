@@ -1,7 +1,7 @@
 {
   "$schema-note": "Labeled detection corpus for WS2a/WS2b (reliability-hardening-track). Each case is { text, direction?, expect: [{ type, present }], note }. `present:true` = the engine SHOULD detect this type in `text`; `present:false` = it must NOT (a hard negative). `direction` defaults to \"request\"; injection rules are response-direction only. Scored per-type by scripts/bench-detection.mjs; regression-gated against scripts/detection-baseline.json.",
   "$safety": "ALL VALUES ARE SYNTHETIC TEST FIXTURES. No real secret, key, or PII appears here. Card numbers are the public 4242.../4111... test cards; AWS uses the documented AKIAIOSFODNN7EXAMPLE; the SSN is the public misprinted-wallet 078-05-1120; the IBAN is the public ECB example DE89370400440532013000; the JWT/PEM/tokens are fabricated or public RFC/sample values. Storing real secrets/PII is forbidden by CLAUDE.md.",
-  "$baseline-legend": "WS2b closed the credential/PII coverage gaps WS2a measured: the AWS/GitHub/Google/Slack keys, JWT, and PEM headers are now true-positives, and new international-PII types (us_ssn, iban) plus E.164/US phone forms were added — each with a hard-negative case and (for us_ssn/iban) a validator-boundary case. The baseline is re-pinned to capture the improved per-type precision/recall. The gate still fails only on a REGRESSION below baseline.",
+  "$baseline-legend": "WS2b closed the credential/PII coverage gaps WS2a measured: the AWS/GitHub/Google/Slack keys, JWT, and PEM headers are now true-positives, and new international-PII types (us_ssn, iban) plus E.164/US phone forms were added — each with a hard-negative case and (for us_ssn/iban) a validator-boundary case. WS2d added Unicode-evasion POSITIVES (full-width card / KR phone / @-email / sk_ key folded by same-length NFKC; a mathematical-bold KR RRN folded by length-divergent NFKC) and HARD-NEGATIVES (a ligature-bearing sentence with no PII that must not over-fire under the length-divergent fail-closed path; an NFKC-stable ASCII control proving the common path is unchanged). The baseline is re-pinned to capture the improved per-type precision/recall (recall held at 1.0). The gate still fails only on a REGRESSION below baseline.",
   "cases": [
     {
       "text": "Please contact me at minji.kim@example.com about the invoice.",
@@ -251,6 +251,41 @@
       "text": "the account id 12345678901 and ticket 4155552671 are bare digit runs",
       "expect": [{ "type": "phone", "present": false }],
       "note": "HARD NEGATIVE (e164/us-phone): a separator-less, plus-less digit run must NOT match — E.164 requires a leading +, US national requires separators, and the kr-phone rule already guards bare runs. An id/timestamp is never a phone."
+    },
+    {
+      "text": "WS2d evasion: full-width card on file ４２４２４２４２４２４２４２４２ expires soon",
+      "expect": [{ "type": "card", "present": true }],
+      "note": "WS2d EVASION POSITIVE (Case 2, same-length NFKC): the public 4242 Visa test card written in FULL-WIDTH digits (U+FF10..). NFKC folds it to ASCII so the Luhn card rule matches; same UTF-16 length means the {start,end} offsets stay valid on the original, so the exact full-width span is redacted/blocked. SYNTHETIC."
+    },
+    {
+      "text": "WS2d evasion: synthetic resident reg number 𝟗𝟎𝟎𝟏𝟎𝟏-𝟏𝟐𝟑𝟒𝟓𝟔𝟖 on the intake form",
+      "expect": [{ "type": "kr_rrn", "present": true }],
+      "note": "WS2d EVASION POSITIVE (Case 3, length-divergent NFKC): a checksum-valid synthetic KR RRN written in MATHEMATICAL BOLD digits (U+1D7CE.., surrogate pairs). NFKC folds to ASCII (the RRN checksum passes) but the normalized length differs, so offsets cannot map back to the original — detection FAILS CLOSED to a single whole-leaf detection and the transform blocks/redacts the entire leaf. SYNTHETIC."
+    },
+    {
+      "text": "WS2d evasion: mobile ０１０-１２３４-５６７８ call anytime",
+      "expect": [{ "type": "phone", "present": true }],
+      "note": "WS2d EVASION POSITIVE (Case 2, same-length NFKC): a separated KR mobile written in FULL-WIDTH digits. NFKC folds it to 010-1234-5678 so the kr-phone rule matches; exact-span redaction on the original full-width run. SYNTHETIC."
+    },
+    {
+      "text": "WS2d evasion: contact me at minji.kim＠example.com about the invoice",
+      "expect": [{ "type": "email", "present": true }],
+      "note": "WS2d EVASION POSITIVE (Case 2, same-length NFKC): an email whose @ is the FULLWIDTH COMMERCIAL AT (U+FF20). NFKC folds the full-width at-sign to ASCII @ so the email rule matches; exact-span redaction. SYNTHETIC."
+    },
+    {
+      "text": "WS2d evasion: api key sk_１２３４５６７８９０abcdef１２３４５６７８９０abcdef rotated last week",
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "WS2d EVASION POSITIVE (Case 2, same-length NFKC): an sk_ API key whose digit run is FULL-WIDTH (a confusable secret form). NFKC folds the body to ASCII so the openai-like-key rule matches; exact-span redaction. SYNTHETIC."
+    },
+    {
+      "text": "the oﬃce sent a ﬁnal lunch memo to the staﬀ about the meeting",
+      "expect": [{ "type": "email", "present": false }, { "type": "phone", "present": false }, { "type": "kr_rrn", "present": false }, { "type": "card", "present": false }, { "type": "api_key", "present": false }, { "type": "secret", "present": false }],
+      "note": "WS2d HARD NEGATIVE (Case 3, length-divergent NFKC, NO PII): benign prose with the ﬃ/ﬁ/ﬀ ligatures (U+FB00..) that NFKC EXPANDS (length grows). The fail-closed whole-leaf path runs the rules over the normalized text and finds nothing, so an ordinary ligature-bearing sentence must NOT over-fire."
+    },
+    {
+      "text": "WS2d control: ascii email plain.user@example.org and card 4111 1111 1111 1111 unchanged",
+      "expect": [{ "type": "email", "present": true }, { "type": "card", "present": true }],
+      "note": "WS2d CONTROL / no-regression (Case 1, NFKC-stable): a pure-ASCII string where normalize() is a no-op, so detection runs byte-identical to pre-WS2d. Proves the ~99% common path is unchanged. SYNTHETIC (4111 public test card)."
     }
   ]
 }

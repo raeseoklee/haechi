@@ -46,6 +46,7 @@ Haechi가 보호하려는 주요 자산은 다음과 같습니다.
 | 행 걸린 upstream | proxy 연결 고갈 | `limits.upstreamTimeoutMs` 기본 120s, 초과 시 504 fail |
 | signing/encryption 키 혼용 | key separation 위반 | policy bundle 서명 키를 domain-separated 파생 키로 분리 |
 | JSON number/object key 은닉 | 카드번호 등 비문자열 leaf 미탐지 | number leaf와 object key도 detection/transform 대상 |
+| 모든 정규식 규칙을 우회하는 유니코드 난독화 | card/RRN/phone/email/secret을 시각·의미상 동등한 비ASCII 유니코드 형태(전각 숫자 `４２４２…`, 전각 `＠`, 수학·원문자 영숫자)로 보내 모든 탐지 규칙을 무력화 | **매칭 전 각 string leaf의 NFKC 정규화**(WS2d)입니다. 정규화가 무변환인 경우(leaf의 약 99%) 탐지는 이전과 바이트 단위로 동일합니다. 접힘이 **위치 안정적**인 경우(모든 코드포인트가 같은 UTF-16 길이로 접히고 코드포인트별 접힘이 전체 정규화를 그대로 재구성) 정규화 사본에서 탐지하고 원본의 정확한 구간을 redact/block하며, 기록되는 값은 접힌 형태가 아니라 원본 바이트입니다. 그 외 — 길이가 달라지거나(수학 숫자·합자) 총 길이는 같지만 내부 offset을 이동시키는 수축+확장 보상 — 의 경우 offset을 원본에 매핑할 수 없으므로 탐지가 **fail closed**되어 leaf 전체를 덮는 단일 탐지로 처리합니다(leaf 전체 redact/block — 우회 시도를 과도 redact하는 것이 안전한 실패입니다). `String.prototype.normalize` 빌트인을 사용하므로 새 의존성은 없습니다. **수용된 잔여:** base64/percent-encoded 페이로드는 여전히 디코딩 후 재검사하지 않습니다(§4 참조) |
 | 인증 없는 멀티 클라이언트 접근 | 로컬 프로세스가 upstream / token round-trip 경로를 무단 사용 | 선택적 bearer auth (`auth.provider: bearer`); 없거나 잘못된 경우 → 바디 읽기 전 401; identity별 rate limit 및 model allowlist |
 | Audit tail truncation | 꼬리 audit 레코드의 무음 삭제 | 추가 전용/별도 미디어의 `audit.anchor` head-hash anchoring으로 마지막 anchor까지의 절단 탐지 (0.7) |
 | Local dev key in production | 소프트웨어 키의 운영 custody 오용 | `assertCryptoProviderConformance`를 통한 외부 `cryptoProvider` 주입; reference KMS adapter (envelope 암호화) |
@@ -86,7 +87,7 @@ Haechi는 다음을 보장하지 않습니다.
 - 법적 컴플라이언스 인증
 - 모델 hallucination, prompt injection 완전 방어
 - 외부 MCP server의 OAuth/resource binding 검증
-- base64/URL-encoded 값, 유니코드 난독화 값의 디코딩 후 검사
+- base64/percent-encoded 값의 **디코딩 후** 검사 — Haechi는 NFKC 정규화 텍스트에서 매칭하지만(§3의 유니코드 난독화 행 참조) base64/URL 디코딩 후 재검사는 하지 **않습니다**. 전송 전 base64·percent로 인코딩된 값은 검사되지 않습니다. (WS2d는 디코딩-후-재검사 패스를 보류했습니다. 상시 디코딩은 오탐이 많고, recall-safe한 opt-in을 범위 내에서 precision-neutral하게 만들 수 없어 문서화된 제외로 남깁니다.)
 - URL query string 내 민감값 검사 (JSON body만 검사)
 - 마지막 anchor 이후의 audit tail truncation — `audit.anchor`(0.7)는 anchor가 추가 전용/별도 미디어에 있을 때 마지막 anchor까지의 레코드 삭제를 탐지합니다. 마지막 anchor 이후 기록된 레코드와 동일 파일시스템 anchor는 대상에서 제외됩니다
 - JSON-RPC batch 메시지 처리 (MCP stdio filter는 batch를 fail-closed로 거부)

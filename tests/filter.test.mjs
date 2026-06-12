@@ -265,6 +265,122 @@ test("WS2c kr-phone boundary: a UUID substring is not mis-detected as a phone, r
   assert.deepEqual(phonePaths, ["intl", "noSep", "sep"], "real KR mobile / +82 numbers still detected");
 });
 
+// ---------------------------------------------------------------------------
+// WS2d — Unicode evasion via NFKC normalization. Helpers build the evaded forms
+// from ASCII so the test source stays unambiguous (no literal full-width chars).
+// All values are SYNTHETIC.
+// ---------------------------------------------------------------------------
+const toFullWidthDigits = (s) => [...s].map((c) => (/[0-9]/.test(c) ? String.fromCharCode(0xFF10 + Number(c)) : c)).join("");
+const toMathBoldDigits = (s) => [...s].map((c) => (/[0-9]/.test(c) ? String.fromCodePoint(0x1D7CE + Number(c)) : c)).join("");
+const FULLWIDTH_AT = String.fromCharCode(0xFF20);
+
+test("WS2d: full-width-digit card/phone/key and full-width-@ email are detected (same-length NFKC, Case 2)", async () => {
+  const filter = createDefaultFilterEngine();
+  // Full-width digits fold 1:1 in length, so detection runs on the normalized
+  // copy and the offsets stay valid on the original.
+  const fwCard = toFullWidthDigits("4242424242424242");
+  const fwPhone = `${toFullWidthDigits("010")}-${toFullWidthDigits("1234")}-${toFullWidthDigits("5678")}`;
+  const fwKey = `sk_${toFullWidthDigits("1234567890abcdef1234567890abcdef")}`;
+  const fwEmail = `minji.kim${FULLWIDTH_AT}example.com`;
+
+  assert.ok((await typesFor(`card on file ${fwCard} expires`)).has("card"), "full-width card folds and is detected");
+  assert.ok((await typesFor(`mobile ${fwPhone} call`)).has("phone"), "full-width KR phone folds and is detected");
+  assert.ok((await typesFor(`api key ${fwKey} rotated`)).has("api_key"), "full-width-body sk_ key folds and is detected");
+  assert.ok((await typesFor(`contact ${fwEmail} now`)).has("email"), "full-width-@ email folds and is detected");
+});
+
+test("WS2d: a same-length evaded match records the ORIGINAL span (offsets valid on the original; never the normalized form)", async () => {
+  const filter = createDefaultFilterEngine();
+  const fwCard = toFullWidthDigits("4242424242424242");
+  const text = `card on file ${fwCard} expires`;
+  const detections = await filter.detect({ entries: collectStringEntries({ content: text }), context: { direction: "request" } });
+  const card = detections.find((d) => d.type === "card");
+  assert.ok(card, "card detected");
+  // The recorded value is the ORIGINAL full-width span (so tokenize/AAD/audit see
+  // the real bytes), and slicing the ORIGINAL string by {start,end} reproduces it.
+  assert.equal(card.value, fwCard, "recorded value is the original full-width span, not the ASCII fold");
+  assert.equal(text.slice(card.start, card.end), card.value, "offsets index the ORIGINAL string correctly");
+});
+
+test("WS2d: a length-divergent evaded value (mathematical-bold KR RRN) fails closed to a whole-leaf detection (Case 3)", async () => {
+  const filter = createDefaultFilterEngine();
+  // Mathematical bold digits are surrogate pairs: NFKC shortens the UTF-16
+  // length, so offsets cannot map back — detection must fail closed to a single
+  // detection spanning the WHOLE leaf.
+  const mathRrn = `${toMathBoldDigits("900101")}-${toMathBoldDigits("1234568")}`;
+  const text = `resident reg number ${mathRrn} on the form`;
+  const detections = await filter.detect({ entries: collectStringEntries({ content: text }), context: { direction: "request" } });
+  const rrn = detections.find((d) => d.type === "kr_rrn");
+  assert.ok(rrn, "length-divergent RRN is detected (folded checksum passes)");
+  assert.equal(rrn.start, 0, "whole-leaf detection starts at 0");
+  assert.equal(rrn.end, text.length, "whole-leaf detection covers the entire leaf");
+  assert.equal(rrn.value, text, "whole-leaf detection records the whole original leaf");
+});
+
+test("WS2d: a length-divergent string with NO PII (ligatures) does NOT over-fire", async () => {
+  // The fail-closed whole-leaf path runs the rules over the normalized text and
+  // finds nothing — an ordinary ligature-bearing sentence (NFKC expands it) must
+  // not be flagged. ﬃ/ﬁ/ﬀ are the ffi/fi/ff ligatures.
+  const ligatures = `the o${"ﬃ"}ce sent a ${"ﬁ"}nal lunch memo`;
+  assert.notEqual(ligatures, ligatures.normalize("NFKC"), "fixture must actually fold (length-divergent)");
+  const types = await typesFor(ligatures);
+  for (const t of ["email", "phone", "kr_rrn", "card", "api_key", "secret"]) {
+    assert.ok(!types.has(t), `ligature prose must not fire ${t}`);
+  }
+});
+
+test("WS2d: an NFKC-stable ASCII payload is byte-identical in behavior (Case 1, no regression)", async () => {
+  const filter = createDefaultFilterEngine();
+  const text = "email plain.user@example.org and card 4111 1111 1111 1111";
+  assert.equal(text, text.normalize("NFKC"), "fixture must be NFKC-stable");
+  const detections = await filter.detect({ entries: collectStringEntries({ content: text }), context: { direction: "request" } });
+  // Same detections as the pre-WS2d path: exact spans, exact recorded values.
+  const email = detections.find((d) => d.type === "email");
+  const card = detections.find((d) => d.type === "card");
+  assert.equal(email.value, "plain.user@example.org");
+  assert.equal(text.slice(email.start, email.end), email.value);
+  assert.equal(card.value, "4111 1111 1111 1111");
+  assert.equal(text.slice(card.start, card.end), card.value);
+});
+
+test("WS2d: the response-direction marker skip survives normalization (markers are NFKC-stable)", async () => {
+  const filter = createDefaultFilterEngine();
+  // A tokenized round-trip echoed by the model is still skipped on the response —
+  // markers are ASCII / NFKC-stable, so the Case-1 path runs exactly as before.
+  const detections = await filter.detect({
+    entries: collectStringEntries({ tokenized: "please email [TOKEN:tok_email_a6d376389bb21964] today" }),
+    context: { direction: "response" }
+  });
+  assert.deepEqual(detections, []);
+});
+
+test("WS2d: a compensating contraction+expansion (equal total length, shifted offsets) never redacts the wrong bytes", async () => {
+  const filter = createDefaultFilterEngine();
+  // The crux bug a bare `normalized.length === value.length` check misses: a
+  // length-CONTRACTING codepoint before the PII (U+10781 → "ː", 2 UTF-16 units →
+  // 1) compensated by a length-EXPANDING one after it (U+0132 "Ĳ" → "IJ", 1 → 2)
+  // keeps the TOTAL length equal while shifting every interior offset. The old
+  // gate routed it to the exact-span path and sliced the wrong bytes (dropping a
+  // trailing digit, leaking it). The sound per-codepoint check routes it to the
+  // fail-closed whole-leaf path instead.
+  const contractor = String.fromCodePoint(0x10781); // folds 2 units -> 1
+  const expander = "Ĳ";                          // folds 1 unit -> 2
+  const text = `${contractor} 010-1234-5678 ${expander}`;
+  assert.equal(text.length, text.normalize("NFKC").length, "fixture must keep equal total length (the trap)");
+  assert.notEqual(text, text.normalize("NFKC"), "fixture must actually fold");
+  const detections = await filter.detect({ entries: collectStringEntries({ content: text }), context: { direction: "request" } });
+  // Offset-integrity invariant for EVERY detection: slicing the ORIGINAL by
+  // {start,end} reproduces the recorded value — i.e. the transform redacts the
+  // right bytes, never an off-by-N slice.
+  for (const d of detections) {
+    assert.equal(text.slice(d.start, d.end), d.value, `detection ${d.type} offsets must index the original correctly`);
+  }
+  const phone = detections.find((d) => d.type === "phone");
+  assert.ok(phone, "the phone is still detected (fail-closed whole-leaf)");
+  assert.equal(phone.start, 0, "shifted fold fails closed to a whole-leaf detection");
+  assert.equal(phone.end, text.length, "whole-leaf detection covers the entire leaf");
+});
+
 test("custom filter rejects unsafe regex shapes", () => {
   assert.throws(
     () => createDefaultFilterEngine({
