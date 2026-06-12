@@ -48,8 +48,8 @@ jobs:
           TARBALL=$(npm pack -w haechi-auth-jwt --silent)
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           node scripts/release-checksums.mjs "$TARBALL" | tee SHA256SUMS
-      # actions/attest-build-provenance v2.4.0
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+      # actions/attest-build-provenance v4.1.0
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
         with:
           subject-path: ${{ env.TARBALL }}
       - run: npm publish -w haechi-auth-jwt --provenance --access public
