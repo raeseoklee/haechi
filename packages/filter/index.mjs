@@ -270,8 +270,62 @@ export function detectEntry(entry, rules, context = {}) {
   // marker-shaped string is NOT Haechi output (Haechi hasn't transformed it yet),
   // so it is scanned normally — otherwise an attacker could wrap a real secret in
   // a fake `[TOKEN:…]` to evade request-side detection.
+  // Markers are pure ASCII and NFKC-stable, so their spans are computed on the
+  // ORIGINAL value exactly as before — they line up with the same-length
+  // normalized scan (Case 2 below) and are irrelevant to the whole-leaf scan
+  // (Case 3).
   const markerSpans = context?.direction === "response" ? haechiMarkerSpans(entry.value) : [];
 
+  // WS2d — Unicode evasion via NFKC normalization. A client can defeat every
+  // regex rule by sending PII/secrets in a Unicode form that folds to ASCII
+  // (full-width digits `４２４２…`, full-width `＠`, mathematical/enclosed
+  // alphanumerics). NFKC normalization maps those to their compatibility ASCII
+  // form so the rules match. The crux is OFFSET INTEGRITY: detections carry
+  // {start,end} into entry.value, but the transform slices the ORIGINAL string
+  // (packages/core transformString). Three cases keep offsets valid:
+  const value = entry.value;
+  const normalized = value.normalize("NFKC");
+  if (normalized === value) {
+    // Case 1 (~99%): nothing folded. Detect on the original exactly as before —
+    // byte-identical behavior, zero regression.
+    return removeOverlaps(scanForDetections(value, rules, context, markerSpans, entry, value));
+  }
+  if (isPositionStableNfkc(value, normalized)) {
+    // Case 2: every codepoint folded to the SAME UTF-16 length and the per-
+    // codepoint folds reconstruct the whole normalization, so each original
+    // character occupies the SAME offsets in `normalized` as in `value` (e.g.
+    // full-width→ASCII digits/letters). A match's {start,end} on `normalized` are
+    // therefore valid on the ORIGINAL value — exact-span redaction of the evaded
+    // value, with the recorded `value` taken from the original slice so
+    // tokenize/AAD/audit see the real bytes. A bare `normalized.length ===
+    // value.length` check is UNSOUND: a length-contracting codepoint before the
+    // PII compensated by a length-expanding one after it keeps the total length
+    // equal yet shifts every interior offset (redacting the wrong bytes), so such
+    // inputs must fall through to the Case 3 whole-leaf path. Validators still run
+    // on the normalized match text (Luhn/RRN need ASCII digits).
+    return removeOverlaps(scanForDetections(normalized, rules, context, markerSpans, entry, value));
+  }
+  // Case 3: the fold is NOT position-stable (a length-changing decomposition, or a
+  // compensating contraction+expansion that shifts interior offsets). Offsets on
+  // the normalized copy do NOT map back to the original, so we CANNOT do exact-span
+  // redaction.
+  // FAIL CLOSED: emit ONE detection per matched type covering the WHOLE leaf so
+  // the transform redacts/blocks the entire leaf. Over-redacting an evasion
+  // attempt is the safe failure. removeOverlaps is intentionally skipped — every
+  // detection spans the whole leaf so they all "overlap"; the transform collapses
+  // them to a single whole-leaf replacement via its cursor, and any `block` among
+  // them blocks the payload, while preserving per-type detection reporting.
+  return wholeLeafDetections(normalized, rules, context, entry, value);
+}
+
+// Run every applicable rule over `scanText` (the original value, or its
+// same-length NFKC normalization). Offsets index `scanText`, which is positionally
+// 1:1 with `originalValue` (Case 1: identical; Case 2: same UTF-16 length), so the
+// {start,end} are valid on `originalValue`. The recorded `value` is the ORIGINAL
+// slice (never the normalized form). Marker spans (response-only) are computed on
+// the original and align under both cases.
+function scanForDetections(scanText, rules, context, markerSpans, entry, originalValue) {
+  const detections = [];
   for (const rule of rules) {
     // Direction-scoped rules (e.g. injection heuristics) only run on the
     // matching traffic direction; rules without a direction run everywhere.
@@ -279,13 +333,13 @@ export function detectEntry(entry, rules, context = {}) {
       continue;
     }
     const regex = new RegExp(rule.pattern, rule.flags.includes("g") ? rule.flags : `${rule.flags}g`);
-    for (const match of entry.value.matchAll(regex)) {
-      const value = match[0];
-      if (rule.validate && !rule.validate(value)) {
+    for (const match of scanText.matchAll(regex)) {
+      const matchText = match[0];
+      if (rule.validate && !rule.validate(matchText)) {
         continue;
       }
       const start = match.index;
-      const end = match.index + value.length;
+      const end = match.index + matchText.length;
       if (overlapsAny(start, end, markerSpans)) {
         continue;
       }
@@ -298,12 +352,73 @@ export function detectEntry(entry, rules, context = {}) {
         start,
         end,
         confidence: rule.confidence,
-        value
+        value: originalValue.slice(start, end)
       });
     }
   }
+  return detections;
+}
 
-  return removeOverlaps(detections);
+// Case 3 fail-closed scan: discover which types the NFKC-normalized text matches,
+// then emit one whole-leaf detection per distinct type (start:0, end:value.length,
+// value: the whole original leaf). The response-direction marker skip does NOT
+// apply here: a length-divergent leaf cannot BE a Haechi marker (markers are ASCII
+// and NFKC-stable), so an evasion attempt can never masquerade as one.
+function wholeLeafDetections(normalized, rules, context, entry, originalValue) {
+  const seenTypes = new Set();
+  const detections = [];
+  for (const rule of rules) {
+    if (rule.direction && rule.direction !== context?.direction) {
+      continue;
+    }
+    if (seenTypes.has(rule.type)) {
+      continue;
+    }
+    const regex = new RegExp(rule.pattern, rule.flags.includes("g") ? rule.flags : `${rule.flags}g`);
+    let matched = false;
+    for (const match of normalized.matchAll(regex)) {
+      if (!rule.validate || rule.validate(match[0])) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      continue;
+    }
+    seenTypes.add(rule.type);
+    detections.push({
+      type: rule.type,
+      ruleId: rule.id,
+      path: entry.path,
+      pathText: entry.pathText,
+      kind: entry.kind ?? "value",
+      start: 0,
+      end: originalValue.length,
+      confidence: rule.confidence,
+      value: originalValue
+    });
+  }
+  return detections;
+}
+
+// Sound precondition for Case 2: a match's {start,end} on the NFKC-normalized
+// text map 1:1 onto the ORIGINAL value. True only when EVERY codepoint folds to
+// the same number of UTF-16 units (so no interior offset shifts) AND the per-
+// codepoint folds concatenate to the whole normalization (so no cross-boundary
+// composition moved content). The bare `normalized.length === value.length` check
+// is unsound — a contraction before the PII compensated by an expansion after it
+// keeps the total length equal while shifting every interior offset, redacting the
+// wrong bytes. Runs only on a leaf that actually folded (normalized !== value).
+function isPositionStableNfkc(value, normalized) {
+  let rebuilt = "";
+  for (const ch of value) {
+    const folded = ch.normalize("NFKC");
+    if (folded.length !== ch.length) {
+      return false;
+    }
+    rebuilt += folded;
+  }
+  return rebuilt === normalized;
 }
 
 // Spans of Haechi's own transform markers in a string, so detection can skip

@@ -304,7 +304,7 @@ const runtime = createRuntime(config, { rateLimiter });
 | `secret` | PEM private key | `-----BEGIN … PRIVATE KEY-----` armor 헤더 | 헤더 존재가 신호이며, "private key"를 언급한 산문은 매칭하지 않습니다. |
 | `injection` | 프롬프트 인젝션 휴리스틱 | 응답 방향 전용, 기본 `allow` | [Action strength](#action-strength) 참고; report-only. |
 
-탐지는 문자열 값, JSON number leaf(요청 방향), object key를 대상으로 합니다. Base64/인코딩 값과 URL query 문자열은 문서화된 제외 항목입니다(`docs/current/threat-model.md` 참고). 응답 방향에서는 Haechi 자체 transform marker와 bare JSON number leaf를 건너뜁니다(요청 방향은 항상 전체 스캔).
+탐지는 문자열 값, JSON number leaf(요청 방향), object key를 대상으로 합니다. 각 **string leaf는 매칭 전 NFKC 정규화**되므로, 유니코드 난독화 형태(전각 숫자 `４２４２…`, 전각 `＠`, 수학·원문자 영숫자)도 ASCII 호환 형태로 접혀 탐지됩니다. 접힘이 UTF-16 길이를 보존하면 우회된 정확한 구간을 redact/block하고, 길이가 달라지면(예: 수학 숫자·합자) 탐지가 fail closed되어 leaf 전체를 redact/block합니다. base64/percent-encoded 값(디코딩 후)과 URL query 문자열은 문서화된 제외 항목으로 남습니다(`docs/current/threat-model.md` 참고). 응답 방향에서는 Haechi 자체 transform marker와 bare JSON number leaf를 건너뜁니다(요청 방향은 항상 전체 스캔).
 
 Action(약한 것 → 강한 것 순):
 
