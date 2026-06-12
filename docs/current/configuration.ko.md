@@ -1,7 +1,6 @@
 # Haechi 설정 레퍼런스
 
-- 문서 상태: Living document
-- 기준 버전: 0.6.0
+- 문서 상태: Living document(core 1.1.x 추적)
 
 `haechi init`은 `haechi.config.json`을 생성하며, 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에 있습니다. 모든 커맨드는 `--config <path>`로 설정 파일을 읽습니다(기본값: `haechi.config.json`). 설정은 **fail-closed 방식으로 검증**됩니다. 알 수 없는 provider, 범위를 벗어난 숫자, 잘못된 형식의 값은 자동으로 무시되지 않고 로드 시점에 오류를 발생시킵니다. `haechi config`는 이 레퍼런스를 출력하며, `haechi status`는 특정 설정 파일의 *실제 적용* 상태를 출력합니다.
 
@@ -14,7 +13,7 @@
   "proxy": { "host": "127.0.0.1", "port": 11016 },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
-  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000 },
+  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256 },
   "policy": { "mode": "dry-run", "presets": ["korean-pii", "secrets-only", "llm-redact"], "defaultAction": "redact", "actions": { "card": "block" } },
   "filters": { "customRules": [] },
   "keys": { "provider": "local", "keyFile": ".haechi/dev.keys.json" },
@@ -74,6 +73,7 @@ upstream JSON 응답을 검사합니다(기본적으로 꺼져 있습니다 — 
 |---|---|---|---|
 | `limits.maxRequestBytes` | 양의 정수 | `1048576` | 요청 바디 크기 상한입니다. 초과 시 `413`을 반환합니다. 바디를 전부 버퍼링하지 않고 증분 방식으로 적용됩니다. |
 | `limits.upstreamTimeoutMs` | 양의 정수 | `120000` | upstream 요청 타임아웃입니다. 만료 시 `504 haechi_upstream_timeout`을 반환합니다. 연결 실패 시에는 `502 haechi_upstream_unreachable`을 반환합니다. |
+| `limits.maxNestingDepth` | 양의 정수 | `256` | 탐지 시 walk하는 JSON 최대 중첩 깊이입니다. 이보다 깊게 중첩된 바디는 `413 haechi_request_too_deeply_nested`로 거부되어(upstream 이전, fail-closed), 재귀적 payload walk를 스택 오버플로로부터 보호합니다. 컨테이너 하강을 제한하며, 한도에 있는 leaf는 여전히 검사됩니다. (별도로, 비UTF-8 요청 바디는 fail-closed로 거부됩니다: `400 haechi_request_body_not_utf8`.) |
 
 ## `policy`
 
@@ -246,7 +246,7 @@ proxy는 CLI 플래그를 명시적으로 전달하지 않으면 loopback이 아
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 ```
 
-**proxy는 아직 클라이언트 인증을 제공하지 않습니다**(0.6 계획). 포트에 접근할 수 있는 누구든 upstream과 token round-trip 경로를 사용할 수 있습니다. `--allow-remote-bind`는 명시적인 네트워크 통제 하에서만 사용해야 합니다 — 컨테이너 안에서 `0.0.0.0`으로 바인드하고 host 포트 매핑을 제한하거나(`-p 127.0.0.1:11016:11016`), 방화벽/VPN/인증 reverse proxy 뒤에 두어야 합니다.
+**proxy는 bearer 클라이언트 인증을 제공합니다**(`auth.provider: bearer`, 0.6에서 출시). 해시 기반 token 저장소, identity별 policy profile, model allowlist, identity별 rate limit을 함께 제공합니다([`auth`](#auth)와 [Named profiles](#named-profiles) 참고). 기본값 `auth.provider: none`은 proxy를 인증 없이 둡니다 — `none`에서는 포트에 접근할 수 있는 누구든 upstream과 token round-trip 경로를 사용할 수 있습니다. 내장 rate limit은 단일 프로세스(인메모리, 프로세스별)이므로, 여러 replica는 공유 limiter를 앞에 두어야 합니다. `--allow-remote-bind`는 어느 경우에도 명시적인 네트워크 통제 하에서만 사용해야 합니다 — 컨테이너 안에서 `0.0.0.0`으로 바인드하고 host 포트 매핑을 제한하거나(`-p 127.0.0.1:11016:11016`), 방화벽/VPN/인증 reverse proxy 뒤에 두어야 합니다.
 
 ## 검증 요약
 

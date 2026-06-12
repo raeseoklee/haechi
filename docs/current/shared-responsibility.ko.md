@@ -1,8 +1,7 @@
 # Haechi Shared Responsibility
 
-- 문서 상태: Draft 0.1
+- 문서 상태: Living document (core 1.1.x 추적)
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.2
 
 ## 1. 책임 매트릭스
 
@@ -15,7 +14,7 @@
 | TokenVault | 암호화 저장, reveal 기본 차단, purge | reveal 승인 절차와 DSAR/retention 운영을 담당합니다 |
 | Audit | 평문 제거, hash chain | append-only storage, backup, 보존 기간, 외부 서명을 담당합니다 |
 | Key custody | local dev key, external crypto provider 계약 | KMS/HSM/Vault adapter 구현, rotation, access review를 담당합니다 |
-| Plugin | manifest validation, dynamic runtime 차단 | plugin code review를 수행하고, sandbox가 제공되기 전에는 실행하지 않습니다 |
+| Plugin | manifest validation; 서명 + 샌드박스된 `authProvider` 플러그인에 한해 동적 로딩 좁게 허용(worker-isolated 1.0 / process-isolated 1.1) | trust anchor/pin/revocation을 관리하고, `process-isolated`를 우선하며, plugin code review를 수행합니다 |
 | MCP | JSON-RPC/method allowlist | MCP server auth, resource consent, env secret allowlist를 담당합니다 |
 | Privacy profile | KR/EU/US baseline action | 법률 검토, data residency, cross-border transfer 증빙을 담당합니다 |
 
@@ -36,3 +35,13 @@
 5. audit sink를 append-only 저장소나 외부 서명 저장소로 보내세요.
 6. TokenVault의 reveal 승인, 보존, 삭제 절차를 문서화하세요.
 7. privacy profile은 법률 검토 결과로 보정하세요.
+8. 복제본이 2개 이상이면 §4의 공유 인프라(front-door rate limit, 복제본별 audit 경로, 공유 token vault)를 제공하세요.
+
+## 4. 수평 확장 / 다중 복제
+
+Haechi의 상태 보유 통제는 설계상 단일 프로세스입니다. 로드밸런서 뒤에서 복제본을 2개 이상 실행하면, 운영자가 공유 인프라를 제공하지 않는 한 이들이 **무음으로 약화**됩니다.
+
+- **Rate limit**은 프로세스별·인메모리이므로 전체 처리량이 복제본 수만큼 배가됩니다. identity별 한도를 공유 front door에서 강제하거나, 공유 저장소 기반 `rateLimiter`를 주입하세요.
+- **Audit hash chain + anchor**는 단일 작성자입니다. 각 복제본에 **고유한** `audit.path`(및 anchor 경로)를 주세요. 하나의 audit 파일을 복제본 간에 공유하면 체인이 분기되어 검증 불가 상태가 됩니다.
+- **TokenVault와 auth store**는 whole-file 로컬 저장소입니다 — 단일 호스트에서는 올바르지만 공유 다중 작성자 저장소는 아닙니다. 다중 복제 토큰화에는 공유 `tokenVault`를 주입하세요.
+- 파일 락은 `O_EXCL` + atomic rename에 의존하며 NFS/공유 파일시스템에서는 보장되지 않습니다 — 이 저장소들은 로컬 디스크에 두세요.

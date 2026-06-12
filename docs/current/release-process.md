@@ -1,8 +1,7 @@
 # Haechi Release Process
 
-- Status: Draft 0.1
+- Status: Living document (tracks core 1.1.x)
 - Date: 2026-06-10
-- Target version: 0.3.2
 
 ## 1. Local Release Verification
 

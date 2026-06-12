@@ -56,6 +56,7 @@ export function defaultConfig() {
     },
     limits: {
       maxRequestBytes: 1048576,
+      maxNestingDepth: 256,
       upstreamTimeoutMs: 120000
     },
     policy: {
@@ -206,7 +207,10 @@ export function createRuntime(config, providers = {}) {
       policyEngine,
       cryptoProvider,
       tokenVault,
-      auditSink
+      auditSink,
+      // Bound recursion depth so a deeply-nested payload fails closed (4xx)
+      // rather than overflowing the stack (uncaught 500).
+      limits: { maxNestingDepth: normalized.limits.maxNestingDepth }
     })
   };
 }
@@ -361,6 +365,9 @@ export function normalizeConfig(config) {
   }
   if (typeof merged.limits.maxRequestBytes !== "number" || merged.limits.maxRequestBytes < 1) {
     throw new Error("limits.maxRequestBytes must be a positive number");
+  }
+  if (!Number.isInteger(merged.limits.maxNestingDepth) || merged.limits.maxNestingDepth < 1) {
+    throw new Error("limits.maxNestingDepth must be a positive integer");
   }
   if (typeof merged.limits.upstreamTimeoutMs !== "number" || merged.limits.upstreamTimeoutMs < 1) {
     throw new Error("limits.upstreamTimeoutMs must be a positive number");

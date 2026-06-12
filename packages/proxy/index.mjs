@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
+import { isUtf8 } from "node:buffer";
 import { inspectResponseStream } from "../stream-filter/index.mjs";
 
 export const DEFAULT_PROXY_PORT = 11016;
@@ -569,9 +570,23 @@ function readBody(request, { maxBytes }) {
       chunks.push(chunk);
     });
     request.on("end", () => {
-      if (!rejected) {
-        resolve(Buffer.concat(chunks).toString("utf8"));
+      if (rejected) {
+        return;
       }
+      const raw = Buffer.concat(chunks);
+      // Fail closed on a non-UTF-8 body: Buffer.toString("utf8") would otherwise
+      // replace invalid bytes with U+FFFD BEFORE detection runs, so a secret/PII
+      // could be smuggled past the regex rules via invalid encoding. Reject with
+      // a clear 4xx instead of lossily decoding.
+      if (raw.byteLength > 0 && !isUtf8(raw)) {
+        reject(proxyError({
+          statusCode: 400,
+          errorCode: "haechi_request_body_not_utf8",
+          message: "Request body is not valid UTF-8"
+        }));
+        return;
+      }
+      resolve(raw.toString("utf8"));
     });
     request.on("error", (error) => {
       if (!rejected) {

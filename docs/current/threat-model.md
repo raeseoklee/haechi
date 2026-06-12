@@ -1,8 +1,7 @@
 # Haechi Threat Model
 
-- Status: Draft 0.1
+- Status: Living document (tracks core 1.1.x)
 - Date: 2026-06-10
-- Target version: 1.0.0
 
 ## 1. Assets Under Protection
 

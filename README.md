@@ -230,7 +230,7 @@ The proxy refuses non-loopback hosts unless the CLI flag is given explicitly —
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 ```
 
-**The proxy has no client authentication yet** (planned for 0.6): anyone who can reach the port can use your upstream and the token round-trip path. Use `--allow-remote-bind` only behind explicit network controls:
+**The proxy ships bearer client authentication** (`auth.provider: bearer`, shipped in 0.6): a hashed token store, per-identity policy profiles, a model allowlist, and a per-identity rate limit (see [Authentication & Per-Client Controls](#authentication--per-client-controls)). The default `auth.provider: none` leaves the proxy unauthenticated, so with `none` anyone who can reach the port can use your upstream and the token round-trip path. The built-in rate limit is single-process (in-memory, per-process) — front multiple replicas with a shared limiter. Use `--allow-remote-bind` only behind explicit network controls regardless:
 
 - **Containers**: binding `0.0.0.0` inside a container is the normal pattern — restrict exposure at the port mapping, e.g. `-p 127.0.0.1:11016:11016`
 - **LAN/remote**: put a firewall, VPN (e.g. Tailscale), or an authenticating reverse proxy in front
@@ -248,7 +248,7 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 ## Security Notes
 
 - This project is not a compliance guarantee.
-- The 0.1 crypto provider uses Node `crypto` with AES-256-GCM and local software keys.
+- The local crypto provider uses Node `crypto` with AES-256-GCM and a local software-key file.
 - Audit events must not contain raw prompt, tool result, secret, or PII values.
 - Unknown or invalid policy/config errors should fail closed in enforcement paths.
 - Response protection fails closed for non-JSON, invalid JSON, compressed, or oversized responses unless an explicit allow policy is configured.

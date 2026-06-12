@@ -2,10 +2,23 @@ import { createHash, randomUUID } from "node:crypto";
 
 const NO_ENFORCE_MODES = new Set(["dry-run", "report-only"]);
 
-export function createHaechi({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run" }) {
+// Safe built-in ceiling on JSON nesting depth. collectStringEntries walks the
+// tree recursively, so an attacker-shaped deeply-nested payload (within
+// limits.maxRequestBytes) would otherwise overflow the call stack and crash the
+// process uncaught. This default protects direct callers of the exported
+// collectStringEntries; the proxy path threads the configurable
+// limits.maxNestingDepth through createHaechi → protectJson instead.
+export const DEFAULT_MAX_NESTING_DEPTH = 256;
+
+export function createHaechi({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run", limits = {} }) {
   if (!filterEngine || !policyEngine || !cryptoProvider || !auditSink) {
     throw new Error("Haechi requires filterEngine, policyEngine, cryptoProvider, and auditSink");
   }
+
+  // Resolve once at construction; protectJson and the stream protector reuse it.
+  const maxNestingDepth = Number.isInteger(limits.maxNestingDepth) && limits.maxNestingDepth > 0
+    ? limits.maxNestingDepth
+    : DEFAULT_MAX_NESTING_DEPTH;
 
   async function protectJson(payload, rawContext = {}) {
     // A per-request policy engine (a named profile selected from identity)
@@ -14,7 +27,10 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     const { policyEngine: contextEngine, ...context } = rawContext;
     const effectiveMode = context.mode ?? mode;
     const engine = contextEngine ?? policyEngine;
-    const entries = collectStringEntries(payload);
+    // Fail closed on an over-deep payload BEFORE any detection/transform work,
+    // mirroring the byte-limit path: the thrown error carries statusCode 413 so
+    // the proxy surfaces a clean 4xx rather than a stack-overflow 500.
+    const entries = collectStringEntries(payload, [], { maxDepth: maxNestingDepth });
     // `context` is threaded into detection as-is and is LOAD-BEARING: e.g.
     // `context.direction` ("request" | "response") gates direction-scoped rules
     // (injection) and the response-only marker exclusion in the filter engine.
@@ -97,7 +113,7 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     // Transform a complete, committed text segment.
     async function transformSegment(text) {
       const detections = await filterEngine.detect({
-        entries: collectStringEntries(text),
+        entries: collectStringEntries(text, [], { maxDepth: maxNestingDepth }),
         context
       });
       const decisions = await decideAll(detections);
@@ -119,7 +135,7 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
       // delta text (e.g. tool-call arguments). Returns the mutated object.
       async protectFrameExtras(value) {
         const detections = await filterEngine.detect({
-          entries: collectStringEntries(value),
+          entries: collectStringEntries(value, [], { maxDepth: maxNestingDepth }),
           context
         });
         if (detections.length === 0) {
@@ -143,7 +159,7 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
       async push(text) {
         pending += text;
         const detections = await filterEngine.detect({
-          entries: collectStringEntries(pending),
+          entries: collectStringEntries(pending, [], { maxDepth: maxNestingDepth }),
           context
         });
         let commit = Math.max(0, pending.length - maxMatchBytes);
@@ -176,7 +192,14 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
   return { protectJson, createStreamProtector };
 }
 
-export function collectStringEntries(value, path = []) {
+export function collectStringEntries(value, path = [], options = {}) {
+  // `options.maxDepth` bounds recursion to fail closed on a deeply-nested
+  // payload (which would otherwise overflow the call stack → uncaught crash).
+  // Additive third arg: existing 2-arg callers get DEFAULT_MAX_NESTING_DEPTH.
+  const maxDepth = Number.isInteger(options.maxDepth) && options.maxDepth > 0
+    ? options.maxDepth
+    : DEFAULT_MAX_NESTING_DEPTH;
+
   if (typeof value === "string") {
     return [{ path, pathText: safePathToString(path), value, kind: "value" }];
   }
@@ -187,8 +210,15 @@ export function collectStringEntries(value, path = []) {
     return [{ path, pathText: safePathToString(path), value: String(value), kind: "number" }];
   }
 
+  // Descending into an array/object would exceed the configured depth. Throw a
+  // fail-closed error carrying statusCode 413 (mirroring the byte-limit path) so
+  // the proxy returns a clean 4xx instead of a stack-overflow 500.
+  if ((Array.isArray(value) || (value && typeof value === "object")) && path.length >= maxDepth) {
+    throw nestingDepthError(maxDepth);
+  }
+
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) => collectStringEntries(item, path.concat(index)));
+    return value.flatMap((item, index) => collectStringEntries(item, path.concat(index), { maxDepth }));
   }
 
   if (value && typeof value === "object") {
@@ -196,11 +226,20 @@ export function collectStringEntries(value, path = []) {
     // otherwise be forwarded upstream in plaintext.
     return Object.entries(value).flatMap(([key, item]) => [
       { path: path.concat(key), pathText: safePathToString(path.concat(key)), value: key, kind: "key" },
-      ...collectStringEntries(item, path.concat(key))
+      ...collectStringEntries(item, path.concat(key), { maxDepth })
     ]);
   }
 
   return [];
+}
+
+function nestingDepthError(maxDepth) {
+  const error = new Error(`Request JSON nesting exceeds limits.maxNestingDepth (${maxDepth})`);
+  // statusCode/errorCode let the proxy catch-all surface this as a clean 4xx,
+  // exactly like the request-body-too-large guard in the proxy body reader.
+  error.statusCode = 413;
+  error.errorCode = "haechi_request_too_deeply_nested";
+  return error;
 }
 
 export function pathToString(path) {
