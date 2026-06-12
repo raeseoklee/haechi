@@ -1,0 +1,57 @@
+{
+  "name": "haechi-ratelimit-redis",
+  "version": "0.1.0",
+  "description": "Shared-store (Redis-backed) rateLimiter satellite for Haechi (providers.rateLimiter) — fixed-window counter over an injected store/client.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raeseoklee/haechi.git",
+    "directory": "satellites/ratelimit-redis"
+  },
+  "homepage": "https://github.com/raeseoklee/haechi/tree/main/satellites/ratelimit-redis#readme",
+  "bugs": {
+    "url": "https://github.com/raeseoklee/haechi/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "haechi",
+    "rate-limiter",
+    "redis",
+    "shared-store",
+    "fixed-window"
+  ],
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./redis": "./redis.mjs",
+    "./memory": "./memory.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "redis.mjs",
+    "memory.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "haechi": ">=0.8.0 <2.0.0",
+    "redis": "^4 || ^5"
+  },
+  "peerDependenciesMeta": {
+    "redis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "haechi": "*"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

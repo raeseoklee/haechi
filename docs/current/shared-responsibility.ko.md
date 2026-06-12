@@ -41,7 +41,7 @@
 
 Haechi의 상태 보유 통제는 설계상 단일 프로세스입니다. 로드밸런서 뒤에서 복제본을 2개 이상 실행하면, 운영자가 공유 인프라를 제공하지 않는 한 이들이 **무음으로 약화**됩니다.
 
-- **Rate limit**은 프로세스별·인메모리이므로 전체 처리량이 복제본 수만큼 배가됩니다. identity별 한도를 공유 front door에서 강제하거나, `createRuntime(config, { rateLimiter })`를 통해 공유 저장소 기반 `rateLimiter`를 주입하세요(이 시임은 `allow(key, limit)` 계약을 만족합니다. [`configuration.md` → Rate limiter 주입](./configuration.ko.md#rate-limiter-주입) 참고). 기본 프로세스별 limiter는 window map도 bounding하므로 identity 기준 무한 메모리 증가가 없습니다.
+- **Rate limit**은 프로세스별·인메모리이므로 전체 처리량이 복제본 수만큼 배가됩니다. identity별 한도를 공유 front door에서 강제하거나, `createRuntime(config, { rateLimiter })`를 통해 공유 저장소 기반 `rateLimiter`를 주입하세요(이 시임은 `allow(key, limit)` 계약을 만족하며, `boolean` 또는 `Promise<boolean>`을 반환할 수 있습니다. [`configuration.md` → Rate limiter 주입](./configuration.ko.md#rate-limiter-주입) 참고). [`haechi-ratelimit-redis`](https://github.com/raeseoklee/haechi/tree/main/satellites/ratelimit-redis) satellite가 레퍼런스 공유 저장소(Redis 기반) 구현입니다 — 주입된 클라이언트 위의 fixed-window 카운터입니다. 기본 프로세스별 limiter는 window map도 bounding하므로 identity 기준 무한 메모리 증가가 없습니다.
 - **Audit hash chain + anchor**는 단일 작성자입니다. 각 복제본에 **고유한** `audit.path`(및 anchor 경로)를 주세요. 하나의 audit 파일을 복제본 간에 공유하면 체인이 분기되어 검증 불가 상태가 됩니다.
 - **TokenVault와 auth store**는 whole-file 로컬 저장소입니다 — 단일 호스트에서는 올바르지만 공유 다중 작성자 저장소는 아닙니다. 다중 복제 토큰화에는 공유 `tokenVault`를 주입하세요.
 - 파일 락은 `O_EXCL` + atomic rename에 의존하며 NFS/공유 파일시스템에서는 보장되지 않습니다 — 이 저장소들은 로컬 디스크에 두세요.

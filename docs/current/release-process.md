@@ -70,6 +70,7 @@ npm audit signatures
 | `.github/workflows/auth-jwt-publish.yml` | `haechi-auth-jwt` | `auth-jwt-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/dashboard-publish.yml` | `haechi-dashboard` | `dashboard-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/auth-oidc-publish.yml` | `haechi-auth-oidc` | `auth-oidc-v<semver>` | satellite publish, same signed-artifacts path |
+| `.github/workflows/ratelimit-redis-publish.yml` | `haechi-ratelimit-redis` | `ratelimit-redis-v<semver>` | satellite publish, same signed-artifacts path |
 
 Each publish workflow triggers on `release: published` but is **guarded** so the two never cross-fire: the core job runs only for tags starting `v` (and re-validates `^v[0-9]+\.[0-9]+\.[0-9]+$`); the satellite job runs only for `crypto-kms-v…` (and re-validates `^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$` **and** that the tag version equals the satellite's `package.json` version). The npmjs.com Trusted Publisher for each package is bound to its **specific workflow filename** — renaming a workflow file breaks its OIDC publish until the npm config is updated.
 
@@ -92,6 +93,7 @@ No manual `npm publish` from a laptop is needed. Because the names are unscoped 
 | `haechi-auth-jwt` | `auth-jwt-v<semver>` | `auth-jwt-publish.yml` | `satellites/auth-jwt/package.json` |
 | `haechi-dashboard` | `dashboard-v<semver>` | `dashboard-publish.yml` | `satellites/dashboard/package.json` |
 | `haechi-auth-oidc` | `auth-oidc-v<semver>` | `auth-oidc-publish.yml` | `satellites/auth-oidc/package.json` |
+| `haechi-ratelimit-redis` | `ratelimit-redis-v<semver>` | `ratelimit-redis-publish.yml` | `satellites/ratelimit-redis/package.json` |
 
 **Verify a satellite release** (same anchors as core):
 
@@ -103,6 +105,8 @@ npm view haechi-crypto-kms --json   # dist.attestations present; access "public"
 **Dependency note:** `haechi-crypto-kms` keeps core zero-dependency — `@aws-sdk/client-kms` is an **optional peer dependency**, imported lazily only when a real AWS client is used and not injected. Consumers who use the in-memory or an injected client never install the SDK. The 0.2.0 `./gcp` (`@google-cloud/kms`) and `./azure` (`@azure/keyvault-keys` + `@azure/identity`) backends follow the same optional-peer/lazy-import model; the `./vault` backend has zero optional peer (`node:` `fetch` only).
 
 **0.9 satellites (new unscoped names — configure Trusted Publisher *before* the first tag):** `haechi-dashboard` and `haechi-auth-oidc` are first-published in 0.9 and follow the same per-satellite bootstrap order above. As with the 0.8 satellites, the unscoped name is claimed on first OIDC publish, so the npmjs.com Trusted Publisher for each must be configured **before** its first tag — link `raeseoklee/haechi` and the exact workflow filename (`dashboard-publish.yml` for `haechi-dashboard`, `auth-oidc-publish.yml` for `haechi-auth-oidc`), then push the prefixed tag (`dashboard-v0.1.0`, `auth-oidc-v0.1.0`) and publish the GitHub Release. The two existing satellites ride their already-bootstrapped tags/workflows: `haechi-auth-jwt@0.2.0` on `auth-jwt-v<semver>` (`auth-jwt-publish.yml`) and `haechi-crypto-kms@0.2.0` on `crypto-kms-v<semver>` (`crypto-kms-publish.yml`) — no new Trusted Publisher configuration is required for those two.
+
+**`haechi-ratelimit-redis` (new unscoped name — configure Trusted Publisher *before* the first tag):** the shared-store rate-limiter satellite is first-published from its own `ratelimit-redis-v<semver>` tag and follows the same per-satellite bootstrap order above. The unscoped name is claimed on its first OIDC publish, so its npmjs.com Trusted Publisher must be configured **before** its first tag — link `raeseoklee/haechi` and the exact workflow filename `ratelimit-redis-publish.yml`, then push the prefixed tag (`ratelimit-redis-v0.1.0`) and publish the GitHub Release. The `redis` client is an **optional peer dependency**, imported only by consumers using the bundled Redis adapter (the store/client is injected), so core stays zero-dependency.
 
 ## 6. Deployment block conditions
 

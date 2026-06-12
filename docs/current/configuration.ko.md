@@ -274,9 +274,9 @@ rate limiter는 **주입 가능한 collaborator**이며, `createRuntime(config, 
 const runtime = createRuntime(config, { rateLimiter });
 ```
 
-주입된 `rateLimiter`는 `allow(key, limit) -> boolean`을 구현해야 합니다(`key`는 identity별 버킷, `limit`은 resolve된 `requestsPerMinute`입니다). 구현하지 않으면 `createRuntime`이 construction 시점에 fail-closed로 throw합니다. proxy는 rate 통제 대상 요청마다 `runtime.rateLimiter`를 참조합니다.
+주입된 `rateLimiter`는 `allow(key, limit)`을 구현해야 하며, `boolean` **또는** `Promise<boolean>`을 반환합니다(`key`는 identity별 버킷, `limit`은 resolve된 `requestsPerMinute`입니다). 구현하지 않으면 `createRuntime`이 construction 시점에 fail-closed로 throw합니다. proxy는 결과를 `await`하므로 동기 boolean과 비동기 공유 저장소 limiter가 동일하게 동작합니다 — 내장 기본값은 동기로 유지되고, 비동기로 resolve되는 Redis 기반 limiter도 올바르게 gate합니다. proxy는 rate 통제 대상 요청마다 `runtime.rateLimiter`를 참조합니다.
 
-**기본값**은 프로세스별 인메모리 fixed-window 카운터입니다. 재시작 시 초기화되며 **replica 간에 공유되지 않으므로**, load balancer 뒤에서 총 처리량은 replica 수만큼 곱해집니다. window map은 self-bounding입니다(lazy, amortized sweep로 만료된 one-shot identity를 제거합니다 — 백그라운드 timer 없음). 다중 replica 배포에서는 공유 front door에서 identity별 limit을 강제하거나, 동일한 `allow(key, limit)` 계약을 만족하는 공유 저장소 구현(예: Redis 기반)을 주입하십시오. [Shared responsibility §4](./shared-responsibility.ko.md#4-수평-확장--다중-복제)를 참고하십시오.
+**기본값**은 프로세스별 인메모리 fixed-window 카운터입니다. 재시작 시 초기화되며 **replica 간에 공유되지 않으므로**, load balancer 뒤에서 총 처리량은 replica 수만큼 곱해집니다. window map은 self-bounding입니다(lazy, amortized sweep로 만료된 one-shot identity를 제거합니다 — 백그라운드 timer 없음). 다중 replica 배포에서는 공유 front door에서 identity별 limit을 강제하거나, 동일한 `allow(key, limit)` 계약을 만족하는 공유 저장소 구현(예: Redis 기반)을 주입하십시오 — [`haechi-ratelimit-redis`](./shared-responsibility.ko.md#4-수평-확장--다중-복제) satellite가 레퍼런스 구현입니다. [Shared responsibility §4](./shared-responsibility.ko.md#4-수평-확장--다중-복제)를 참고하십시오.
 
 ## Detection type과 action
 

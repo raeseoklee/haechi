@@ -545,7 +545,13 @@ async function authorizeRequest({ runtime, request, routeContext, rateLimiter, m
 
   if (resolved.rate && resolved.rate.requestsPerMinute) {
     const key = identity?.id ?? "anonymous";
-    if (!rateLimiter.allow(key, resolved.rate.requestsPerMinute)) {
+    // allow() may return a boolean OR a Promise<boolean>: the built-in default is
+    // synchronous, but a shared-store (e.g. Redis-backed) limiter is inherently
+    // async. We await unconditionally — `await <boolean>` returns the boolean
+    // unchanged, so the sync default keeps working, while `!somePromise` (always
+    // false, because a Promise is truthy) can no longer let an async limiter
+    // silently fail open. See haechi-ratelimit-redis (shared-store satellite).
+    if (!(await rateLimiter.allow(key, resolved.rate.requestsPerMinute))) {
       await recordProxyDecision({
         runtime, routeContext, identity, profile: resolved.profile, correlationId,
         decision: "rate_limited",
