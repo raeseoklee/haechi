@@ -20,6 +20,8 @@
   "audit": { "sink": "jsonl", "path": ".haechi/audit.jsonl" },
   "tokenVault": { "provider": "local", "path": ".haechi/token-vault.json", "revealPolicy": "disabled", "retentionDays": 30, "deterministic": false, "deterministicTypes": null, "detokenizeResponses": false },
   "privacy": { "profile": null },
+  "logging": { "format": "text" },
+  "metrics": { "enabled": true },
   "mcp": { "allowedMethods": ["initialize", "tools/call", "resources/read", "prompts/get"], "protectParams": true, "protectResults": true, "requireJsonRpc": true }
 }
 ```
@@ -138,6 +140,55 @@ npm run scan:detection    # CI regression gate: fail if any type regresses below
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
 | `privacy.profile` | `null` \| `kr-pipa` \| `eu-gdpr` \| `us-general` | `null` | Applies a regional baseline action set before enforcement. Profiles may **strengthen** but never weaken your explicit actions. Engineering defaults, not legal advice. |
+
+## `logging`
+
+| Key | Type / values | Default | Notes |
+|---|---|---|---|
+| `logging.format` | `text` \| `json` | `text` | `text` keeps the human-readable startup/shutdown/error lines (unchanged). `json` emits one single-line JSON object per event. Fail-closed: any other value throws. |
+
+In `json` mode the proxy's internal-error log is a single line `{ "level": "error", "event": "proxy_internal_error", "correlationId", "errorName", "statusCode" }`, and startup/shutdown emit `proxy_listening` / `proxy_shutdown` (plus `*_warn` events for remote-bind / non-enforce-mode / response-protection-disabled). **No log field ever carries a request/response payload, header, token, or any PII** — error logs carry the error *class name* and the request `correlationId` only.
+
+## `metrics`
+
+| Key | Type / values | Default | Notes |
+|---|---|---|---|
+| `metrics.enabled` | boolean | `true` | Gates the `GET /__haechi/metrics` route. When `false`, that route returns `404`. Fail-closed: a non-boolean throws. |
+
+The metrics collector is also an **injectable collaborator** (`createRuntime(config, { metrics })`); see [Operability endpoints](#operability-endpoints) for the contract and the no-PII guarantee.
+
+## Operability endpoints
+
+The proxy serves four unauthenticated endpoints under the reserved `/__haechi/*` prefix, checked **before** auth and body-read. They never proxy upstream.
+
+| Endpoint | Status | Body | Purpose |
+|---|---|---|---|
+| `GET /__haechi/live` | `200` | `{ ok: true, version }` | Cheap process liveness. |
+| `GET /__haechi/ready` | `200` / `503` | `{ ready, version, checks }` | Readiness. **Fail-closed**: a gateway that cannot append to its audit log is **not** ready (`503`). The default JSONL sink's `checks.auditWritable` confirms its audit directory/file is writable without writing an event; a sink lacking a `ready()`/`healthCheck()` method is treated as ready. |
+| `GET /__haechi/health` | `200` | `{ ok: true, mode, version }` | Back-compat (the original health endpoint, now with `version`). |
+| `GET /__haechi/metrics` | `200` / `404` | Prometheus text | Telemetry (see below). `404` when `metrics.enabled: false`. |
+
+`version` is the running package version (`package.json`).
+
+### Telemetry (`/__haechi/metrics`)
+
+The endpoint renders the **Prometheus text exposition format** (`# HELP` / `# TYPE` + `name{label="..."} value`), `Content-Type: text/plain`. Counters: `haechi_requests_total{route,mode,decision}` plus `haechi_blocks_total`, `haechi_auth_denied_total`, `haechi_rate_limited_total`, `haechi_upstream_timeout_total`, `haechi_upstream_error_total`, `haechi_response_unprotected_total`, `haechi_internal_error_total`; one histogram `haechi_request_duration_seconds{route}`.
+
+**No-PII-in-telemetry invariant.** Every metric name and **every label value** is a bounded enum — a route id, a policy mode, or a fixed decision class (`forwarded` / `blocked` / `auth_denied` / `rate_limited` / `model_not_allowed` / …). A metric label is **never** an identity id/subject, a token, or a detected value: there is no per-identity or per-value label cardinality. This is the no-plaintext-in-audit invariant extended to telemetry; the metrics module additionally length-caps and charset-sanitizes label values as defence in depth.
+
+### `providers.metrics` injection seam
+
+The metrics collector is supplied programmatically through `createRuntime(config, providers)` — the same seam as `cryptoProvider`/`authProvider`/`rateLimiter`. It is **not** a JSON config key.
+
+```js
+const runtime = createRuntime(config, { metrics });
+```
+
+An injected `metrics` must implement `increment(name, labels?, amount?)`, `observe(name, value, labels?)`, and `render() -> string`; `createRuntime` fails closed at construction if it does not. The **default** is a zero-dependency in-memory collector that renders the Prometheus text above. A multi-replica operator injects a shared/remote collector satisfying the same contract.
+
+### `correlationId` (audit + logs)
+
+The proxy generates a per-**request** `correlationId` (a UUID). It is threaded into the protect context, so each request's request- and response-direction audit events carry the same additive top-level `correlationId` field, and into the proxy's internal-error log line — letting an operator join a logged error to its audit trail. It is `null` for non-proxy `protectJson()` calls (preserving prior behavior). The id is a UUID and is **never** a payload/identity/PII value.
 
 ## `mcp`
 
@@ -302,7 +353,7 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## Validation cheatsheet
 
-These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`.
+These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`; non-`text`/`json` `logging.format`; non-boolean `metrics.enabled`.
 
 # Satellite operator configuration (0.9)
 

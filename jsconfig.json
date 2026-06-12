@@ -27,7 +27,8 @@
       "haechi/runtime": ["./packages/cli/runtime.mjs"],
       "haechi/token-vault": ["./packages/token-vault/index.mjs"],
       "haechi/stream-filter": ["./packages/stream-filter/index.mjs"],
-      "haechi/auth": ["./packages/auth/index.mjs"]
+      "haechi/auth": ["./packages/auth/index.mjs"],
+      "haechi/metrics": ["./packages/metrics/index.mjs"]
     }
   },
   "include": ["packages/**/*.mjs", "scripts/**/*.mjs", "tests/**/*.mjs", "satellites/**/*.mjs"]

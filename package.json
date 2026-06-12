@@ -51,7 +51,8 @@
     "./token-vault": "./packages/token-vault/index.mjs",
     "./stream-filter": "./packages/stream-filter/index.mjs",
     "./auth": "./packages/auth/index.mjs",
-    "./ssrf": "./packages/ssrf/index.mjs"
+    "./ssrf": "./packages/ssrf/index.mjs",
+    "./metrics": "./packages/metrics/index.mjs"
   },
   "files": [
     "README.md",

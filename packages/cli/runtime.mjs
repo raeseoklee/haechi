@@ -8,6 +8,7 @@ import { createJsonlAuditSink } from "../audit/index.mjs";
 import { createLocalTokenVault } from "../token-vault/index.mjs";
 import { loadVerifiedPolicyBundleFileSync } from "../policy-bundle/index.mjs";
 import { createProtocolAdapter } from "../protocol-adapters/index.mjs";
+import { createMetrics } from "../metrics/index.mjs";
 import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
 import { createBearerAuthProvider } from "../auth/index.mjs";
 import { createSandboxedAuthProviderSync, createProcessIsolatedAuthProviderSync } from "../plugin/index.mjs";
@@ -99,6 +100,19 @@ export function defaultConfig() {
     },
     privacy: {
       profile: null
+    },
+    // WS4-A operability. Additive; defaults preserve 1.1 behavior.
+    // logging.format "text" = the current human-readable lines; "json" = a single
+    // JSON line per event (startup/shutdown/error) carrying a correlationId but
+    // NEVER a payload/header/token/PII value.
+    logging: {
+      format: "text"
+    },
+    // metrics.enabled gates the /__haechi/metrics route. Default true; when false
+    // the route returns 404. The metric surface is a bounded enum — no per-identity
+    // or per-value label cardinality (see packages/metrics/index.mjs).
+    metrics: {
+      enabled: true
     },
     auth: {
       provider: "none",
@@ -206,6 +220,15 @@ export function createRuntime(config, providers = {}) {
   const rateLimiter = providers.rateLimiter ?? createRateLimiter();
   assertProvider("rateLimiter", rateLimiter, ["allow"]);
 
+  // WS4-A telemetry seam. The metrics collector is an injectable collaborator,
+  // mirroring auditSink/rateLimiter. The default is a zero-dep in-memory
+  // Prometheus-text collector; a multi-replica operator injects a shared/remote
+  // collector exposing the same increment/observe/render contract. The proxy
+  // reads runtime.metrics. The metric surface is a bounded enum — never an
+  // identity/value label (no-PII-in-telemetry invariant; see metrics module).
+  const metrics = providers.metrics ?? createMetrics();
+  assertProvider("metrics", metrics, ["increment", "observe", "render"]);
+
   return {
     config: normalized,
     tokenVault,
@@ -213,6 +236,7 @@ export function createRuntime(config, providers = {}) {
     authProvider,
     policyProfiles,
     rateLimiter,
+    metrics,
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
@@ -291,6 +315,14 @@ export function normalizeConfig(config) {
       ...defaultConfig().privacy,
       ...(config.privacy ?? {})
     },
+    logging: {
+      ...defaultConfig().logging,
+      ...(config.logging ?? {})
+    },
+    metrics: {
+      ...defaultConfig().metrics,
+      ...(config.metrics ?? {})
+    },
     auth: {
       ...defaultConfig().auth,
       ...(config.auth ?? {}),
@@ -364,6 +396,12 @@ export function normalizeConfig(config) {
   }
   if (merged.privacy.profile) {
     getPrivacyProfile(merged.privacy.profile);
+  }
+  if (!["text", "json"].includes(merged.logging.format)) {
+    throw new Error(`Invalid logging.format: ${merged.logging.format} (expected "text" or "json")`);
+  }
+  if (typeof merged.metrics.enabled !== "boolean") {
+    throw new Error("metrics.enabled must be boolean");
   }
   if (!["fail-closed", "allow"].includes(merged.responseProtection.failureMode)) {
     throw new Error(`Invalid responseProtection.failureMode: ${merged.responseProtection.failureMode}`);

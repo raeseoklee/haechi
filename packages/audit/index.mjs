@@ -1,5 +1,5 @@
-import { createReadStream } from "node:fs";
-import { appendFile, mkdir, open, stat, unlink } from "node:fs/promises";
+import { createReadStream, constants as fsConstants } from "node:fs";
+import { access, appendFile, mkdir, open, stat, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
@@ -91,6 +91,30 @@ export function createJsonlAuditSink({ path, anchor = null }) {
       });
       writeQueue = write.catch(() => {});
       await write;
+    },
+
+    // WS4-A readiness probe: a CHEAP writability check used by /__haechi/ready.
+    // A security gateway that cannot append to its audit log is NOT ready
+    // (fail-closed), so this confirms the audit directory exists and is writable
+    // WITHOUT writing an event (no audit-chain side effect). It returns the bare
+    // boolean and an enum reason — never a path value or any payload/PII.
+    async ready() {
+      try {
+        const dir = dirname(path);
+        await mkdir(dir, { recursive: true });
+        await access(dir, fsConstants.W_OK);
+        // If the audit file already exists, confirm it is writable too.
+        try {
+          await access(path, fsConstants.W_OK);
+        } catch (error) {
+          if (error.code !== "ENOENT") {
+            return { ok: false, reason: "audit_file_not_writable" };
+          }
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, reason: "audit_dir_not_writable" };
+      }
     }
   };
 }

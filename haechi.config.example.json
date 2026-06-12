@@ -69,6 +69,12 @@
   "privacy": {
     "profile": null
   },
+  "logging": {
+    "format": "text"
+  },
+  "metrics": {
+    "enabled": true
+  },
   "auth": {
     "provider": "none",
     "store": ".haechi/auth.json",
