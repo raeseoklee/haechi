@@ -1,6 +1,6 @@
 # Haechi 문서 인덱스
 
-기본 문서 언어는 영문이다. 각 문서의 한국어 번역본은 같은 경로의 `*.ko.md`로 관리한다.
+기본 문서 언어는 영문입니다. 각 문서의 한국어 번역본은 같은 경로의 `*.ko.md`로 관리합니다.
 
 ## Current
 
@@ -27,8 +27,8 @@
 
 ## 방향 전환 기록
 
-초기 초안(현재 제거됨; 이 커밋 이전 git 히스토리 참조)은 HTTP/HTTPS/socket/gRPC/A2A까지 포괄하는 범용 모듈형 구간암호화 레이어를 다뤘다. 현재 방향은 AI, LLM, MCP, A2A, agent 플랫폼의 prompt, context, tool-call, resource, artifact, streaming message를 보호하는 특화 암호화 솔루션이다.
+초기 초안(현재 제거되었으며, 이 커밋 이전 git 히스토리를 참조하세요)은 HTTP/HTTPS/socket/gRPC/A2A까지 포괄하는 범용 모듈형 구간암호화 레이어를 다뤘습니다. 현재 방향은 AI, LLM, MCP, A2A, agent 플랫폼의 prompt, context, tool-call, resource, artifact, streaming message를 보호하는 특화 암호화 솔루션입니다.
 
-상용 SaaS보다 오픈소스/self-hosted 보안 인프라를 우선한다. 따라서 현재 문서는 hosted control plane보다 self-hosted SDK/CLI/proxy, 교체 가능한 `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `KeyProvider`, `AuditSink`, plugin conformance test를 중심으로 정리한다.
+상용 SaaS보다 오픈소스/self-hosted 보안 인프라를 우선합니다. 따라서 현재 문서는 hosted control plane보다 self-hosted SDK/CLI/proxy, 교체 가능한 `CryptoProvider`, `PolicyEngine`, `FilterEngine`, `KeyProvider`, `AuditSink`, plugin conformance test를 중심으로 정리합니다.
 
-적용성은 핵심 요구사항이다. 목표는 5분 local demo, 30분 MCP/LLM PoC, 1일 custom filter PoC이며, 사용자는 proxy, middleware, SDK wrapper, sidecar 중 가장 낮은 변경 비용의 방식으로 시작할 수 있어야 한다.
+적용성은 핵심 요구사항입니다. 목표는 5분 local demo, 30분 MCP/LLM PoC, 1일 custom filter PoC이며, 사용자는 proxy, middleware, SDK wrapper, sidecar 중 가장 낮은 변경 비용의 방식으로 시작할 수 있어야 합니다.

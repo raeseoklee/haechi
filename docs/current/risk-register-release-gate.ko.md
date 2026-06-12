@@ -7,7 +7,7 @@
 
 ## 1. 현재 판단
 
-0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했다. 외부 운영자 게이트(npm 계정 인증, package ownership, GitHub tag/release)는 2026-06-10에 통과했다: `haechi@0.3.2`가 로컬 패스키 인증으로 npm에 배포되었고, `v0.3.2` 태그와 GitHub pre-release가 생성되었다. npm provenance는 GitHub Actions trusted publishing 경로로 이월한다.
+0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했습니다. 외부 운영자 게이트(npm 계정 인증, package ownership, GitHub tag/release)는 2026-06-10에 통과했습니다. `haechi@0.3.2`가 로컬 패스키 인증으로 npm에 배포되었고, `v0.3.2` 태그와 GitHub pre-release가 생성되었습니다. npm provenance는 GitHub Actions trusted publishing 경로로 이월합니다.
 
 | 구분 | 판단 | 이유 |
 |---|---|---|
@@ -47,7 +47,7 @@
 | P1-SEC-001 | KMS/HSM/Vault 미지원 | Resolved for OSS core | `createRuntime(config, { cryptoProvider })` 외부 crypto provider injection, external provider 없으면 fail-closed |
 | P1-SEC-002 | TokenVault 권한 모델 부족 | Resolved | `revealPolicy: "disabled"` 기본값, `--allow-dev-reveal`, metadata export, retention/purge timestamp |
 | P1-SEC-003 | audit 무결성 부족 | Resolved | JSONL audit SHA-256 hash chain 및 `verifyAuditChain` |
-| P1-SEC-004 | plugin runtime 없음 | Resolved by gating (P1-SEC-024이 대체) | dynamic runtime 거부, `manifest-only` plugin만 통과. **1.0에서 P1-SEC-024(§5.4)이 대체:** 1.0은 manifest-only-only 입장을 의도적으로 해제하고, 새 신뢰 통제 하에 signed·capability-gated·worker-isolated·audited `authProvider` plugin에 한해 **좁게** 동적 로딩을 허용 |
+| P1-SEC-004 | plugin runtime 없음 | Resolved by gating (P1-SEC-024이 대체) | dynamic runtime 거부, `manifest-only` plugin만 통과. **1.0에서 P1-SEC-024(§5.4)이 대체합니다.** 1.0은 manifest-only-only 입장을 의도적으로 해제하고, 새 신뢰 통제 하에 signed·capability-gated·worker-isolated·audited `authProvider` plugin에 한해 동적 로딩을 **좁게** 허용합니다 |
 | P1-SEC-005 | policy conflict 처리 부족 | Resolved | preset block 등 강한 action을 약한 action으로 낮추면 conflict fail-closed |
 | P1-SEC-006 | regex 중심 필터 정확도 한계 | Resolved for preview | KR RRN checksum, Luhn, unsafe custom regex 제한. ML/classifier plugin은 stable backlog |
 | P1-SEC-007 | AAD/replay/stream 확장 부족 | Resolved for preview | AAD hash mismatch 명시, streaming 기본 차단. stream sequence/replay cache는 stream support 도입 시 필요 |
@@ -97,11 +97,11 @@
 | P2-SEC-028 | proxy 내부 오류 메시지가 클라이언트에 노출 | Resolved | 예기치 못한 오류는 일반화된 메시지 반환, 상세는 stderr |
 | P2-DOC-005 | dry-run + responseProtection off 기본값에서 "보호 중" 오인 가능 | Resolved | proxy 기동/`protect` 출력에 비집행 경고 명시 |
 
-base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncation 탐지는 명시적 제외로 threat model에 문서화했다 (0.4+ backlog).
+base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncation 탐지는 명시적 제외로 threat model에 문서화했습니다 (0.4+ backlog).
 
 ## 5.3 0.9.0 Observability + Interactive-Auth 리스크 상태
 
-이 ID들은 0.9.0 위성 컷(`haechi-dashboard`, `haechi-auth-oidc`, `haechi-crypto-kms@0.2.0`)에 한정되며, 0.9.0 섹션으로 namespace되어 위의 동일 번호 P0/P1 행과 구분된다. 증거는 위성 소스, 그 테스트 스위트, 그리고 `docs/current/release-0.9-implementation-scope.md` §6에 정리된 adversarial security review다.
+이 ID들은 0.9.0 위성 컷(`haechi-dashboard`, `haechi-auth-oidc`, `haechi-crypto-kms@0.2.0`)에 한정되며, 0.9.0 섹션으로 namespace되어 위의 동일 번호 P0/P1 행과 구분됩니다. 증거는 위성 소스, 그 테스트 스위트, 그리고 `docs/current/release-0.9-implementation-scope.md` §6에 정리된 adversarial security review입니다.
 
 | ID | 리스크 | 상태 | 해소 증거 |
 |---|---|---|---|
@@ -111,7 +111,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 ## 5.4 1.0.0 Stable API Contract + Signed-Plugin Sandbox 리스크 상태
 
-이 ID들은 1.0.0 stable 컷(API freeze + Ed25519 signed, worker-isolated `authProvider` plugin sandbox)에 한정된다. 권위 있는 threat 행과 범위는 `docs/current/release-1.0-implementation-scope.md` §6이며, 증거는 PR(#46–#49), core 소스, 그리고 테스트 스위트다.
+이 ID들은 1.0.0 stable 컷(API freeze + Ed25519 signed, worker-isolated `authProvider` plugin sandbox)에 한정됩니다. 권위 있는 threat 행과 범위는 `docs/current/release-1.0-implementation-scope.md` §6이며, 증거는 PR(#46–#49), core 소스, 그리고 테스트 스위트입니다.
 
 | ID | 리스크 | 상태 | 해소 증거 |
 |---|---|---|---|
@@ -124,8 +124,8 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 | ID | Risk | Status | Resolution evidence |
 |---|---|---|---|
-| P1-SEC-027 | Plugin capability *강제*: 1.0 `worker_threads` sandbox는 memory/crash 격리뿐이라 악의적 signed plugin이 `fs`/`net`을 써서 credential을 exfiltrate할 수 있음. **P1-SEC-024의 수용된 worker 잔여를 강화** — 1.1이 새 opt-in 런타임에 실제 강제 추가 | Mitigated | `packages/plugin/process-sandbox.mjs` `createProcessIsolatedAuthProvider`/`…Sync`(PR #54): signed `authProvider`가 `--permission` 하 자식 `node`에서 **부여 0**(fs/child-process/worker/addons/wasi 없음, `--allow-net` 없음)으로, `data:` URL 로드(fs 권한 없음 → TOCTOU/symlink 표면 없음), `stdio:['ignore','ignore','ignore','ipc']`(stdout/stderr/fd 유출 채널 없음), 정화 env, JSON-string 전용 IPC + 공유 null-proto sanitizer + 호스트측 keyed-HMAC identity로 실행. **Node 26 실측 검증**: plugin의 `fs`/`net`/`fetch`/`dns`/`child_process`/`worker`와 `process.binding('tcp_wrap')` 우회가 모두 `ERR_ACCESS_DENIED`. 네트워크 봉쇄는 **커널 `--allow-net` 거부**(삭제 가능한 JS 하니스가 아님); 기본값 `netEnforcement:"require-permission"`은 강제 못 하는 Node에서 **fail closed**(동작 probe 기능 탐지; PR #54). spawn-storm 서킷 브레이커(PR #56)가 재spawn 제한. lifecycle audit에 호스트 계산/enum 전용 `isolation`/`grants`/`netEnforcement` 추가(PR #56). config: `auth.plugin.isolation:"process"` fail-closed 배선(PR #56). 테스트: fs/net/stdio 레드팀(`--allow-net` 없는 Node에선 fail-closed라 skip) + 상시 실행 fail-closed 계약 + config 매트릭스. **잔여:** `--allow-net` 없는 Node(fail-closed, 미봉쇄); `networkEgress` 부여 plugin; 자식 메모리의 credential/키 자료(core-dump/swap); V8/Node 탈출(런타임 통제일 뿐 OS 샌드박스 아님) |
-| P1-SEC-028 | 호스트 중개 키 자료 + SSRF: 키 자료가 필요한 커스텀 자격증명 plugin이 plugin 주도 SSRF 벡터가 될 수 있고, 코어엔 SSRF 가드가 없었음(위성 복사본은 코어에서 도달 불가) | Mitigated | 새 node:-only, 의존성 0 **`haechi/ssrf`** 코어 모듈(PR #55): `isBlockedAddress`(private/loopback/link-local/metadata), `guardedFetch`(https 전용, DNS 후 재확인, `redirect:"error"`, 본문 제한 + timeout), `createGuardedKeyFetcher`(TTL 캐시 + cooldown). `process-isolated` 런타임의 선택적 `keyMaterial:{url}`은 **호스트**가 **운영자 선언** URL에서 이 가드로 가져와 IPC로 주입 — plugin은 URL 명명 안 함(plugin 주도 SSRF 없음), kid-refetch cooldown이 아웃바운드 비율 제한; blocked-address URL은 fail closed. 테스트: 표준 `isBlockedAddress` 벡터 테이블 + 코어-대-`auth-jwt` parity 가드, `guardedFetch` SSRF 거부/제한, cooldown fail-closed, 런타임 키 주입 + no-SSRF. **잔여:** 위성은 의도적 로컬 복사본 유지(crypto/auth 패키지는 core-ssrf에 런타임 의존 금지; `crypto-kms/ssrf-parity.test.mjs`) — 코어 재import는 연기, drift는 제거가 아니라 parity로 가드; 가드의 DNS-rebinding 창(resolve-then-connect)은 운영자 선언 URL에 대해 수용 |
+| P1-SEC-027 | Plugin capability *강제*: 1.0 `worker_threads` sandbox는 memory/crash 격리뿐이라 악의적 signed plugin이 `fs`/`net`을 써서 credential을 exfiltrate할 수 있음. **P1-SEC-024의 수용된 worker 잔여를 강화** — 1.1이 새 opt-in 런타임에 실제 강제 추가 | Mitigated | `packages/plugin/process-sandbox.mjs` `createProcessIsolatedAuthProvider`/`…Sync`(PR #54): signed `authProvider`가 `--permission` 하 자식 `node`에서 **부여 0**(fs/child-process/worker/addons/wasi 없음, `--allow-net` 없음)으로, `data:` URL 로드(fs 권한 없음 → TOCTOU/symlink 표면 없음), `stdio:['ignore','ignore','ignore','ipc']`(stdout/stderr/fd 유출 채널 없음), 정화 env, JSON-string 전용 IPC + 공유 null-proto sanitizer + 호스트측 keyed-HMAC identity로 실행됩니다. **Node 26 실측 검증**: plugin의 `fs`/`net`/`fetch`/`dns`/`child_process`/`worker`와 `process.binding('tcp_wrap')` 우회가 모두 `ERR_ACCESS_DENIED`. 네트워크 봉쇄는 **커널 `--allow-net` 거부**(삭제 가능한 JS 하니스가 아님); 기본값 `netEnforcement:"require-permission"`은 강제 못 하는 Node에서 **fail closed**(동작 probe 기능 탐지; PR #54). spawn-storm 서킷 브레이커(PR #56)가 재spawn 제한. lifecycle audit에 호스트 계산/enum 전용 `isolation`/`grants`/`netEnforcement` 추가(PR #56). config: `auth.plugin.isolation:"process"` fail-closed 배선(PR #56). 테스트: fs/net/stdio 레드팀(`--allow-net` 없는 Node에선 fail-closed라 skip) + 상시 실행 fail-closed 계약 + config 매트릭스. **잔여:** `--allow-net` 없는 Node(fail-closed, 미봉쇄); `networkEgress` 부여 plugin; 자식 메모리의 credential/키 자료(core-dump/swap); V8/Node 탈출(런타임 통제일 뿐 OS 샌드박스 아님) |
+| P1-SEC-028 | 호스트 중개 키 자료 + SSRF: 키 자료가 필요한 커스텀 자격증명 plugin이 plugin 주도 SSRF 벡터가 될 수 있고, 코어엔 SSRF 가드가 없었음(위성 복사본은 코어에서 도달 불가) | Mitigated | 새 node:-only, 의존성 0 **`haechi/ssrf`** 코어 모듈(PR #55): `isBlockedAddress`(private/loopback/link-local/metadata), `guardedFetch`(https 전용, DNS 후 재확인, `redirect:"error"`, 본문 제한 + timeout), `createGuardedKeyFetcher`(TTL 캐시 + cooldown). `process-isolated` 런타임의 선택적 `keyMaterial:{url}`은 **호스트**가 **운영자 선언** URL에서 이 가드로 가져와 IPC로 주입하므로, plugin은 URL을 명명하지 않습니다(plugin 주도 SSRF 없음). kid-refetch cooldown이 아웃바운드 비율을 제한하고, blocked-address URL은 fail closed됩니다. 테스트: 표준 `isBlockedAddress` 벡터 테이블 + 코어-대-`auth-jwt` parity 가드, `guardedFetch` SSRF 거부/제한, cooldown fail-closed, 런타임 키 주입 + no-SSRF. **잔여:** 위성은 의도적으로 로컬 복사본을 유지함(crypto/auth 패키지는 core-ssrf에 런타임 의존 금지; `crypto-kms/ssrf-parity.test.mjs`) — 코어 재import는 연기하며, drift는 제거가 아니라 parity로 가드; 가드의 DNS-rebinding 창(resolve-then-connect)은 운영자 선언 URL에 대해 수용 |
 
 ## 6. P2 제품/문서 리스크 상태
 
@@ -138,12 +138,12 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 ## 7. npm developer preview 배포 전 체크리스트
 
-현재 외부 npm 게이트 확인 결과:
+현재 외부 npm 게이트 확인 결과는 다음과 같습니다.
 
 - `npm whoami`: `raeseoklee`
 - `npm view haechi version`: `0.3.2`
 
-아래 체크리스트는 2026-06-10 0.3.2 배포에서 provenance publish 경로를 제외하고 완료되었다(`v0.3.2` 태그와 GitHub pre-release 완료). provenance는 GitHub Actions trusted publishing으로 이월하며, 체크리스트는 이후 릴리스의 템플릿으로 유지한다.
+아래 체크리스트는 2026-06-10 0.3.2 배포에서 provenance publish 경로를 제외하고 완료되었습니다(`v0.3.2` 태그와 GitHub pre-release 완료). provenance는 GitHub Actions trusted publishing으로 이월하며, 체크리스트는 이후 릴리스의 템플릿으로 유지합니다.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
@@ -165,11 +165,11 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 | 0.9.0 | observability + interactive auth | `haechi-auth-oidc` 전체 authorization-code flow, `haechi-dashboard` 읽기 전용 audit 뷰어(hash-chain 무결성 표시, 요약/검색/타임라인), `haechi-crypto-kms` 추가 백엔드(Vault/GCP/Azure) |
 | 1.0.0 | stable API contract | migration policy, long-term audit schema, plugin sandbox/runtime conformance 및 allowlist/manifest 통과 외부 auth/classifier package 동적 로딩 |
 
-동적 npm package 로딩은 1.0 plugin sandbox 이전까지 금지한다. 0.4~0.7의 외부 provider는 `createRuntime(config, providers)` 프로그래매틱 주입만 지원한다.
+동적 npm package 로딩은 1.0 plugin sandbox 이전까지 금지합니다. 0.4~0.7의 외부 provider는 `createRuntime(config, providers)` 프로그래매틱 주입만 지원합니다.
 
 ## 9. 현재 허용 가능한 사용 범위
 
-현재 0.3.2는 다음 범위에서 사용한다.
+현재 0.3.2는 다음 범위에서 사용합니다.
 
 - 로컬 개발 환경
 - 샘플 payload 검증
@@ -178,7 +178,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 - GitHub 코드 리뷰와 보안 설계 논의
 - npm developer preview
 
-현재 0.3.2는 다음 용도로 사용하지 않는다.
+현재 0.3.2는 다음 용도로 사용하지 않습니다.
 
 - production LLM gateway
 - 인터넷에 직접 노출되는 proxy
