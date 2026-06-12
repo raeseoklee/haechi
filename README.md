@@ -8,7 +8,7 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.1-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.2-brightgreen)](docs/current/api-stability.md)
 
 **English** | [한국어](README.ko.md)
 
@@ -29,6 +29,20 @@ The current scope focuses on local adoption:
 - `haechi status`: show what is and is not protected under the current config
 - `haechi audit-verify`: verify the audit hash chain and print its head hash
 - `haechi mcp-wrap -- <command>`: wrap an MCP server with bidirectional stdio protection
+
+## Demo
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi local end-to-end demo: detection then tokenize/mask/redact, the email token round-trip, a no-plaintext audit, live readiness + Prometheus metrics, and a blocked card" width="900">
+</p>
+
+A self-contained, reproducible end-to-end walkthrough — a stub upstream behind the **real** proxy in `enforce` mode, no remote model required. It shows the model only ever seeing protected values, the email token round-trip (the caller gets the original back while the masked phone and redacted keys stay protected), the no-plaintext audit, the live `/__haechi/ready` + `/__haechi/metrics` surface, and a card blocked fail-closed. Run it yourself:
+
+```bash
+npm run demo
+```
+
+See [`examples/local-proxy-demo/`](examples/local-proxy-demo/).
 
 ## Install
 

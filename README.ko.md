@@ -8,7 +8,7 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.1-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.2-brightgreen)](docs/current/api-stability.md)
 
 [English](README.md) | **한국어**
 
@@ -29,6 +29,20 @@ Haechi는 LLM·MCP·vLLM·Ollama 및 에이전트 payload가 모델, 도구, 로
 - `haechi status`: 현재 설정에서 무엇이 보호되고 무엇이 보호되지 않는지 보여 줍니다
 - `haechi audit-verify`: audit hash chain을 검증하고 head hash를 출력합니다
 - `haechi mcp-wrap -- <command>`: MCP 서버를 양방향 stdio 보호로 감쌉니다
+
+## 데모
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi 로컬 end-to-end 데모: 탐지 후 tokenize/mask/redact, 이메일 토큰 라운드트립, 무평문 감사, 라이브 readiness + Prometheus metrics, 카드 차단" width="900">
+</p>
+
+원격 모델 없이 재현 가능한 end-to-end 데모입니다 — 스텁 업스트림 앞에 **실제** proxy를 `enforce` 모드로 둡니다. 모델은 보호된 값만 보고, 이메일 토큰은 라운드트립으로 복원되며(호출자는 원본을 돌려받고 마스킹된 전화·리댁션된 키는 보호 유지), 감사 로그에는 평문이 없고, 라이브 `/__haechi/ready` + `/__haechi/metrics`가 노출되며, 카드는 fail-closed로 차단됩니다. 직접 실행해 보십시오:
+
+```bash
+npm run demo
+```
+
+[`examples/local-proxy-demo/`](examples/local-proxy-demo/)를 참고하십시오.
 
 ## 설치
 
