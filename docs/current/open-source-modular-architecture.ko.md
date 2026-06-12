@@ -83,7 +83,7 @@ docs/
 
 | Mode | 변경 범위 | 적합한 상황 | 예시 |
 |---|---|---|---|
-| Local proxy | 코드 변경 거의 없음 | LLM HTTP, MCP Streamable HTTP를 빠르게 보호 | base URL을 `http://localhost:1016`로 변경 |
+| Local proxy | 코드 변경 거의 없음 | LLM HTTP, MCP Streamable HTTP를 빠르게 보호 | base URL을 `http://localhost:11016`로 변경 |
 | SDK wrapper | 작은 코드 변경 | 앱 내부 context를 더 정확히 전달 | `haechi.protectMessage(...)` |
 | Middleware | 웹/API 서버에 삽입 | Express/Fastify/FastAPI 같은 gateway | request/response hook |
 | Sidecar | self-hosted service 옆 배치 | 컨테이너/서버 운영 환경 | app -> sidecar -> provider |

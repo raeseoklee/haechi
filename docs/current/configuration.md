@@ -11,7 +11,7 @@
 {
   "mode": "dry-run",
   "target": { "type": "llm-http", "adapter": "openai-compatible", "upstream": "http://127.0.0.1:9999" },
-  "proxy": { "host": "127.0.0.1", "port": 1016 },
+  "proxy": { "host": "127.0.0.1", "port": 11016 },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
   "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000 },
@@ -44,7 +44,7 @@
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
 | `proxy.host` | non-empty string | `127.0.0.1` | Bind address. Non-loopback hosts require the `--allow-remote-bind` CLI flag — config alone will not start (see [Binding beyond loopback](#binding-beyond-loopback)). |
-| `proxy.port` | integer 0–65535 | `1016` | Listen port (`0` = ephemeral). Override per-run with `--port`. |
+| `proxy.port` | integer 0–65535 | `11016` | Listen port (`0` = ephemeral). Override per-run with `--port`. |
 
 ## `responseProtection`
 
@@ -246,7 +246,7 @@ The proxy refuses non-loopback hosts unless the CLI flag is passed explicitly �
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 ```
 
-**The proxy has no client authentication yet** (planned for 0.6): anyone who can reach the port can use your upstream and the token round-trip path. Use `--allow-remote-bind` only behind explicit network controls — bind `0.0.0.0` inside a container and restrict the host port mapping (`-p 127.0.0.1:1016:1016`), or front it with a firewall/VPN/authenticating reverse proxy.
+**The proxy has no client authentication yet** (planned for 0.6): anyone who can reach the port can use your upstream and the token round-trip path. Use `--allow-remote-bind` only behind explicit network controls — bind `0.0.0.0` inside a container and restrict the host port mapping (`-p 127.0.0.1:11016:11016`), or front it with a firewall/VPN/authenticating reverse proxy.
 
 ## Validation cheatsheet
 
