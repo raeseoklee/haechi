@@ -92,7 +92,7 @@ async function initCommand(argv) {
     mode: result.config.mode,
     warnings: [
       "The generated .haechi/dev.keys.json file is for local development only.",
-      "Haechi 0.3.x does not include a production KMS/HSM/Vault key provider."
+      "Core ships no production KMS/HSM/Vault key provider; KMS/Vault-backed custody is available via the haechi-crypto-kms satellite (external cryptoProvider)."
     ]
   });
 }

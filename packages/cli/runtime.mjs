@@ -306,7 +306,7 @@ export function normalizeConfig(config) {
     throw new Error("audit.anchor.everyRecords must be a positive integer");
   }
   if (merged.tokenVault.provider !== "local") {
-    throw new Error("0.2 only supports local token vault provider");
+    throw new Error("Only the local token vault provider is supported");
   }
   if (!["disabled", "local-dev"].includes(merged.tokenVault.revealPolicy)) {
     throw new Error(`Invalid tokenVault.revealPolicy: ${merged.tokenVault.revealPolicy}`);
