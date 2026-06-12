@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile, stat } from "node:fs/promises";
 import { readAuditSummary, verifyAuditChain } from "../../audit/index.mjs";
-import { DEFAULT_PROXY_PORT, createHaechiProxy } from "../../proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, HAECHI_VERSION, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
 import { validatePluginManifestFile } from "../../plugin/index.mjs";
 import { runMcpStdioFilter, wrapMcpChild } from "../../mcp-stdio/index.mjs";
@@ -287,21 +287,55 @@ async function proxyCommand(argv) {
   const address = await proxy.listen();
 
   const effectiveMode = config.policy.mode ?? config.mode;
-  console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
-  console.log(`Upstream: ${config.target.upstream}`);
-  console.log(`Mode: ${effectiveMode}`);
+  const jsonLogs = config.logging?.format === "json";
+  // Structured startup/shutdown logs honor logging.format. JSON mode emits one
+  // line per event carrying only non-secret operational fields (host/port/mode/
+  // version/warning codes) — never a payload, token, or PII value.
+  const logEvent = (level, event, fields = {}) => {
+    if (jsonLogs) {
+      const stream = level === "warn" ? process.stderr : process.stdout;
+      stream.write(`${JSON.stringify({ level, event, ...fields })}\n`);
+    }
+  };
+
+  if (jsonLogs) {
+    logEvent("info", "proxy_listening", {
+      host: address.host,
+      port: address.port,
+      upstream: config.target.upstream,
+      mode: effectiveMode,
+      version: HAECHI_VERSION
+    });
+  } else {
+    console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
+    console.log(`Upstream: ${config.target.upstream}`);
+    console.log(`Mode: ${effectiveMode}`);
+  }
   if (allowRemoteBind) {
-    console.error("warning: --allow-remote-bind exposes the proxy beyond loopback. Put Haechi behind explicit network access controls.");
+    if (jsonLogs) {
+      logEvent("warn", "remote_bind_enabled");
+    } else {
+      console.error("warning: --allow-remote-bind exposes the proxy beyond loopback. Put Haechi behind explicit network access controls.");
+    }
   }
   if (effectiveMode !== "enforce") {
-    console.error(`warning: policy mode is ${effectiveMode}. Payloads are inspected and audited but NOT modified or blocked. Set policy.mode to "enforce" to protect traffic.`);
+    if (jsonLogs) {
+      logEvent("warn", "non_enforce_mode", { mode: effectiveMode });
+    } else {
+      console.error(`warning: policy mode is ${effectiveMode}. Payloads are inspected and audited but NOT modified or blocked. Set policy.mode to "enforce" to protect traffic.`);
+    }
   }
   if (!config.responseProtection.enabled) {
-    console.error("warning: responseProtection.enabled is false. Upstream responses are forwarded without inspection.");
+    if (jsonLogs) {
+      logEvent("warn", "response_protection_disabled");
+    } else {
+      console.error("warning: responseProtection.enabled is false. Upstream responses are forwarded without inspection.");
+    }
   }
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.once(signal, async () => {
+      logEvent("info", "proxy_shutdown", { signal });
       await proxy.close();
       process.exit(0);
     });

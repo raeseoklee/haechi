@@ -560,6 +560,14 @@ function buildAuditEvent({ context, mode, enforced, blocked, payload, detections
     // and so is self-consistent for hash-chain verification of new events.
     schemaVersion: "1",
     id: randomUUID(),
+    // Per-REQUEST correlation id (WS4-A). Additive top-level field: the proxy
+    // generates one randomUUID() per request and threads it into the protect
+    // context, so the request- and response-direction events of ONE request
+    // share it (and it appears in the structured error log for the same request).
+    // It is null when no context.correlationId is set, preserving the existing
+    // non-proxy protectJson() behavior and keeping the api-contract subset green.
+    // It is a UUID — never a payload/identity/PII value.
+    correlationId: context.correlationId ?? null,
     timestamp: new Date().toISOString(),
     protocol: context.protocol ?? "custom",
     operation: context.operation ?? "protect",
