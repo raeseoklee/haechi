@@ -199,12 +199,20 @@ export function createRuntime(config, providers = {}) {
 
   const authProvider = resolveAuthProvider(normalized, providers, cryptoProvider, auditSink);
 
+  // The proxy's per-identity request rate limiter is an injectable collaborator,
+  // mirroring cryptoProvider/auditSink/tokenVault. The default is a per-process
+  // in-memory fixed-window counter; a multi-replica operator injects a
+  // shared-store implementation. Fail closed at construction if it lacks allow().
+  const rateLimiter = providers.rateLimiter ?? createRateLimiter();
+  assertProvider("rateLimiter", rateLimiter, ["allow"]);
+
   return {
     config: normalized,
     tokenVault,
     auditSink,
     authProvider,
     policyProfiles,
+    rateLimiter,
     protocolAdapter: createProtocolAdapter(normalized.target),
     haechi: createHaechi({
       mode: normalized.mode,
@@ -718,6 +726,63 @@ function createConfiguredCryptoProvider(config) {
     throw new Error("keys.provider external requires createRuntime(config, { cryptoProvider })");
   }
   return createLocalCryptoProvider({ keyFile: config.keys.keyFile });
+}
+
+// Default rate limiter: an in-memory fixed-window counter keyed by identity.
+// Per-process — it resets on restart and is NOT shared across replicas, so a
+// multi-replica operator injects a shared-store implementation via
+// createRuntime(config, { rateLimiter }) (see shared-responsibility.md §4).
+//
+// The window Map is self-bounding via a lazy, amortized sweep — NO timer (a
+// setInterval would keep the event loop alive and hang `node --test`). On
+// allow(), when the Map crosses a size threshold we evict a bounded number of
+// fully-expired entries (now - windowStart >= windowMs). A one-shot identity's
+// slot therefore does not linger forever once it ages past its window. The
+// allow(key, limit) -> boolean contract and the fixed-window 429 semantics are
+// unchanged; only stale bookkeeping is reclaimed.
+export function createRateLimiter({ windowMs = 60000, sweepThreshold = 1024, sweepBudget = 256 } = {}) {
+  const windows = new Map();
+
+  function sweepExpired(now) {
+    // Bounded amortized eviction: scan at most sweepBudget entries per call (Map
+    // iteration is insertion-ordered, so the oldest keys are visited first) and
+    // drop any whose window has fully elapsed. Amortized O(1) per allow().
+    let scanned = 0;
+    for (const [key, slot] of windows) {
+      if (scanned >= sweepBudget) {
+        break;
+      }
+      scanned += 1;
+      if (now - slot.windowStart >= windowMs) {
+        windows.delete(key);
+      }
+    }
+  }
+
+  return {
+    allow(key, limit) {
+      const now = Date.now();
+      // Reclaim aged-out one-shot identities before they accumulate unbounded.
+      if (windows.size >= sweepThreshold) {
+        sweepExpired(now);
+      }
+      const slot = windows.get(key);
+      if (!slot || now - slot.windowStart >= windowMs) {
+        windows.set(key, { windowStart: now, count: 1 });
+        return true;
+      }
+      if (slot.count >= limit) {
+        return false;
+      }
+      slot.count += 1;
+      return true;
+    },
+    // Test-only introspection of the live window count. Innocuous: it exposes a
+    // bare integer, never any key/identity value.
+    _size() {
+      return windows.size;
+    }
+  };
 }
 
 function assertProvider(name, provider, methods) {
