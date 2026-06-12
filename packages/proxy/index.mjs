@@ -57,6 +57,20 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
   const metrics = runtime.metrics ?? noopMetrics();
   const logger = createLogger(config.logging?.format ?? "text");
 
+  // WS4-B backpressure: a configurable global max-in-flight ceiling. 0 (default)
+  // disables it, preserving 1.1 behavior. When > 0 and the live count is at the
+  // ceiling, a NEW non-exempt request is rejected 503 + Retry-After BEFORE auth
+  // and body-read. The /__haechi/* observability routes are EXEMPT so metrics +
+  // liveness can be scraped under saturation.
+  const maxInFlight = config.limits.maxInFlight ?? 0;
+  const retryAfterSeconds = Math.max(1, Math.ceil((config.limits.shutdownGraceMs ?? 10000) / 1000));
+  // Live in-flight request count for the drain-tracking AND the ceiling. A
+  // bounded integer — never identity/value bearing.
+  let inFlight = 0;
+  // Resolves once in-flight drains to zero during a graceful close().
+  let drained = null;
+  let resolveDrained = null;
+
   const server = createServer(async (request, response) => {
     // Per-REQUEST correlation id: generated here, threaded into every protect
     // context (so the audit events of one request share it) AND into the error
@@ -64,6 +78,30 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
     const correlationId = randomUUID();
     const startedAt = process.hrtime.bigint();
     let routeId = "unknown";
+
+    // Observability routes are exempt from the in-flight ceiling and are NOT
+    // counted toward it: liveness/readiness/metrics must answer under saturation.
+    const exemptRoute = isObservabilityRoute(request);
+
+    // Backpressure: reject at the ceiling BEFORE doing any work. Counted in
+    // metrics by a bounded enum decision; the body is never read.
+    if (!exemptRoute && maxInFlight > 0 && inFlight >= maxInFlight) {
+      metrics.increment("haechi_overloaded_total");
+      response.writeHead(503, {
+        "content-type": "application/json",
+        "retry-after": String(retryAfterSeconds)
+      });
+      response.end(`${JSON.stringify({ error: "haechi_overloaded", message: "Server at max in-flight capacity; retry later" }, null, 2)}\n`);
+      return;
+    }
+
+    // Track in-flight for graceful drain + the ceiling. Decrement in finally so a
+    // throw/early-return can never leak the count (which would wedge close()).
+    let counted = false;
+    if (!exemptRoute) {
+      inFlight += 1;
+      counted = true;
+    }
     try {
       // Health + telemetry endpoints are unauthenticated and checked BEFORE auth
       // and body-read. They live under the reserved /__haechi/* prefix.
@@ -237,8 +275,26 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       const elapsedSeconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       // route label is a bounded route id (or "unknown") — never an identity/value.
       metrics.observe("haechi_request_duration_seconds", elapsedSeconds, { route: routeId });
+      if (counted) {
+        inFlight -= 1;
+        // If a graceful close() is awaiting drain and we just hit zero, resolve it.
+        if (resolveDrained && inFlight <= 0) {
+          resolveDrained();
+        }
+      }
     }
   });
+
+  // WS4-B tuned timeouts. Only override Node's server defaults when a value is
+  // configured (null = leave Node's default untouched, so behavior is unchanged
+  // unless an operator opts in). requestTimeout caps the whole request; a value
+  // of 0 disables the timeout (Node semantics) — validated upstream.
+  if (config.limits.requestTimeoutMs !== null && config.limits.requestTimeoutMs !== undefined) {
+    server.requestTimeout = config.limits.requestTimeoutMs;
+  }
+  if (config.limits.headersTimeoutMs !== null && config.limits.headersTimeoutMs !== undefined) {
+    server.headersTimeout = config.limits.headersTimeoutMs;
+  }
 
   return {
     server,
@@ -250,12 +306,85 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
         });
       });
     },
+    // WS4-B graceful drain. Stop accepting new connections, immediately close
+    // idle keep-alive sockets, and wait for in-flight requests to drain. After a
+    // configurable grace period (limits.shutdownGraceMs) force-close any lingering
+    // socket so a stuck keep-alive cannot hold shutdown open forever. The grace
+    // timer is .unref()-ed and cleared on a clean drain so `node --test` never
+    // hangs on a leaked timer.
     close() {
+      const graceMs = config.limits.shutdownGraceMs ?? 10000;
       return new Promise((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
+        let settled = false;
+        let graceTimer = null;
+
+        const finish = (error) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          if (graceTimer) {
+            clearTimeout(graceTimer);
+            graceTimer = null;
+          }
+          resolveDrained = null;
+          drained = null;
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        };
+
+        // Stop accepting new connections; the callback fires once all
+        // connections are closed (idle ones we close now, in-flight ones once
+        // they drain or the grace timer force-closes them).
+        server.close((error) => finish(error));
+
+        // Close idle keep-alive sockets immediately so they don't keep the
+        // server open waiting for a request that will never come.
+        if (typeof server.closeIdleConnections === "function") {
+          server.closeIdleConnections();
+        }
+
+        // If nothing is in flight, the close callback will fire promptly; still
+        // arm a drain resolver in case requests are mid-flight.
+        if (inFlight <= 0) {
+          // No in-flight work; closeIdleConnections handled keep-alive, so
+          // server.close() resolves on its own. Nothing more to wait for.
+          return;
+        }
+
+        // Wait for in-flight requests to drain, then force-close stragglers
+        // (the force close covers a request whose socket lingers after we stop).
+        drained = new Promise((res) => { resolveDrained = res; });
+        drained.then(() => {
+          if (typeof server.closeAllConnections === "function") {
+            server.closeAllConnections();
+          }
+        });
+
+        // Grace cap: after graceMs force every remaining connection closed so a
+        // lingering keep-alive socket cannot hold shutdown open forever. unref()
+        // so this timer alone never keeps the event loop (and `node --test`) alive.
+        graceTimer = setTimeout(() => {
+          if (typeof server.closeAllConnections === "function") {
+            server.closeAllConnections();
+          }
+        }, graceMs);
+        if (typeof graceTimer.unref === "function") {
+          graceTimer.unref();
+        }
       });
     }
   };
+}
+
+// True for the reserved /__haechi/* observability routes (live/ready/health/
+// metrics). These are EXEMPT from the in-flight ceiling so liveness + metrics
+// stay scrapable under saturation, and they do not count toward drain tracking.
+function isObservabilityRoute(request) {
+  return request.method === "GET" && typeof request.url === "string" && request.url.startsWith("/__haechi/");
 }
 
 // Readiness probe (WS4-A). FAIL-CLOSED: a gateway that cannot write its audit

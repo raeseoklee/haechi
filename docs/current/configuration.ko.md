@@ -8,12 +8,13 @@
 
 ```json
 {
+  "configVersion": 1,
   "mode": "dry-run",
   "target": { "type": "llm-http", "adapter": "openai-compatible", "upstream": "http://127.0.0.1:9999" },
   "proxy": { "host": "127.0.0.1", "port": 11016 },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
-  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256 },
+  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256, "maxInFlight": 0, "shutdownGraceMs": 10000, "requestTimeoutMs": null, "headersTimeoutMs": null },
   "policy": { "mode": "dry-run", "presets": ["korean-pii", "secrets-only", "llm-redact"], "defaultAction": "redact", "actions": { "card": "block" } },
   "filters": { "customRules": [] },
   "keys": { "provider": "local", "keyFile": ".haechi/dev.keys.json" },
@@ -30,6 +31,7 @@
 
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
+| `configVersion` | 양의 정수 | `1` | 설정 스키마 버전 스탬프입니다. 값이 없으면 현재 버전으로 간주합니다. 이 빌드가 이해하는 값보다 **더 높은** 값은 로드 시 **fail-closed**로 실패하며, 양수 정수가 아닌 값은 오류를 발생시킵니다. [`config-version.md`](./config-version.md)를 참고하십시오. |
 | `mode` | `dry-run` \| `report-only` \| `enforce` | `dry-run` | 전역 집행 모드입니다. `dry-run`/`report-only`는 탐지와 audit만 수행하며, `enforce`는 변환/차단을 적용합니다. `policy.mode`가 설정된 경우 해당 값이 우선합니다. |
 
 ## `target`
@@ -76,6 +78,10 @@ upstream JSON 응답을 검사합니다(기본적으로 꺼져 있습니다 — 
 | `limits.maxRequestBytes` | 양의 정수 | `1048576` | 요청 바디 크기 상한입니다. 초과 시 `413`을 반환합니다. 바디를 전부 버퍼링하지 않고 증분 방식으로 적용됩니다. |
 | `limits.upstreamTimeoutMs` | 양의 정수 | `120000` | upstream 요청 타임아웃입니다. 만료 시 `504 haechi_upstream_timeout`을 반환합니다. 연결 실패 시에는 `502 haechi_upstream_unreachable`을 반환합니다. |
 | `limits.maxNestingDepth` | 양의 정수 | `256` | 탐지 시 walk하는 JSON 최대 중첩 깊이입니다. 이보다 깊게 중첩된 바디는 `413 haechi_request_too_deeply_nested`로 거부되어(upstream 이전, fail-closed), 재귀적 payload walk를 스택 오버플로로부터 보호합니다. 컨테이너 하강을 제한하며, 한도에 있는 leaf는 여전히 검사됩니다. (별도로, 비UTF-8 요청 바디는 fail-closed로 거부됩니다: `400 haechi_request_body_not_utf8`.) |
+| `limits.maxInFlight` | 음이 아닌 정수 | `0` | 전역 max-in-flight 백프레셔 상한입니다. `0`은 비활성화이며(상한 없음 — 1.1 동작), `> 0`이고 현재 in-flight 수가 상한에 도달하면 **새** 요청은 인증/바디 읽기 **이전에** `Retry-After` 헤더와 `{ "error": "haechi_overloaded" }`와 함께 `503`으로 거부됩니다. `/__haechi/*` 관측 라우트는 **예외**입니다(포화 상태에서도 liveness·metrics 스크레이프 가능). 거부마다 `haechi_overloaded_total`이 증가합니다. [운영 런북](./operations-runbook.md#5-backpressure-tuning)을 참고하십시오. |
+| `limits.shutdownGraceMs` | 음이 아닌 정수(ms) | `10000` | 우아한 종료(graceful shutdown) 유예 기간입니다. `SIGINT`/`SIGTERM` 시 프록시는 새 연결 수락을 멈추고, idle keep-alive 소켓을 즉시 닫고, in-flight 요청이 빠질 때까지 기다린 뒤, 이 유예가 지나면 남은 소켓을 강제 종료하여 멈춘 keep-alive가 종료를 무한정 붙잡지 못하게 합니다. 백프레셔 `Retry-After` 초 값의 기준이기도 합니다. 오케스트레이터의 종료 유예를 이 값보다 **크게** 설정하십시오. |
+| `limits.requestTimeoutMs` | `null` \| 음이 아닌 정수(ms) | `null` | Node HTTP 서버의 `requestTimeout`에 매핑됩니다. `null`은 Node 기본값을 그대로 둡니다(동작 불변). 느린 전체 요청 전달을 제한하려면 숫자를 설정하고, `0`은 타임아웃 비활성화입니다(Node 의미). |
+| `limits.headersTimeoutMs` | `null` \| 음이 아닌 정수(ms) | `null` | Node HTTP 서버의 `headersTimeout`에 매핑됩니다. `null`은 Node 기본값을 그대로 둡니다. 느린 헤더 전달(slow-loris)을 제한하려면 숫자를 설정하고, `0`은 비활성화입니다. |
 
 ## `policy`
 
@@ -189,6 +195,20 @@ const runtime = createRuntime(config, { metrics });
 ### `correlationId` (audit + 로그)
 
 프록시는 요청마다 `correlationId`(UUID)를 생성합니다. 이 값은 protect 컨텍스트로 전달되어 한 요청의 request·response 방향 audit 이벤트가 동일한 추가(additive) 최상위 `correlationId` 필드를 갖게 하며, 프록시 내부 오류 로그 줄에도 전달되어 운영자가 기록된 오류를 그 audit 추적과 연결할 수 있게 합니다. 프록시가 아닌 `protectJson()` 호출에서는 `null`입니다(기존 동작 보존). 이 id는 UUID이며 페이로드/identity/PII 값을 **절대** 담지 않습니다.
+
+## 환경변수 설정 오버레이 (배포)
+
+컨테이너 / 12-factor 배포를 위해, **비밀이 아닌 운영 키의 고정 allowlist**를 환경변수로 덮어쓸 수 있습니다. 환경변수 값은 **설정 파일보다 우선**하며 **fail-closed**로 검증됩니다 — 잘못된 값은 프로세스를 기동 실패시킵니다. `loadConfig()`에서 파일을 읽은 뒤 검증 이전에 적용됩니다.
+
+| 환경변수 | 설정 키 | 타입 / 값 |
+|---|---|---|
+| `HAECHI_PROXY_PORT` | `proxy.port` | 정수 0–65535 |
+| `HAECHI_PROXY_HOST` | `proxy.host` | 비어 있지 않은 문자열 |
+| `HAECHI_UPSTREAM` | `target.upstream` | URL 문자열 |
+| `HAECHI_MODE` | `mode` | `dry-run` \| `report-only` \| `enforce` |
+| `HAECHI_LOG_FORMAT` | `logging.format` | `text` \| `json` |
+
+**비밀은 설계상 오버레이 대상이 아닙니다.** `keys.*`, auth 토큰 저장소, 토큰/비밀에 대한 `HAECHI_*` 변수는 **없습니다**. 비밀은 설정 파일에 두거나 주입된 provider(`createRuntime(config, { cryptoProvider, authProvider, … })`)로 공급합니다. 비밀을 프로세스 환경에 두면 `/proc`, 크래시 덤프, 오케스트레이터 inspect 출력으로 누출될 위험이 있으므로 오버레이 allowlist에서 제외합니다. [운영 런북](./operations-runbook.md#2-configuration-via-the-env-var-overlay)을 참고하십시오.
 
 ## `mcp`
 
@@ -353,7 +373,7 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## 검증 요약
 
-다음은 로드 시 오류(fail-closed)를 발생시킵니다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; boolean이 아닌 `responseProtection.scanNumbers`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.*`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도; `text`/`json`이 아닌 `logging.format`; boolean이 아닌 `metrics.enabled`.
+다음은 로드 시 오류(fail-closed)를 발생시킵니다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; boolean이 아닌 `responseProtection.scanNumbers`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.maxRequestBytes`/`limits.upstreamTimeoutMs`/`limits.maxNestingDepth`; 음수이거나 정수가 아닌 `limits.maxInFlight`/`limits.shutdownGraceMs`; `null`이 아니면서 음수이거나 정수가 아닌 `limits.requestTimeoutMs`/`limits.headersTimeoutMs`; 양수 정수가 아니거나 **지원 범위를 넘는** `configVersion`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도; `text`/`json`이 아닌 `logging.format`; boolean이 아닌 `metrics.enabled`; 잘못된 `HAECHI_*` 환경변수 오버레이 값(잘못된 `HAECHI_PROXY_PORT`, 알 수 없는 `HAECHI_MODE`, 형식이 잘못된 `HAECHI_UPSTREAM` 등).
 
 # Satellite 운영자 설정 (0.9)
 

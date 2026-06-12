@@ -1,4 +1,5 @@
 {
+  "configVersion": 1,
   "mode": "dry-run",
   "target": {
     "type": "llm-http",
@@ -25,7 +26,12 @@
   },
   "limits": {
     "maxRequestBytes": 1048576,
-    "upstreamTimeoutMs": 120000
+    "maxNestingDepth": 256,
+    "upstreamTimeoutMs": 120000,
+    "maxInFlight": 0,
+    "shutdownGraceMs": 10000,
+    "requestTimeoutMs": null,
+    "headersTimeoutMs": null
   },
   "policy": {
     "mode": "dry-run",

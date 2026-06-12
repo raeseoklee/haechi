@@ -8,12 +8,13 @@
 
 ```json
 {
+  "configVersion": 1,
   "mode": "dry-run",
   "target": { "type": "llm-http", "adapter": "openai-compatible", "upstream": "http://127.0.0.1:9999" },
   "proxy": { "host": "127.0.0.1", "port": 11016 },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
-  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256 },
+  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256, "maxInFlight": 0, "shutdownGraceMs": 10000, "requestTimeoutMs": null, "headersTimeoutMs": null },
   "policy": { "mode": "dry-run", "presets": ["korean-pii", "secrets-only", "llm-redact"], "defaultAction": "redact", "actions": { "card": "block" } },
   "filters": { "customRules": [] },
   "keys": { "provider": "local", "keyFile": ".haechi/dev.keys.json" },
@@ -30,6 +31,7 @@
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
+| `configVersion` | positive integer | `1` | Config schema version stamp. Absent = treated as the current version. A value **newer** than this build understands **fails closed** at load; a non-positive/non-integer value throws. See [`config-version.md`](./config-version.md). |
 | `mode` | `dry-run` \| `report-only` \| `enforce` | `dry-run` | Global enforcement mode. `dry-run`/`report-only` detect + audit only; `enforce` transforms/blocks. Overridden by `policy.mode` when set. |
 
 ## `target`
@@ -76,6 +78,10 @@ Inspects upstream JSON responses (off by default — turn on to protect what com
 | `limits.maxRequestBytes` | positive integer | `1048576` | Request body cap; over the limit returns `413`. Enforced incrementally (the body is not fully buffered first). |
 | `limits.upstreamTimeoutMs` | positive integer | `120000` | Upstream request timeout; on expiry returns `504 haechi_upstream_timeout`. Connection failure returns `502 haechi_upstream_unreachable`. |
 | `limits.maxNestingDepth` | positive integer | `256` | Max JSON nesting depth walked during detection. A more deeply nested body is rejected `413 haechi_request_too_deeply_nested` (fail-closed, before upstream), guarding the recursive payload walk against a stack overflow. Bounds container descent; leaves at the limit are still inspected. (Separately, a non-UTF-8 request body is rejected fail-closed: `400 haechi_request_body_not_utf8`.) |
+| `limits.maxInFlight` | non-negative integer | `0` | Global max-in-flight backpressure ceiling. `0` disables it (no ceiling — 1.1 behavior). When `> 0` and the live in-flight count is at the ceiling, a **new** request is rejected `503` with a `Retry-After` header and `{ "error": "haechi_overloaded" }`, **before** auth/body-read. The `/__haechi/*` observability routes are **exempt** (liveness + metrics stay scrapable under saturation). Each rejection increments `haechi_overloaded_total`. See the [operations runbook](./operations-runbook.md#5-backpressure-tuning). |
+| `limits.shutdownGraceMs` | non-negative integer (ms) | `10000` | Graceful-shutdown grace period. On `SIGINT`/`SIGTERM` the proxy stops accepting connections, closes idle keep-alive sockets immediately, waits for in-flight requests to drain, then after this grace force-closes any lingering socket so a stuck keep-alive cannot hold shutdown open forever. Also seeds the backpressure `Retry-After` seconds. Set your orchestrator's termination grace **above** this value. |
+| `limits.requestTimeoutMs` | `null` \| non-negative integer (ms) | `null` | Maps to the Node HTTP server `requestTimeout`. `null` leaves Node's default untouched (behavior unchanged). Set a number to cap slow whole-request delivery; `0` disables the timeout (Node semantics). |
+| `limits.headersTimeoutMs` | `null` \| non-negative integer (ms) | `null` | Maps to the Node HTTP server `headersTimeout`. `null` leaves Node's default untouched. Set a number to cap slow header delivery (slow-loris); `0` disables it. |
 
 ## `policy`
 
@@ -189,6 +195,20 @@ An injected `metrics` must implement `increment(name, labels?, amount?)`, `obser
 ### `correlationId` (audit + logs)
 
 The proxy generates a per-**request** `correlationId` (a UUID). It is threaded into the protect context, so each request's request- and response-direction audit events carry the same additive top-level `correlationId` field, and into the proxy's internal-error log line — letting an operator join a logged error to its audit trail. It is `null` for non-proxy `protectJson()` calls (preserving prior behavior). The id is a UUID and is **never** a payload/identity/PII value.
+
+## Env-var configuration overlay (deploy)
+
+For container / 12-factor deploys, a **fixed allowlist of NON-SECRET operational keys** can be overridden from the environment. The env value **wins over the config file** and is validated **fail-closed** — an invalid value makes the process fail to start. Applied in `loadConfig()` after reading the file and before validation.
+
+| Env var | Config key | Type / values |
+|---|---|---|
+| `HAECHI_PROXY_PORT` | `proxy.port` | integer 0–65535 |
+| `HAECHI_PROXY_HOST` | `proxy.host` | non-empty string |
+| `HAECHI_UPSTREAM` | `target.upstream` | URL string |
+| `HAECHI_MODE` | `mode` | `dry-run` \| `report-only` \| `enforce` |
+| `HAECHI_LOG_FORMAT` | `logging.format` | `text` \| `json` |
+
+**Secrets are NOT overlayable — by design.** There is **no** `HAECHI_*` variable for `keys.*`, the auth token store, or any token/secret. Secrets stay in the config file or are supplied via injected providers (`createRuntime(config, { cryptoProvider, authProvider, … })`). Putting a secret in a process environment risks leaking it through `/proc`, crash dumps, and orchestrator inspect output, so the overlay allowlist excludes them. See the [operations runbook](./operations-runbook.md#2-configuration-via-the-env-var-overlay).
 
 ## `mcp`
 
@@ -353,7 +373,7 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 ## Validation cheatsheet
 
-These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.*`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`; non-`text`/`json` `logging.format`; non-boolean `metrics.enabled`.
+These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.maxRequestBytes`/`limits.upstreamTimeoutMs`/`limits.maxNestingDepth`; negative or non-integer `limits.maxInFlight`/`limits.shutdownGraceMs`; non-`null`/negative/non-integer `limits.requestTimeoutMs`/`limits.headersTimeoutMs`; non-positive-integer or **newer-than-supported** `configVersion`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`; non-`text`/`json` `logging.format`; non-boolean `metrics.enabled`; an invalid `HAECHI_*` env overlay value (bad `HAECHI_PROXY_PORT`, unknown `HAECHI_MODE`, malformed `HAECHI_UPSTREAM`, …).
 
 # Satellite operator configuration (0.9)
 

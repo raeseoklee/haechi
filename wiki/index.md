@@ -19,6 +19,7 @@ Every page must be listed here with a one-line summary. Update this index on eve
 - [[dashboard-audit-viewer]] — the zero-dep read-only audit viewer satellite and its security model (loopback/Host-allowlist/CSP/sessionGuard seam)
 - [[oidc-session-broker]] — the interactive OIDC session broker satellite (authorization-code + PKCE, state-first callback, shared JWS verifier, PII-safe audit)
 - [[plugin-sandbox]] — the 1.0 signed `authProvider` plugin sandbox: Ed25519 trust gate, worker_threads isolation (honest residual), lifecycle audit, conformance gate
+- [[operability-day2]] — WS4 operability: health split + `/metrics` + structured logs/correlationId (WS4-A) and graceful drain + backpressure + tuned timeouts + env overlay + Docker/compose/runbook + configVersion (WS4-B)
 
 ## Decisions
 

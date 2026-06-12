@@ -29,8 +29,17 @@ const KNOWN_PLUGIN_CAPABILITIES = new Set([
 
 export const DEFAULT_CONFIG_PATH = "haechi.config.json";
 
+// Current config schema version. A versioned anchor so a FUTURE breaking schema
+// change has something to compare against. Additive: a config WITHOUT the field
+// is treated as the current version; an unknown/newer value fails closed (a
+// config written by a newer Haechi may use semantics this build does not
+// understand — refuse rather than silently mis-interpret it). See
+// docs/current/config-version.md.
+export const CONFIG_VERSION = 1;
+
 export function defaultConfig() {
   return {
+    configVersion: CONFIG_VERSION,
     mode: "dry-run",
     target: {
       type: "llm-http",
@@ -58,7 +67,16 @@ export function defaultConfig() {
     limits: {
       maxRequestBytes: 1048576,
       maxNestingDepth: 256,
-      upstreamTimeoutMs: 120000
+      upstreamTimeoutMs: 120000,
+      // WS4-B resilience (additive; defaults preserve 1.1 behavior).
+      // maxInFlight 0 = backpressure disabled (no ceiling). shutdownGraceMs is
+      // the graceful-drain grace period before in-flight requests/keep-alive
+      // sockets are force-closed on close(). requestTimeoutMs/headersTimeoutMs
+      // are null = leave Node's server defaults untouched; set a number to tune.
+      maxInFlight: 0,
+      shutdownGraceMs: 10000,
+      requestTimeoutMs: null,
+      headersTimeoutMs: null
     },
     policy: {
       mode: "dry-run",
@@ -136,7 +154,88 @@ export function defaultConfig() {
 
 export async function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
   const raw = JSON.parse(await readFile(configPath, "utf8"));
-  return normalizeConfig(raw);
+  const overlaid = applyEnvOverlay(raw, process.env);
+  return normalizeConfig(overlaid);
+}
+
+// WS4-B env-var configuration overlay. A FIXED ALLOWLIST of NON-SECRET
+// operational keys may be overridden from the environment for container/12-factor
+// deploys; env WINS over the file for these. Applied AFTER reading the file and
+// BEFORE normalizeConfig, so the overlaid value goes through the same fail-closed
+// validation. An invalid env value (bad port, unknown mode) THROWS — it is never
+// silently ignored — naming the offending variable.
+//
+// SECURITY: secrets/keys/tokens are DELIBERATELY NOT overlayable. There is no
+// HAECHI_* key for keys.*, the auth store/tokens, or any path-to-key — those stay
+// in the config file or are supplied via injected providers. Adding a secret to
+// this allowlist would invite leaking it through a process environment.
+const ENV_OVERLAY = [
+  {
+    env: "HAECHI_PROXY_PORT",
+    apply(config, value) {
+      const port = Number(value);
+      if (!Number.isInteger(port) || port < 0 || port > 65535) {
+        throw new Error(`HAECHI_PROXY_PORT must be an integer from 0 to 65535 (got: ${JSON.stringify(value)})`);
+      }
+      config.proxy = { ...(config.proxy ?? {}), port };
+    }
+  },
+  {
+    env: "HAECHI_PROXY_HOST",
+    apply(config, value) {
+      if (typeof value !== "string" || !value.trim()) {
+        throw new Error("HAECHI_PROXY_HOST must be a non-empty string");
+      }
+      config.proxy = { ...(config.proxy ?? {}), host: value };
+    }
+  },
+  {
+    env: "HAECHI_UPSTREAM",
+    apply(config, value) {
+      if (typeof value !== "string" || !value.trim()) {
+        throw new Error("HAECHI_UPSTREAM must be a non-empty URL string");
+      }
+      try {
+        // eslint-disable-next-line no-new
+        new URL(value);
+      } catch {
+        throw new Error(`HAECHI_UPSTREAM must be a valid URL (got: ${JSON.stringify(value)})`);
+      }
+      config.target = { ...(config.target ?? {}), upstream: value };
+    }
+  },
+  {
+    env: "HAECHI_MODE",
+    apply(config, value) {
+      if (!["dry-run", "report-only", "enforce"].includes(value)) {
+        throw new Error(`HAECHI_MODE must be one of dry-run|report-only|enforce (got: ${JSON.stringify(value)})`);
+      }
+      config.mode = value;
+    }
+  },
+  {
+    env: "HAECHI_LOG_FORMAT",
+    apply(config, value) {
+      if (!["text", "json"].includes(value)) {
+        throw new Error(`HAECHI_LOG_FORMAT must be "text" or "json" (got: ${JSON.stringify(value)})`);
+      }
+      config.logging = { ...(config.logging ?? {}), format: value };
+    }
+  }
+];
+
+export function applyEnvOverlay(rawConfig, env = process.env) {
+  // Clone shallowly so we don't mutate the caller's object; nested objects we
+  // touch are themselves shallow-cloned in each apply().
+  const config = { ...rawConfig };
+  for (const { env: key, apply } of ENV_OVERLAY) {
+    const value = env[key];
+    if (value === undefined) {
+      continue;
+    }
+    apply(config, value);
+  }
+  return config;
 }
 
 export async function writeDefaultConfig(configPath = DEFAULT_CONFIG_PATH, { force = false } = {}) {
@@ -263,6 +362,9 @@ export function normalizeConfig(config) {
   const merged = {
     ...defaultConfig(),
     ...config,
+    // A config that omits configVersion (e.g. a 1.1 file written before the
+    // stamp existed) is treated as the current version, not undefined.
+    configVersion: config.configVersion ?? CONFIG_VERSION,
     target: {
       ...defaultConfig().target,
       ...(config.target ?? {})
@@ -429,6 +531,31 @@ export function normalizeConfig(config) {
   }
   if (typeof merged.limits.upstreamTimeoutMs !== "number" || merged.limits.upstreamTimeoutMs < 1) {
     throw new Error("limits.upstreamTimeoutMs must be a positive number");
+  }
+  // WS4-B resilience limits, fail-closed. maxInFlight 0 disables the ceiling.
+  if (!Number.isInteger(merged.limits.maxInFlight) || merged.limits.maxInFlight < 0) {
+    throw new Error("limits.maxInFlight must be a non-negative integer (0 disables the in-flight ceiling)");
+  }
+  if (!Number.isInteger(merged.limits.shutdownGraceMs) || merged.limits.shutdownGraceMs < 0) {
+    throw new Error("limits.shutdownGraceMs must be a non-negative integer (milliseconds)");
+  }
+  // requestTimeoutMs/headersTimeoutMs: null leaves Node's server default; a set
+  // value must be a non-negative integer (0 disables that timeout, Node semantics).
+  for (const field of ["requestTimeoutMs", "headersTimeoutMs"]) {
+    const value = merged.limits[field];
+    if (value !== null && value !== undefined
+      && (!Number.isInteger(value) || value < 0)) {
+      throw new Error(`limits.${field} must be null or a non-negative integer (milliseconds; 0 disables the timeout)`);
+    }
+  }
+  // configVersion: a versioned anchor for future schema changes. Fail closed on a
+  // newer/unknown version (a config a newer Haechi wrote may use semantics this
+  // build does not understand) and on a non-positive-integer value.
+  if (!Number.isInteger(merged.configVersion) || merged.configVersion < 1) {
+    throw new Error("configVersion must be a positive integer");
+  }
+  if (merged.configVersion > CONFIG_VERSION) {
+    throw new Error(`Unsupported configVersion ${merged.configVersion}: this Haechi build understands configVersion <= ${CONFIG_VERSION}. Upgrade Haechi or lower configVersion (see docs/current/config-version.md).`);
   }
   validatePolicyExtras(merged.policy);
   validateFilters(merged.filters);
