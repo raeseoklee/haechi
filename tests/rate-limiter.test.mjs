@@ -142,6 +142,101 @@ test("an injected allow-all rateLimiter lets every request through", async () =>
   }
 });
 
+test("an injected ASYNC rateLimiter (Promise<boolean>) gates a 429 when it resolves false", async () => {
+  // A shared-store (Redis-backed) limiter is inherently async: allow() returns a
+  // Promise<boolean>. The proxy `await`s it, so a Promise resolving false must
+  // 429 (a naive `!somePromise` is always false — a Promise is truthy — which
+  // would silently fail open). This pins the WS3 async-seam core change.
+  const dir = await mkdtemp(join(tmpdir(), "haechi-rl-async-deny-"));
+  const { keyFile, auditPath, storePath, cryptoProvider } = await project(dir);
+  const tok = await addToken({ path: storePath, cryptoProvider, type: "service", scopes: ["tier:a"] });
+
+  const asyncCalls = [];
+  const asyncDenyLimiter = {
+    async allow(key, limit) {
+      asyncCalls.push({ key, limit });
+      return false; // resolves a Promise<false>
+    }
+  };
+
+  const config = {
+    mode: "enforce",
+    auth: { provider: "bearer", store: storePath },
+    policy: {
+      mode: "enforce", presets: [], defaultAction: "allow",
+      profiles: { limited: { rate: { requestsPerMinute: 5 } } },
+      profileBinding: { byScope: { "tier:a": "limited" }, default: "limited" }
+    },
+    keys: { keyFile }, audit: { path: auditPath }
+  };
+
+  const { proxy, upstream, base } = await startProxyWithProviders(config, echoUpstream(), { rateLimiter: asyncDenyLimiter });
+  try {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${tok.token}` },
+      body: JSON.stringify({ messages: [] })
+    });
+    assert.equal(res.status, 429);
+    assert.equal((await res.json()).error, "haechi_rate_limited");
+    assert.equal(asyncCalls.length, 1);
+    assert.equal(asyncCalls[0].limit, 5);
+    assert.match(await readFile(auditPath, "utf8"), /"decision":"rate_limited"/);
+  } finally {
+    await proxy.close();
+    upstream.close();
+  }
+});
+
+test("an injected ASYNC rateLimiter passes when its Promise resolves true", async () => {
+  // The other side of the await: a Promise<true> must let the request through to
+  // upstream (200), proving the await unwraps the boolean rather than coercing a
+  // truthy Promise.
+  const dir = await mkdtemp(join(tmpdir(), "haechi-rl-async-allow-"));
+  const { keyFile, auditPath, storePath, cryptoProvider } = await project(dir);
+  const tok = await addToken({ path: storePath, cryptoProvider, type: "service", scopes: ["tier:a"] });
+
+  let allowCalls = 0;
+  const asyncAllowLimiter = {
+    async allow() {
+      allowCalls += 1;
+      return true; // resolves a Promise<true>
+    }
+  };
+
+  const config = {
+    mode: "enforce",
+    auth: { provider: "bearer", store: storePath },
+    policy: {
+      mode: "enforce", presets: [], defaultAction: "allow",
+      // 1/min would 429 the second request with the default SYNC limiter; the
+      // async allow-all limiter must override that across multiple hits.
+      profiles: { limited: { rate: { requestsPerMinute: 1 } } },
+      profileBinding: { byScope: { "tier:a": "limited" }, default: "limited" }
+    },
+    keys: { keyFile }, audit: { path: auditPath }
+  };
+
+  const { proxy, upstream, base } = await startProxyWithProviders(config, echoUpstream(), { rateLimiter: asyncAllowLimiter });
+  try {
+    async function hit() {
+      const res = await fetch(`${base}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${tok.token}` },
+        body: JSON.stringify({ messages: [] })
+      });
+      return res.status;
+    }
+    assert.equal(await hit(), 200);
+    assert.equal(await hit(), 200);
+    assert.equal(allowCalls, 2);
+    assert.doesNotMatch(await readFile(auditPath, "utf8"), /"decision":"rate_limited"/);
+  } finally {
+    await proxy.close();
+    upstream.close();
+  }
+});
+
 test("createRuntime exposes a default rateLimiter implementing allow()", async () => {
   const dir = await mkdtemp(join(tmpdir(), "haechi-rl-default-"));
   const { keyFile, auditPath } = await project(dir);
