@@ -6,7 +6,7 @@
 
 ## 1. 보호 대상
 
-Haechi가 보호하려는 주요 자산은 다음이다.
+Haechi가 보호하려는 주요 자산은 다음과 같습니다.
 
 | 자산 | 예시 | 보호 목표 |
 |---|---|---|
@@ -24,7 +24,7 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | CLI local process | 개발자 로컬 신뢰 | dev key 경고, dry-run 기본값 |
 | HTTP proxy listener | 비신뢰 client 입력 | loopback bind 기본, remote bind 명시 플래그 |
 | Upstream model/tool server | 비신뢰 또는 부분 신뢰 | request/response protection, uninspectable response fail-closed |
-| Streaming response | 검사(bounded) 또는 차단 | `inspect` 모드는 bounded cross-frame 버퍼로 SSE/NDJSON을 stream-filter함; `block`(기본값)은 거부 |
+| Streaming response | 검사(bounded) 또는 차단 | `inspect` 모드는 bounded cross-frame 버퍼로 SSE/NDJSON을 stream-filter합니다. `block`(기본값)은 거부합니다 |
 | MCP stdio peer | 부분 신뢰 | JSON-RPC 2.0 요구, method allowlist |
 | Local filesystem | 부분 신뢰 | local key/token vault 0600, audit hash chain |
 | External provider/plugin | 비신뢰 | provider method contract, plugin manifest-only gate |
@@ -34,8 +34,8 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | 위협 | 영향 | 현재 통제 |
 |---|---|---|
 | 인터넷 노출 proxy | 인증 없는 LLM gateway | non-loopback bind 기본 실패 |
-| streaming 우회 | SSE/NDJSON 평문 유출 | `inspect` 모드는 SSE/NDJSON을 stream-filter함; `block`(기본값)은 거부; `pass-through`는 명시적으로 감사된 opt-out |
-| Ollama 암묵 streaming 우회 | `stream` 생략 시 NDJSON 평문 유출 | `/api/chat`·`/api/generate`는 `stream: false` 명시 없으면 streaming으로 간주해 기본 차단 |
+| streaming 우회 | SSE/NDJSON 평문 유출 | `inspect` 모드는 SSE/NDJSON을 stream-filter합니다. `block`(기본값)은 거부하고, `pass-through`는 명시적으로 감사된 opt-out입니다 |
+| Ollama 암묵 streaming 우회 | `stream` 생략 시 NDJSON 평문 유출 | `/api/chat`·`/api/generate`는 `stream: false`를 명시하지 않으면 streaming으로 간주해 기본 차단합니다 |
 | 비JSON/압축/대용량 응답 | responseProtection 우회 | fail-closed response policy |
 | token reveal 남용 | tokenized PII 복원 | revealPolicy 기본 disabled, reveal/purge 결정 audit 기록 |
 | audit 변조 | 감사 증거 신뢰 저하 | SHA-256 hash chain |
@@ -65,7 +65,7 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 | 토큰 엔드포인트 POST(및 Vault `fetch`)를 통한 broker SSRF — cloud metadata (0.9) | discovery와 request 사이에 `169.254.169.254`로 DNS-rebind되는 `token_endpoint`(또는 운영자 제공 `VAULT_ADDR`)가 instance-metadata 자격증명을 유출 | 모든 egress(discovery GET, 공유 verifier 경유 JWKS GET, token-exchange POST, end-session redirect, `haechi-crypto-kms` Vault `fetch`)가 **request 직전**(post-DNS) `lookup` 후 `isBlockedAddress` 재검사를 `redirect: "error"`·bounded body·timeout과 함께 수행. 운영자 신뢰 엔드포인트에 한함 |
 | audit/로그로의 token/secret leak (broker) (0.9) | ID/access/refresh token, `client_secret`, `code`, `state`, `nonce`, raw `sub`가 audit 로그나 client 응답에 기록됨 | broker는 모든 audit 이벤트를 자체 allowlist로 projection해 `subjectHash`/`issuerHash`/`sessionIdHash`(keyed-HMAC) + `provider`/`reasonCode`/timestamp만 방출; core `FORBIDDEN_KEYS`를 broker token/claim key까지 확장; access token은 **폐기**(저장·사용 안 함). 실질적 잔여 없음 |
 | KMS backend egress (Vault HTTP, GCP/Azure SDK) (0.9) | `haechi-crypto-kms` Vault/GCP/Azure backend가 key material이나 provider/key-path 상세를 유출하거나 의도치 않은 엔드포인트에 도달 | optional-peer + injected-client 모델과 **faithful-mock conformance**(cross-key·corrupted-blob 거부, HMAC determinism/domain-separation); Vault `fetch`는 위 satellite-local SSRF 가드 수행; 모든 backend는 provider 오류를 generic fail-closed 오류로 매핑하고 provider/key-ARN 상세를 audit에 기록하지 않음. live-backend 검증은 CI 외부 |
-| 동적 로딩된 악의적/침해된 signed plugin (1.0) | signed `authProvider` plugin이 worker sandbox에 로딩된 뒤 실행 중 host를 악용 | `canonicalize({pluginId, kind, version, capabilities, coreVersionRange, entrySha256, notBefore, notAfter})`에 대한 Ed25519 서명, **trust-anchor-only** 키 해석(`signerKeyId`가 allowlist된 anchor가 아니면 verify 이전 거부; 알고리즘은 Ed25519로 고정), pin + `pluginId`별 version-floor + revocation denylist(`revokedSignerKeyIds`/`revokedEntrySha256`) + validity-window 집행, `assertAuthProviderConformance` 정합성 게이트, `node:worker_threads` memory/crash 격리 + per-call timeout-terminate, 전체 lifecycle audit(`plugin.load.*`/`authenticate.deny`/`worker.terminated`). 전체 게이트는 매 respawn마다 재실행. **수용된 잔여:** signed plugin 자신의 `fs`/`fetch`/`process.env`는 차단되지 않으며(`networkEgress: false`는 선언일 뿐 1.0에서 집행 통제 아님) 정당하게 받은 credential을 exfiltrate할 수 있음 — 오직 signing/vetting 신뢰 모델로만 통제됨. **1.1이 새 opt-in `process-isolated` 런타임에 대해 이 잔여를 닫는다**(다음 행, P1-SEC-027); `worker_threads`(1.0) 모드는 불변이며 이 수용된 잔여를 유지 |
+| 동적 로딩된 악의적/침해된 signed plugin (1.0) | signed `authProvider` plugin이 worker sandbox에 로딩된 뒤 실행 중 host를 악용 | `canonicalize({pluginId, kind, version, capabilities, coreVersionRange, entrySha256, notBefore, notAfter})`에 대한 Ed25519 서명, **trust-anchor-only** 키 해석(`signerKeyId`가 allowlist된 anchor가 아니면 verify 이전 거부; 알고리즘은 Ed25519로 고정), pin + `pluginId`별 version-floor + revocation denylist(`revokedSignerKeyIds`/`revokedEntrySha256`) + validity-window 집행, `assertAuthProviderConformance` 정합성 게이트, `node:worker_threads` memory/crash 격리 + per-call timeout-terminate, 전체 lifecycle audit(`plugin.load.*`/`authenticate.deny`/`worker.terminated`). 전체 게이트는 매 respawn마다 재실행. **수용된 잔여:** signed plugin 자신의 `fs`/`fetch`/`process.env`는 차단되지 않으며(`networkEgress: false`는 선언일 뿐 1.0에서 집행 통제 아님) 정당하게 받은 credential을 exfiltrate할 수 있음 — 오직 signing/vetting 신뢰 모델로만 통제됨. **1.1이 새 opt-in `process-isolated` 런타임에 대해 이 잔여를 닫음**(다음 행, P1-SEC-027); `worker_threads`(1.0) 모드는 불변이며 이 수용된 잔여를 유지 |
 | plugin으로의 PII/secret leak (1.0) | request body·crypto 키·token vault·raw claim이 worker 경계를 넘어 유출 | host는 worker에 **credential slice만** 전달(`Authorization` 헤더 / bearer token — request body 절대 안 보냄, crypto 키 절대 안 보냄); wire는 MessagePort 위 평문 JSON 문자열; **null-prototype, own-key-allowlist claims sanitizer**가 `__proto__`/`constructor`/`prototype`을 제거하고 크기를 bound한 뒤 **host**가 `buildExternalIdentity`로 keyed-HMAC identity를 구성(HMAC 키는 worker에 들어가지 않음). **수용된 잔여:** auth plugin이 정당하게 검증하는 credential은 그 plugin에 보임(위 행 참조) |
 | 경계 간 object/proto smuggling (1.0) | 악의적 claims object가 host prototype을 오염시키거나 raw 값을 경계 너머로 밀반입 | JSON-string wire만 사용(structured-clone 없음, `SharedArrayBuffer`/transferables 없음 → shared-memory·object-graph 채널 없음) + `buildExternalIdentity` 이전 null-proto own-key-allowlist sanitizer. 실질적 잔여 없음 |
 | plugin entry의 swap / TOCTOU (1.0) | 서명 검사 후 실행 전에 검증된 entry 바이트가 swap됨(예: symlink 경로 재해석) | 서명이 `entrySha256`을 바인딩; loader는 entry를 **메모리로** 읽어 hash·verify하고 **메모리 내 검증된 소스에서** Worker를 spawn(`eval: true`)하며 검증 후 경로를 재해석하지 않고 symlink entry를 거부. 실질적 잔여 없음 |
@@ -77,9 +77,9 @@ Haechi가 보호하려는 주요 자산은 다음이다.
 
 ## 4. 명시적 제외
 
-Haechi는 다음을 보장하지 않는다.
+Haechi는 다음을 보장하지 않습니다.
 
-- 코어 자체의 운영 KMS/HSM/Vault adapter 제공(`haechi-crypto-kms` satellite가 외부 `cryptoProvider` 계약을 통해 AWS/GCP/Azure/Vault adapter를 제공한다)
+- 코어 자체의 운영 KMS/HSM/Vault adapter 제공(`haechi-crypto-kms` satellite가 외부 `cryptoProvider` 계약을 통해 AWS/GCP/Azure/Vault adapter를 제공합니다)
 - internet-facing gateway 인증/인가
 - `streaming.maxMatchBytes`보다 긴 cross-frame 매칭(스트림 프레임에 걸쳐 분할될 수 있음)
 - `block`이 발동되기 전에 이미 방출된 스트림 바이트의 회수
@@ -89,7 +89,7 @@ Haechi는 다음을 보장하지 않는다.
 - 외부 MCP server의 OAuth/resource binding 검증
 - base64/URL-encoded 값, 유니코드 난독화 값의 디코딩 후 검사
 - URL query string 내 민감값 검사 (JSON body만 검사)
-- 마지막 anchor 이후의 audit tail truncation — `audit.anchor`(0.7)는 anchor가 추가 전용/별도 미디어에 있을 때 마지막 anchor까지의 레코드 삭제를 탐지한다; 마지막 anchor 이후 기록된 레코드와 동일 파일시스템 anchor는 대상에서 제외된다
+- 마지막 anchor 이후의 audit tail truncation — `audit.anchor`(0.7)는 anchor가 추가 전용/별도 미디어에 있을 때 마지막 anchor까지의 레코드 삭제를 탐지합니다. 마지막 anchor 이후 기록된 레코드와 동일 파일시스템 anchor는 대상에서 제외됩니다
 - JSON-RPC batch 메시지 처리 (MCP stdio filter는 batch를 fail-closed로 거부)
 - `haechi-auth-oidc`의 multi-origin / CDN-fronted IdP(issuer host ≠ `token_endpoint`/`jwks_uri` host) — single-origin만 지원, `haechi-auth-jwt`와 동일 제약 (0.9)
 - refresh-token rotation / silent renewal / 장수명 broker 세션 — 0.9 세션은 absolute-TTL + idle-timeout만; `offline_access`는 제거되고 access token은 폐기 (0.9)
@@ -108,4 +108,4 @@ Haechi는 다음을 보장하지 않는다.
 
 ## 5. 남은 운영 전제
 
-운영 사용자는 Haechi 외부에서 네트워크 접근 제어, upstream 인증, secret injection, key custody, 로그 보존, DSAR/삭제 요청 처리, 법적 transfer 근거를 책임져야 한다.
+운영 사용자는 Haechi 외부에서 네트워크 접근 제어, upstream 인증, secret injection, key custody, 로그 보존, DSAR/삭제 요청 처리, 법적 transfer 근거를 책임져야 합니다.
