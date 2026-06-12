@@ -1,5 +1,9 @@
 # Haechi
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi.jpg" alt="Haechi — a guardian haechi warding a gateway with a digital shield" width="820">
+</p>
+
 [![npm](https://img.shields.io/npm/v/haechi)](https://www.npmjs.com/package/haechi)
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
