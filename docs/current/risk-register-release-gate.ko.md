@@ -1,8 +1,8 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Living document(core 1.1.x 추적)
+- 문서 상태: Living document(core 1.2.x 추적)
 - 작성일: 2026-06-11
-- 기준 버전: 1.1.x
+- 기준 버전: 1.2.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -27,6 +27,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G4 | 0.9.0 observability + interactive-auth 위성 컷 | P1-SEC-026 / P1-OPS-009 mitigated 및 P2-CRYPTO-001 accepted; `haechi-dashboard` + `haechi-auth-oidc` + `haechi-crypto-kms@0.2.0` 테스트 통과; 위성 tarball zero-dep; core 0.9.0 bump(추가적 FORBIDDEN_KEYS audit 강화만) | Pass |
 | G5 | 1.0.0 stable API contract + signed-plugin sandbox | P1-SEC-024 / P1-SEC-025 mitigated, P2-API-001 / P2-OPS-006 resolved; API freeze + deprecation policy + `tests/api-contract.test.mjs` 통과; Ed25519 signed-plugin contract + `assertAuthProviderConformance` + worker-isolated `authProvider` sandbox 테스트 통과; PR0 위성 peer-range를 `>=0.8.0 <2.0.0`로 확대 및 `check-satellite-peer-ranges.mjs` preflight 게이트 통과; core는 zero runtime dependency 유지; core 1.0.0 bump | Pass |
 | G6 | 1.1.0 plugin capability 강제 (`process-isolated`) | P1-SEC-027 / P1-SEC-028 mitigated; `process-isolated` 런타임(`--permission` 하 자식, 부여 0, `data:` URL 로드, stdio 무시, JSON-string IPC) + fail-closed `--allow-net` 기능 탐지(`netEnforcement:"require-permission"`) + 코어 `haechi/ssrf` 가드 + 호스트 중개 키 자료 + spawn-storm 서킷 브레이커; fs/net/stdio 레드팀 + SSRF + config 테스트 통과(행동 스위트는 `--allow-net` Node에서 실행, 아니면 fail-closed로 skip); API freeze 통과 유지(additive `./ssrf` export + additive config 키); core는 zero runtime dependency 유지; core 1.1.0 bump(additive + opt-in 마이너) | Pass |
+| G7 | 1.2.0 신뢰성 강화 트랙 (WS1–WS6) | 탐지 품질 측정+강화(WS2: 라벨 코퍼스 precision/recall `bench:detection` 게이트, 자격증명+국제 PII 커버리지, 하드블록 타입 불변식이 적용된 `filters.minConfidence` / `filters.allowlist`, offset 무결성을 갖춘 NFKC 유니코드 회피 폴딩); WS3 주입 가능한 `rateLimiter` 시임 + bounded fixed-window map; WS4 운영성(`/__haechi/live`+`/ready` 분리, 주입 가능한 `/metrics`, 구조적 로그 + 요청별 `correlationId`, graceful drain, max-in-flight backpressure, env overlay, 하드닝 Dockerfile/compose/runbook, `configVersion`); WS6 proxy TLS / remote-bind 하드닝(`proxy.tls` / `proxy.trustForwardedProto`, fail-closed `assertSafeProxyTransport`) + OWASP-LLM/NIST 컨트롤 매핑 백서 + RFC 9116 `security.txt` + 취약점 공개 경로. 모든 변경은 1.1 동작을 보존하는 기본값 뒤의 additive(`tests/api-contract.test.mjs` 통과); no-plaintext-in-audit 불변식이 텔레메트리까지 확장; core는 zero runtime dependency 유지; core 1.2.0 bump(additive 마이너) | Pass |
 
 ## 3. P0 배포 차단 리스크 상태
 
