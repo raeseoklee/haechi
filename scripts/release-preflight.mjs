@@ -8,6 +8,7 @@ const checks = [
   ["npm", ["run", "check:types"]],
   ["npm", ["run", "scan:stale-names"]],
   ["npm", ["run", "scan:doc-freshness"]],
+  ["npm", ["run", "scan:detection"]],
   ["npm", ["run", "check:packaging"]],
   ["npm", ["run", "check:satellite-packaging"]],
   ["npm", ["pack", "--dry-run"]]

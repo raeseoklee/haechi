@@ -94,6 +94,17 @@ upstream JSON 응답을 검사합니다(기본적으로 꺼져 있습니다 — 
 |---|---|---|---|
 | `filters.customRules` | 규칙 객체 배열 | `[]` | 추가 탐지 규칙입니다: `{ id, type, pattern, flags?, confidence? }`. 패턴은 ReDoS 검사를 통과해야 하며(≤500자, 중첩 한정자 없음, 역참조 없음), 안전하지 않으면 로드 시 거부됩니다. |
 
+### 탐지 벤치마크
+
+탐지 정밀도(precision)/재현율(recall)은 가정하지 않고 측정합니다. 합성 테스트 픽스처로 구성된 라벨링 코퍼스(`tests/fixtures/detection-corpus.json` — type별 양성 샘플과 양성처럼 보이는 hard-negative)를 기반으로 type별 채점기를 돌립니다.
+
+```bash
+npm run bench:detection   # type별 TP/FP/FN + precision/recall 표를 출력합니다
+npm run scan:detection    # CI 회귀 게이트: 어떤 type이라도 baseline 아래로 떨어지면 실패합니다
+```
+
+`bench:detection`(`scripts/bench-detection.mjs`)은 기본 필터 엔진을 각 코퍼스 케이스에 적용하여 type별 true/false positive와 false negative를 보고합니다. `scan:detection`은 실측 점수를 고정된 baseline(`scripts/detection-baseline.json`)과 비교하며 **회귀일 때만 실패합니다** — 즉 precision 또는 recall이 기록된 수치 아래로 떨어진 경우입니다. baseline에는 현재의 불완전한 상태(`phone`/`card`/`secret`에서 audit이 재현한 오탐, 그리고 AWS/GitHub/Google/Slack 키·JWT·PEM 헤더에 대한 알려진 커버리지 공백 누락)가 의도적으로 포함되어 있으므로, 게이트는 오늘은 통과하고 변경이 탐지를 악화시킬 때만 실패합니다. 이 게이트는 `release:preflight`에서 doc-freshness 게이트 다음에 실행됩니다. 의도적인 규칙 변경 후에는 `node scripts/bench-detection.mjs --write-baseline`으로 baseline을 재생성하고 diff를 검토하십시오. 기록된 공백과 오탐을 닫는 작업은 reliability-hardening 트랙의 WS2b/WS2c입니다.
+
 ## `keys`
 
 | 키 | 타입 / 값 | 기본값 | 설명 |

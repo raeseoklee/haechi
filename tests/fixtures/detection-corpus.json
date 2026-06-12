@@ -1,0 +1,180 @@
+{
+  "$schema-note": "Labeled detection corpus for WS2a (reliability-hardening-track). Each case is { text, direction?, expect: [{ type, present }], note }. `present:true` = the engine SHOULD detect this type in `text`; `present:false` = it must NOT (a hard negative). `direction` defaults to \"request\"; injection rules are response-direction only. Scored per-type by scripts/bench-detection.mjs; regression-gated against scripts/detection-baseline.json.",
+  "$safety": "ALL VALUES ARE SYNTHETIC TEST FIXTURES. No real secret, key, or PII appears here. Card numbers are the public 4242.../4111... test cards; AWS uses the documented AKIAIOSFODNN7EXAMPLE; the JWT/PEM/tokens are fabricated or public RFC/sample values. Storing real secrets/PII is forbidden by CLAUDE.md.",
+  "$baseline-legend": "Some positives are KNOWN COVERAGE GAPS the audit reproduced as MISS (no rule exists yet — WS2b). They are labeled present:true with `\"gap\": true` so the corpus documents the target while the baseline records today's miss. The gate fails on a REGRESSION below baseline, never on an already-recorded gap.",
+  "cases": [
+    {
+      "text": "Please contact me at minji.kim@example.com about the invoice.",
+      "expect": [{ "type": "email", "present": true }],
+      "note": "clean positive: ordinary RFC-style example email"
+    },
+    {
+      "text": "Reach support via support@haechi.example.co.kr for help.",
+      "expect": [{ "type": "email", "present": true }],
+      "note": "clean positive: multi-label TLD email"
+    },
+    {
+      "text": "The file path is config@v2/build and the at-sign is decorative here.",
+      "expect": [{ "type": "email", "present": false }],
+      "note": "clean negative: @ without a valid domain is not an email"
+    },
+    {
+      "text": "My mobile is 010-1234-5678, call anytime.",
+      "expect": [{ "type": "phone", "present": true }],
+      "note": "clean positive: separated KR mobile"
+    },
+    {
+      "text": "Call +82 10 1234 5678 or the no-separator form 01012345678.",
+      "expect": [{ "type": "phone", "present": true }],
+      "note": "clean positive: +82 international form and 0-led bare run"
+    },
+    {
+      "text": "Order id 01099887766 was shipped on time.",
+      "expect": [{ "type": "phone", "present": false }],
+      "note": "FALSE POSITIVE the audit reproduced: an 11-digit order id starting 010 currently mis-fires as a KR phone. Hard-negative — the engine should NOT flag an order id as a phone. (Records as a current FP in the baseline; WS2c context anchors will close it.)"
+    },
+    {
+      "text": "The unix timestamp 1781129892 and counter 1719999999 are not phone numbers.",
+      "expect": [{ "type": "phone", "present": false }],
+      "note": "clean negative: bare 10-digit non-0-led runs are rejected by krPhoneValid"
+    },
+    {
+      "text": "synthetic resident registration number 900101-1234568 on the form",
+      "expect": [{ "type": "kr_rrn", "present": true }],
+      "note": "clean positive: KR RRN-shaped value with a VALID checksum (synthetic)"
+    },
+    {
+      "text": "synthetic rrn-shaped 900101-1234567 fails the checksum",
+      "expect": [{ "type": "kr_rrn", "present": false }],
+      "note": "clean negative: RRN shape but checksum-invalid -> not detected"
+    },
+    {
+      "text": "card on file 4242 4242 4242 4242 expires soon",
+      "expect": [{ "type": "card", "present": true }],
+      "note": "clean positive: the public 4242 Visa test card (Luhn-valid)"
+    },
+    {
+      "text": "alt test card 4111 1111 1111 1111 for the gateway",
+      "expect": [{ "type": "card", "present": true }],
+      "note": "clean positive: the public 4111 Visa test card (Luhn-valid)"
+    },
+    {
+      "text": "please process order 4242424242424242 and ship today",
+      "expect": [{ "type": "card", "present": false }],
+      "note": "FALSE POSITIVE the audit reproduced: a Luhn-passing 16-digit order number in non-card context currently mis-fires as a card. Hard-negative — the engine should NOT flag a bare order number. (Records as a current FP in the baseline; WS2c context anchors will close it.)"
+    },
+    {
+      "text": "tracking number 123456789012345 is not a payment card",
+      "expect": [{ "type": "card", "present": false }],
+      "note": "clean negative: a 15-digit non-Luhn tracking run is rejected by luhnValid"
+    },
+    {
+      "text": "api key sk_demo_1234567890abcdef1234567890abcdef rotated last week",
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "clean positive: an sk_ prefixed key of real shape (synthetic)"
+    },
+    {
+      "text": "publishable key pk_demo_0123456789abcdef0123456789 in the snippet",
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "clean positive: a pk_ prefixed key (synthetic)"
+    },
+    {
+      "text": "sku_98 and pk_3 are short product codes, not keys",
+      "expect": [{ "type": "api_key", "present": false }],
+      "note": "clean negative: prefixes too short to meet the 24+ char rule"
+    },
+    {
+      "text": "Authorization: Bearer ZmFrZS10b2tlbi1mb3ItdGVzdGluZy0xMjM0NTY3OA in the header example",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "clean positive: a real-shaped Bearer credential (synthetic base64-ish run)"
+    },
+    {
+      "text": "Bearer 0123456789abcdef is mentioned in this prose paragraph as an example phrase.",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "FALSE POSITIVE the audit reproduced: the word 'Bearer' followed by a 16-char token inside prose mis-fires as a secret. Hard-negative. (Records as a current FP in the baseline; WS2c prose/context anchors will close it.)"
+    },
+    {
+      "text": "password: changeme123456 is a placeholder in the README, replace it.",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "FALSE POSITIVE the audit reproduced: a 'password: changeme...' placeholder mis-fires as a secret. Hard-negative — placeholders must not be flagged. (Records as a current FP in the baseline; WS2c allowlist/placeholder anchors will close it.)"
+    },
+    {
+      "text": "secret = s3cr3t_value_kept_here in the config file",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "clean positive: a secret=<value> assignment with a real-shaped value"
+    },
+    {
+      "text": "the meeting agenda lists three items and a budget of 4 dollars",
+      "expect": [
+        { "type": "email", "present": false },
+        { "type": "phone", "present": false },
+        { "type": "kr_rrn", "present": false },
+        { "type": "card", "present": false },
+        { "type": "api_key", "present": false },
+        { "type": "secret", "present": false }
+      ],
+      "note": "clean negative: ordinary prose with small numbers and words -> nothing"
+    },
+    {
+      "text": "version 1.2.0 ships with 47 findings across 5 lenses and 6 workstreams",
+      "expect": [
+        { "type": "card", "present": false },
+        { "type": "phone", "present": false },
+        { "type": "kr_rrn", "present": false },
+        { "type": "api_key", "present": false },
+        { "type": "secret", "present": false }
+      ],
+      "note": "clean negative: version/count numbers must not trip any rule"
+    },
+    {
+      "text": "AWS access key AKIAIOSFODNN7EXAMPLE used in the docs example",
+      "expect": [{ "type": "api_key", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): the documented AWS example access key is currently MISSED — no AKIA rule exists. Baseline records the miss; the gate must not fail on it today."
+    },
+    {
+      "text": "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY noted here",
+      "expect": [{ "type": "secret", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): the documented AWS secret as an `aws_secret_access_key = ...` assignment is currently MISSED — the assignment-secret lookbehind only anchors on bare `api_key|secret|token|password` immediately before `=`, not the `aws_secret_access_key` vocabulary (WS2b expands the key vocabulary). Baseline records the miss."
+    },
+    {
+      "text": "GitHub PAT ghp_0123456789abcdefghijklmnopqrstuvwxyzAB committed by mistake",
+      "expect": [{ "type": "secret", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): a GitHub ghp_ personal-access-token (fabricated random chars) is currently MISSED — no ghp_ rule. Baseline records the miss."
+    },
+    {
+      "text": "Google API key AIzaSyA1234567890abcdefghijklmnopqrstuv in the client config",
+      "expect": [{ "type": "api_key", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): a Google AIza... API key (fabricated) is currently MISSED — no AIza rule. Baseline records the miss."
+    },
+    {
+      "text": "Slack bot token xoxb-PLACEHOLDER-PLACEHOLDER-notARealSlackTokenForTests leaked",
+      "expect": [{ "type": "secret", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): a Slack xoxb- shaped token (synthetic placeholder — deliberately no realistic entropy so secret scanners don't flag it) is currently MISSED — no xox[baprs]- rule. Baseline records the miss."
+    },
+    {
+      "text": "JWT eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U in the auth flow",
+      "expect": [{ "type": "secret", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): a three-segment JWT (public jwt.io sample) is currently MISSED — no eyJ three-segment rule. Baseline records the miss."
+    },
+    {
+      "text": "-----BEGIN RSA PRIVATE KEY----- MIIBOgIBAAJBAKj34GkxFh... -----END RSA PRIVATE KEY-----",
+      "expect": [{ "type": "secret", "present": true, "gap": true }],
+      "note": "FALSE NEGATIVE (coverage gap, WS2b): a PEM PRIVATE KEY header (truncated/fabricated body) is currently MISSED — no PEM rule. Baseline records the miss."
+    },
+    {
+      "text": "US SSN 078-05-1120 on the intake form",
+      "expect": [{ "type": "kr_rrn", "present": false }],
+      "note": "FALSE NEGATIVE / locale gap (WS2b): the famous synthetic US SSN (078-05-1120) is not KR-locale PII and has no US-SSN rule. Recorded as a documented locale exclusion; expect:false for kr_rrn confirms it is NOT mis-classified as a KR RRN today."
+    },
+    {
+      "text": "US phone (212) 555-0143 from the reserved 555-01xx test range",
+      "expect": [{ "type": "phone", "present": false }],
+      "note": "FALSE NEGATIVE / locale gap (WS2b): a US/NANP phone (reserved 555-01xx test number) has no rule (KR-locale only). expect:false confirms it is not mis-detected as a KR phone today."
+    },
+    {
+      "text": "IBAN DE89370400440532013000 from the ECB example set",
+      "expect": [{ "type": "card", "present": false }],
+      "note": "FALSE NEGATIVE / locale gap (WS2b): the public German IBAN example has no mod-97 IBAN rule. expect:false for card confirms the embedded digit run is not mis-detected as a card today."
+    }
+  ]
+}
