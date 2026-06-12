@@ -11,7 +11,7 @@
   "configVersion": 1,
   "mode": "dry-run",
   "target": { "type": "llm-http", "adapter": "openai-compatible", "upstream": "http://127.0.0.1:9999" },
-  "proxy": { "host": "127.0.0.1", "port": 11016 },
+  "proxy": { "host": "127.0.0.1", "port": 11016, "tls": null, "trustForwardedProto": false },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
   "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256, "maxInFlight": 0, "shutdownGraceMs": 10000, "requestTimeoutMs": null, "headersTimeoutMs": null },
@@ -48,6 +48,8 @@
 |---|---|---|---|
 | `proxy.host` | non-empty string | `127.0.0.1` | Bind address. Non-loopback hosts require the `--allow-remote-bind` CLI flag — config alone will not start (see [Binding beyond loopback](#binding-beyond-loopback)). |
 | `proxy.port` | integer 0–65535 | `11016` | Listen port (`0` = ephemeral). Override per-run with `--port`. |
+| `proxy.tls` | `null` or `{ keyFile, certFile }` / `{ pfxFile, passphrase? }` | `null` | TLS material loaded from **file paths** at startup into a TLS context. When present, Haechi terminates TLS itself (serves `https`). Required (or `trustForwardedProto`) for a remote bind — see [Binding beyond loopback](#binding-beyond-loopback). Fail-closed: a non-null value that does not resolve to usable material `((key && cert) or pfx)`, mixes `pfxFile` with `keyFile`/`certFile`, or names an unreadable file throws at load. |
+| `proxy.trustForwardedProto` | boolean | `false` | Operator acknowledgement that a **trusted reverse proxy terminates TLS** in front of Haechi. When `true`, a remote bind may stay plain `http`, but Haechi then **refuses any request whose `X-Forwarded-Proto` is not `https`** (checked before auth/body; the `/__haechi/*` liveness routes are exempt). Never a substitute for real TLS when Haechi is itself internet-facing. |
 
 ## `responseProtection`
 
@@ -363,17 +365,32 @@ When a preset and an override (or a privacy profile) disagree, the **stronger** 
 
 ## Binding beyond loopback
 
-The proxy refuses non-loopback hosts unless the CLI flag is passed explicitly — `proxy.host: "0.0.0.0"` in config alone will not start, by design:
+The proxy refuses non-loopback hosts unless the CLI flag is passed explicitly — `proxy.host: "0.0.0.0"` in config alone will not start, by design. A remote bind **additionally requires TLS**: either Haechi terminates TLS itself (`proxy.tls`), or you explicitly acknowledge a fronting TLS terminator (`proxy.trustForwardedProto`). A remote bind with neither **throws at startup** — Haechi will not serve bearer tokens and payloads in plaintext on a non-loopback listener.
 
+**Option A — Haechi terminates TLS** (serves `https`):
+
+```jsonc
+// haechi.config.json
+"proxy": { "host": "0.0.0.0", "tls": { "keyFile": "/etc/haechi/tls/key.pem", "certFile": "/etc/haechi/tls/cert.pem" } }
+// or PKCS#12: "tls": { "pfxFile": "/etc/haechi/tls/server.pfx", "passphrase": "…" }
+```
 ```bash
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
+# → Haechi proxy listening on https://0.0.0.0:11016
 ```
+
+**Option B — a trusted reverse proxy terminates TLS** in front of Haechi (Haechi stays plain `http` on a private network behind the hop):
+
+```jsonc
+"proxy": { "host": "0.0.0.0", "trustForwardedProto": true }
+```
+With `trustForwardedProto: true`, Haechi **refuses any request whose `X-Forwarded-Proto` is not `https`** (a plaintext request that bypassed the hop) with a fail-closed `403`, checked before auth and body-read. The `/__haechi/*` liveness/metrics routes are exempt so a loopback sidecar can still scrape them. Only the trusted terminator may set `X-Forwarded-Proto` — do not enable this if untrusted clients can reach the Haechi port directly.
 
 **The proxy ships bearer client authentication** (`auth.provider: bearer`, shipped in 0.6): a hashed token store, per-identity policy profiles, a model allowlist, and a per-identity rate limit (see [`auth`](#auth) and [Named profiles](#named-profiles)). The default `auth.provider: none` leaves the proxy unauthenticated — with `none`, anyone who can reach the port can use your upstream and the token round-trip path. The built-in rate limit is single-process (in-memory, per-process); front multiple replicas with a shared limiter. Use `--allow-remote-bind` only behind explicit network controls regardless — bind `0.0.0.0` inside a container and restrict the host port mapping (`-p 127.0.0.1:11016:11016`), or front it with a firewall/VPN/authenticating reverse proxy.
 
 ## Validation cheatsheet
 
-These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.maxRequestBytes`/`limits.upstreamTimeoutMs`/`limits.maxNestingDepth`; negative or non-integer `limits.maxInFlight`/`limits.shutdownGraceMs`; non-`null`/negative/non-integer `limits.requestTimeoutMs`/`limits.headersTimeoutMs`; non-positive-integer or **newer-than-supported** `configVersion`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`; non-`text`/`json` `logging.format`; non-boolean `metrics.enabled`; an invalid `HAECHI_*` env overlay value (bad `HAECHI_PROXY_PORT`, unknown `HAECHI_MODE`, malformed `HAECHI_UPSTREAM`, …).
+These throw at load (fail-closed): unknown `keys.provider`; empty `proxy.host`; out-of-range `proxy.port`; non-boolean `proxy.trustForwardedProto`; a `proxy.tls` that is non-`null` but not an object, sets `keyFile` without `certFile` (or vice-versa), mixes `pfxFile` with `keyFile`/`certFile`, names an unreadable file, or does not resolve to usable material `((key && cert) or pfx)`; non-`jsonl` `audit.sink`; non-`local` `tokenVault.provider`; bad `revealPolicy`; non-positive `retentionDays`; non-boolean `deterministic`/`detokenizeResponses`; empty/non-string `deterministicTypes`; empty/non-string `mcp.allowedMethods`; non-boolean `mcp.*` flags; unknown `privacy.profile`; bad `responseProtection.failureMode`; non-positive `responseProtection.maxBytes`; non-boolean `responseProtection.scanNumbers`; bad `streaming.requestMode`/`streaming.responseMode`; non-positive `streaming.maxMatchBytes`; bad `auth.provider`; empty `auth.store`; non-string `auth.allowedLabelKeys`; non-object `policy.profiles`; `policy.profileBinding` without a valid `default`; non-string `policy.modelAllowlist`; non-positive `policy.rate.requestsPerMinute`; non-positive `limits.maxRequestBytes`/`limits.upstreamTimeoutMs`/`limits.maxNestingDepth`; negative or non-integer `limits.maxInFlight`/`limits.shutdownGraceMs`; non-`null`/negative/non-integer `limits.requestTimeoutMs`/`limits.headersTimeoutMs`; non-positive-integer or **newer-than-supported** `configVersion`; unknown `target.type`/`adapter`; unsafe custom regex; weakening action without `allowUnsafeOverrides`; non-`text`/`json` `logging.format`; non-boolean `metrics.enabled`; an invalid `HAECHI_*` env overlay value (bad `HAECHI_PROXY_PORT`, unknown `HAECHI_MODE`, malformed `HAECHI_UPSTREAM`, …).
 
 # Satellite operator configuration (0.9)
 

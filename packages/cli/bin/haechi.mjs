@@ -283,8 +283,14 @@ async function proxyCommand(argv) {
   const port = parsePort(options.port ?? config.proxy.port);
   const host = options.host ?? config.proxy.host;
   const allowRemoteBind = Boolean(options["allow-remote-bind"]);
+  // proxy.tls / proxy.trustForwardedProto come from the normalized config (the
+  // TLS material is loaded from file paths at load time); createHaechiProxy reads
+  // them from runtime.config.proxy, so the CLI does not re-pass them. The bind
+  // guard inside createHaechiProxy throws fail-closed for a remote bind without
+  // TLS and without trustForwardedProto.
   const proxy = createHaechiProxy({ runtime, port, host, allowRemoteBind });
   const address = await proxy.listen();
+  const scheme = address.tls ? "https" : "http";
 
   const effectiveMode = config.policy.mode ?? config.mode;
   const jsonLogs = config.logging?.format === "json";
@@ -302,20 +308,24 @@ async function proxyCommand(argv) {
     logEvent("info", "proxy_listening", {
       host: address.host,
       port: address.port,
+      scheme,
+      tls: Boolean(address.tls),
       upstream: config.target.upstream,
       mode: effectiveMode,
       version: HAECHI_VERSION
     });
   } else {
-    console.log(`Haechi proxy listening on http://${address.host}:${address.port}`);
+    console.log(`Haechi proxy listening on ${scheme}://${address.host}:${address.port}`);
     console.log(`Upstream: ${config.target.upstream}`);
     console.log(`Mode: ${effectiveMode}`);
   }
   if (allowRemoteBind) {
     if (jsonLogs) {
-      logEvent("warn", "remote_bind_enabled");
+      logEvent("warn", "remote_bind_enabled", { tls: Boolean(address.tls), trustForwardedProto: Boolean(config.proxy?.trustForwardedProto) });
+    } else if (address.tls) {
+      console.error("warning: --allow-remote-bind exposes the proxy beyond loopback (TLS terminated by Haechi). Put Haechi behind explicit network access controls.");
     } else {
-      console.error("warning: --allow-remote-bind exposes the proxy beyond loopback. Put Haechi behind explicit network access controls.");
+      console.error("warning: --allow-remote-bind exposes the proxy beyond loopback behind a trusted TLS-terminating reverse proxy (proxy.trustForwardedProto). Requests without X-Forwarded-Proto: https are refused. Put Haechi behind explicit network access controls.");
     }
   }
   if (effectiveMode !== "enforce") {
@@ -633,7 +643,7 @@ const COMMAND_HELP = {
   proxy: {
     usage: `haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]`,
     summary: "Run the local HTTP JSON proxy in front of an upstream LLM.",
-    detail: "Binds loopback by default; --allow-remote-bind is required (and must be a CLI flag, not config) to bind non-loopback hosts. There is no client auth yet — see 'haechi config'."
+    detail: "Binds loopback (plain http) by default; --allow-remote-bind is required (and must be a CLI flag, not config) to bind non-loopback hosts. A remote bind additionally requires TLS: set proxy.tls ({ keyFile, certFile } or { pfxFile, passphrase? }) so Haechi serves https, OR set proxy.trustForwardedProto: true when a trusted reverse proxy terminates TLS in front of Haechi (Haechi then refuses any request without X-Forwarded-Proto: https). Configure client auth via auth.provider — see 'haechi config'."
   },
   "policy-sign": {
     usage: "haechi policy-sign <policy.json> [--config haechi.config.json] [--out policy.bundle.json]",

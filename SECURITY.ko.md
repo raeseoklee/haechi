@@ -12,7 +12,13 @@
 
 ## 보고
 
-의심되는 취약점은 저장소 메인테이너에게 비공개로 보고하세요. 보고에는 실제 비밀, 운영 prompt, 고객 데이터, 개인정보를 포함하지 마세요.
+**권장 채널: GitHub private vulnerability reporting.** 저장소의 Security Advisories <https://github.com/raeseoklee/haechi/security/advisories> 에서 "Report a vulnerability" 버튼으로 비공개 보고를 여십시오. 수정이 조율될 때까지 보고는 비공개로 유지됩니다. 기계 판독 가능한 공개 메타데이터는 [`/.well-known/security.txt`](.well-known/security.txt)(RFC 9116; 저장소 루트에도 미러)에 게시되어 있습니다.
+
+보고에는 실제 비밀, 운영 prompt, 고객 데이터, 개인정보를 포함하지 마십시오 — 대신 문제 설명과 최소한의 정제된 재현 절차를 제공하십시오.
+
+**Triage 목표(최선 노력이며, pre-1.0/OSS 프로젝트의 SLA가 아닙니다):** **영업일 3일 이내 접수 확인**을 목표로 하며, **영업일 10일 이내**에 초기 평가(수용 / 추가정보 필요 / 범위 밖)를 공유합니다. 공개된 범위 내 취약점은 `1.x` 안정성 예외 하의 in-minor 보안 수정 대상이 될 수 있습니다(`docs/current/api-stability.md`).
+
+통제 매핑(OWASP LLM Top 10 2025 / NIST AI RMF)과 구조화된 자체 모의해킹은 [`docs/current/security-whitepaper.md`](docs/current/security-whitepaper.md)에 문서화되어 있습니다. 이는 자체 평가이며 독립 감사나 인증이 아닙니다.
 
 ## 보안 불변식
 

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRuntime, defaultConfig, normalizeConfig } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
-import { DEFAULT_PROXY_PORT, assertSafeProxyBind, createHaechiProxy } from "../packages/proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, assertSafeProxyBind, assertSafeProxyTransport, createHaechiProxy } from "../packages/proxy/index.mjs";
 
 test("vLLM-compatible proxy protects request and JSON response", async () => {
   const upstream = createServer(async (request, response) => {
@@ -90,14 +90,29 @@ test("proxy refuses non-loopback bind unless explicitly allowed", () => {
     /Refusing to bind/
   );
 
+  // The loopback/remote-bind gate (shared with the dashboard) is unchanged:
+  // allowRemoteBind alone passes it.
   assert.doesNotThrow(() => assertSafeProxyBind({ host: "0.0.0.0", allowRemoteBind: true }));
+
+  // WS6: the transport layer is refused for a remote bind unless it carries
+  // usable TLS material OR an explicit trustForwardedProto acknowledgement.
+  assert.throws(
+    () => assertSafeProxyTransport({ host: "0.0.0.0", allowRemoteBind: true }),
+    /without TLS/
+  );
+  assert.doesNotThrow(() => assertSafeProxyTransport({ host: "0.0.0.0", allowRemoteBind: true, hasUsableTls: true }));
+  assert.doesNotThrow(() => assertSafeProxyTransport({ host: "0.0.0.0", allowRemoteBind: true, trustForwardedProto: true }));
+  // Loopback never needs TLS.
+  assert.doesNotThrow(() => assertSafeProxyTransport({ host: "127.0.0.1", allowRemoteBind: true }));
 });
 
 test("proxy listen options are configurable with a safe default port", () => {
   assert.equal(DEFAULT_PROXY_PORT, 11016);
   assert.deepEqual(defaultConfig().proxy, {
     host: "127.0.0.1",
-    port: 11016
+    port: 11016,
+    tls: null,
+    trustForwardedProto: false
   });
   assert.deepEqual(normalizeConfig({
     proxy: {
@@ -106,7 +121,9 @@ test("proxy listen options are configurable with a safe default port", () => {
     }
   }).proxy, {
     host: "127.0.0.1",
-    port: 21016
+    port: 21016,
+    tls: null,
+    trustForwardedProto: false
   });
 });
 

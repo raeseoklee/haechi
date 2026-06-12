@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { createHash, randomUUID } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import { readFileSync } from "node:fs";
@@ -24,6 +25,21 @@ function readPackageVersion() {
   }
 }
 
+// A tlsContext is usable iff it can actually terminate TLS: (key && cert) or pfx.
+// This is the SINGLE source of truth for both the bind guard and server
+// selection — the SAME shape the haechi-dashboard satellite uses, so the proxy
+// and the dashboard share one TLS-material predicate. A non-null tlsContext that
+// fails this check must fail closed (never green-light a remote bind that then
+// builds a plaintext http server).
+export function hasUsableTlsMaterial(ctx) {
+  if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) {
+    return false;
+  }
+  const hasKeyCert = Boolean(ctx.key) && Boolean(ctx.cert);
+  const hasPfx = Boolean(ctx.pfx);
+  return hasKeyCert || hasPfx;
+}
+
 // Structured logger honoring config.logging.format. In "json" mode it emits a
 // single JSON line carrying a correlationId and an error NAME/class — NEVER a
 // request/response payload, headers, token, or any PII. In "text" mode it
@@ -44,9 +60,43 @@ function createLogger(format = "text") {
   };
 }
 
-export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "127.0.0.1", allowRemoteBind = false }) {
-  assertSafeProxyBind({ host, allowRemoteBind });
+export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "127.0.0.1", allowRemoteBind = false, tlsContext, trustForwardedProto }) {
   const { haechi, config, protocolAdapter } = runtime;
+
+  // WS6 TLS hardening. The tlsContext / trustForwardedProto source of truth is
+  // the normalized config (proxy.tls is loaded into a tlsContext at startup;
+  // proxy.trustForwardedProto is a boolean), but an explicit argument overrides
+  // it (so a hand-built runtime / a test can drive these directly). hasUsableTls
+  // is the same predicate the dashboard satellite uses.
+  const resolvedTlsContext = tlsContext !== undefined ? tlsContext : (config.proxy?.tls ?? null);
+  const resolvedTrustForwardedProto = trustForwardedProto !== undefined
+    ? trustForwardedProto
+    : Boolean(config.proxy?.trustForwardedProto);
+  const usableTls = hasUsableTlsMaterial(resolvedTlsContext);
+
+  // Bind guard, two layers. (1) the loopback/remote-bind gate (shared with the
+  // dashboard). (2) WS6: a remote bind ADDITIONALLY requires a usable tlsContext
+  // OR an explicit trustForwardedProto acknowledgement (a trusted reverse proxy
+  // terminates TLS in front of Haechi). Otherwise it THROWS at startup — the
+  // proxy must NEVER serve bearer tokens + payloads in plaintext on a remote
+  // bind. Loopback dev is unaffected (plain http, no TLS).
+  assertSafeProxyBind({ host, allowRemoteBind });
+  assertSafeProxyTransport({
+    host,
+    allowRemoteBind,
+    hasUsableTls: usableTls,
+    trustForwardedProto: resolvedTrustForwardedProto
+  });
+
+  // When the remote bind rests on trustForwardedProto (plain http behind a
+  // trusted TLS hop) we REJECT any protected-route request whose
+  // X-Forwarded-Proto is not https — a plaintext request that bypassed the hop.
+  // This is only meaningful for a non-loopback, plain-http, trust-forwarded
+  // listener; a loopback dev server or an https-terminating server never gates.
+  const enforceForwardedProto = !isLoopbackHost(host)
+    && allowRemoteBind
+    && !usableTls
+    && resolvedTrustForwardedProto;
   // The runtime owns the rate limiter (an injectable collaborator). Fall back to
   // a local per-process default so a hand-built runtime object without a
   // rateLimiter still works (backward-compatible). The default and the runtime's
@@ -71,7 +121,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
   let drained = null;
   let resolveDrained = null;
 
-  const server = createServer(async (request, response) => {
+  const requestHandler = async (request, response) => {
     // Per-REQUEST correlation id: generated here, threaded into every protect
     // context (so the audit events of one request share it) AND into the error
     // log. A UUID — never a payload/identity/PII value.
@@ -103,6 +153,21 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       counted = true;
     }
     try {
+      // WS6 forwarded-proto enforcement. When this is a non-loopback plain-http
+      // listener resting on trustForwardedProto (a trusted reverse proxy
+      // terminates TLS in front of Haechi), a request whose X-Forwarded-Proto is
+      // not "https" arrived over plaintext that BYPASSED the TLS hop — reject it
+      // fail-closed BEFORE auth and body-read, so a protected route never serves
+      // tokens/payloads over an unverified-plaintext hop. The /__haechi/* liveness
+      // routes are EXEMPT (they leak nothing) so a health check / metrics scrape
+      // from the loopback sidecar still answers.
+      if (enforceForwardedProto && !exemptRoute && !isForwardedHttps(request)) {
+        writeJson(response, 403, {
+          error: "haechi_forwarded_proto_required",
+          message: "This proxy runs behind a trusted TLS-terminating hop (proxy.trustForwardedProto). A request without X-Forwarded-Proto: https bypassed the hop and is refused."
+        });
+        return;
+      }
       // Health + telemetry endpoints are unauthenticated and checked BEFORE auth
       // and body-read. They live under the reserved /__haechi/* prefix.
       if (request.method === "GET" && request.url === "/__haechi/live") {
@@ -283,7 +348,17 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
         }
       }
     }
-  });
+  };
+
+  // Server selection: a usable tlsContext → an https listener terminating TLS in
+  // this process; otherwise plain http (unchanged for loopback/dev). The bind
+  // guard above already guarantees a non-loopback bind without usable TLS carries
+  // an explicit trustForwardedProto acknowledgement, so a plain-http server is
+  // only ever exposed remotely behind a trusted TLS hop (and gated below).
+  const server = usableTls
+    ? createHttpsServer(resolvedTlsContext, requestHandler)
+    : createServer(requestHandler);
+  const servesHttps = usableTls;
 
   // WS4-B tuned timeouts. Only override Node's server defaults when a value is
   // configured (null = leave Node's default untouched, so behavior is unchanged
@@ -298,11 +373,14 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
 
   return {
     server,
+    // Whether THIS listener terminates TLS (https) — the CLI/log line reflects
+    // the right scheme, and a caller can assert the selected transport.
+    servesHttps,
     listen() {
       return new Promise((resolve) => {
         server.listen(port, host, () => {
           const address = server.address();
-          resolve({ host: address.address, port: address.port });
+          resolve({ host: address.address, port: address.port, tls: servesHttps });
         });
       });
     },
@@ -1155,12 +1233,62 @@ function shortHash(value) {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }
 
+// X-Forwarded-Proto enforcement helper. Node lowercases header names; a comma-
+// joined multi-value header (e.g. "https, http" from a chain of proxies) is
+// trusted only when the FIRST hop — the one closest to the client, set by the
+// trusted terminator — is https. Any other value (http, missing, malformed)
+// fails closed.
+function isForwardedHttps(request) {
+  const raw = request?.headers?.["x-forwarded-proto"];
+  if (typeof raw !== "string" || raw.length === 0) {
+    return false;
+  }
+  const first = raw.split(",")[0].trim().toLowerCase();
+  return first === "https";
+}
+
+// Loopback / remote-bind gate. Loopback always binds (plain http for dev). A
+// non-loopback bind is refused UNLESS allowRemoteBind is set. This is the SHARED
+// primitive the haechi-dashboard satellite reuses, so its contract is preserved
+// unchanged: { host, allowRemoteBind } and nothing more. The WS6 TLS fail-closed
+// rule is layered ON TOP of this in assertSafeProxyTransport (the proxy's own
+// requirement that a remote bind carry TLS), mirroring how the dashboard layers
+// its own tlsContext precedence after calling assertSafeProxyBind.
 export function assertSafeProxyBind({ host = "127.0.0.1", allowRemoteBind = false } = {}) {
   if (allowRemoteBind || isLoopbackHost(host)) {
     return;
   }
 
   throw new Error(`Refusing to bind Haechi proxy to non-loopback host ${host}. Use --allow-remote-bind only for explicitly secured environments.`);
+}
+
+// WS6 fail-closed TLS requirement for a REMOTE bind. After the loopback/remote
+// gate above, a non-loopback (allowRemoteBind) listener must ALSO carry usable
+// TLS material (Haechi terminates TLS) OR an explicit trustForwardedProto
+// acknowledgement (a trusted reverse proxy terminates TLS in front of Haechi).
+// Neither → THROW: never serve bearer tokens + payloads in plaintext on a remote
+// bind. Loopback dev is exempt (plain http, no TLS needed). Separate from
+// assertSafeProxyBind so the dashboard satellite's reuse of that primitive is
+// unaffected.
+export function assertSafeProxyTransport({
+  host = "127.0.0.1",
+  allowRemoteBind = false,
+  hasUsableTls = false,
+  trustForwardedProto = false
+} = {}) {
+  if (isLoopbackHost(host) || !allowRemoteBind) {
+    // Loopback (or an already-refused remote bind) needs no TLS check here.
+    return;
+  }
+  if (!hasUsableTls && !trustForwardedProto) {
+    throw new Error(
+      `Refusing to bind Haechi proxy to non-loopback host ${host} without TLS. ` +
+        `A remote bind would expose bearer tokens and payloads in plaintext. ` +
+        `Set proxy.tls (a keyFile+certFile or pfxFile so Haechi terminates TLS), ` +
+        `or set proxy.trustForwardedProto: true only when a trusted reverse proxy ` +
+        `terminates TLS in front of Haechi (Haechi will then require X-Forwarded-Proto: https).`
+    );
+  }
 }
 
 function isLoopbackHost(host) {

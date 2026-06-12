@@ -21,6 +21,8 @@ English is the primary documentation language. Korean translations are maintaine
 - `docs/current/configuration.md`: full configuration reference (every key, defaults, validation, presets, common setups)
 - `docs/current/risk-register-release-gate.md`: release-blocking risks, security/operational risk status, npm release gates (0.3.2 baseline)
 - `docs/current/threat-model.md`: Haechi trust boundaries, protected assets, key threats and controls
+- `docs/current/security-whitepaper.md`: shipped-control mapping to OWASP LLM Top 10 (2025) + NIST AI RMF, with a structured self-pentest (a self-assessment, not a certification)
+- `docs/current/compliance-mapping.md`: control-to-obligation-category mapping + DSAR/retention operational workflow (a mapping, not a certification)
 - `docs/current/shared-responsibility.md`: responsibility split between Haechi and users/operators in self-hosted deployments
 - `docs/current/api-stability.md`: developer preview API stability and migration note criteria
 - `docs/current/release-process.md`: release preflight, SBOM, npm provenance publish procedure
