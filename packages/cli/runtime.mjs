@@ -103,7 +103,13 @@ export function defaultConfig() {
       // allowlist [] = no operator FP exceptions. Both additive; neither can
       // suppress a hard-block type (secret/api_key/kr_rrn/card) — see core.
       minConfidence: 0,
-      allowlist: []
+      allowlist: [],
+      // WS2d residual — opt-in base64/percent decode-and-rescan. Default false =
+      // byte-identical to prior behavior (no decode). When true, a string leaf
+      // that looks base64/percent-encoded is decoded and rescanned; a decoded
+      // hit fails closed to a WHOLE-LEAF detection and only fires for a validator-
+      // backed / hard-block match (precision guard against random-base64 FPs).
+      decodeAndRescan: false
     },
     keys: {
       provider: "local",
@@ -715,6 +721,11 @@ function validateFilters(filters) {
         throw new Error("filters.allowlist entry.path must be a non-empty string");
       }
     }
+  }
+  // WS2d residual — opt-in base64/percent decode-and-rescan. Strict boolean,
+  // fail-closed: a non-boolean throws rather than silently coercing.
+  if (filters.decodeAndRescan !== undefined && typeof filters.decodeAndRescan !== "boolean") {
+    throw new Error("filters.decodeAndRescan must be a boolean");
   }
 }
 
