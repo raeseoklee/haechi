@@ -1,3 +1,11 @@
+// The hard-block detection types: a leak of one of these is a load-bearing
+// fail-closed concern, so the WS2c precision dials (filters.minConfidence,
+// filters.allowlist) may NOT suppress a detection of any of them. minConfidence
+// trims only the precision-risky SOFT types; the allowlist's per-value/per-path
+// exceptions are ignored for these types (the detection still fires). Exported
+// so the core detect→decide path enforces the same exemption set the docs pin.
+export const HARD_BLOCK_TYPES = new Set(["secret", "api_key", "kr_rrn", "card"]);
+
 const DEFAULT_RULES = [
   {
     id: "email",
@@ -9,9 +17,15 @@ const DEFAULT_RULES = [
   {
     // KR mobile numbers (01[016789] prefixes); landlines are out of scope.
     // krPhoneValid keeps a bare separator-less run from matching a timestamp/id.
+    // The leading `(?<![\w+-])` / trailing `(?![\w-])` boundaries (WS2c) stop the
+    // rule from matching a phone-shaped digit run that is a SUBSTRING of a longer
+    // hex/alnum/dashed run — e.g. the `…a716-446655440000` tail of a UUID, where
+    // the inner `16-44665544` otherwise mis-fired as a phone. The boundaries
+    // never affect a real number: a KR mobile sits on a word/space/punctuation
+    // edge and `+82` starts on the `+` (allowed before the boundary).
     id: "kr-phone",
     type: "phone",
-    pattern: "(?:\\+82[-\\s]?)?0?1[016789][-.\\s]?\\d{3,4}[-.\\s]?\\d{4}",
+    pattern: "(?<![\\w+-])(?:\\+82[-\\s]?)?0?1[016789][-.\\s]?\\d{3,4}[-.\\s]?\\d{4}(?![\\w-])",
     flags: "g",
     confidence: 0.9,
     validate: krPhoneValid
@@ -103,6 +117,13 @@ const DEFAULT_RULES = [
     confidence: 0.98
   },
   {
+    // Bearer credential. Deliberately NOT context-anchored to `Authorization:`:
+    // detection runs PER STRING LEAF, and a real payload carries the credential
+    // as its own leaf (`{"Authorization": "Bearer <token>"}` walks to the bare
+    // value `"Bearer <token>"`), so a lookbehind requiring the header key in the
+    // same string would MISS the realistic case — a recall regression on a
+    // hard-block (`secret`) type. `secret` is fail-closed: a `Bearer …` prose
+    // false positive is the accepted cost of never missing a leaked token.
     id: "bearer-token",
     type: "secret",
     pattern: "\\bBearer\\s+[A-Za-z0-9._~+/-]{16,}\\b",

@@ -40,7 +40,9 @@
     }
   },
   "filters": {
-    "customRules": []
+    "customRules": [],
+    "minConfidence": 0,
+    "allowlist": []
   },
   "keys": {
     "provider": "local",

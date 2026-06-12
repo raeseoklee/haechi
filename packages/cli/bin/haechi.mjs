@@ -712,6 +712,8 @@ Detection policy
   policy.defaultAction      allow | redact | mask | tokenize | encrypt | block
   policy.actions            per-type overrides; merges may strengthen, not weaken
   filters.customRules       extra regex rules (ReDoS-screened)
+  filters.minConfidence     [0,1] drop soft detections below this (not hard-block)
+  filters.allowlist         FP exceptions [value|{value?,path?}] (not hard-block)
 
 Tokenization (model sees token, caller sees plaintext)
   tokenVault.revealPolicy   disabled | local-dev               (manual reveal gate)

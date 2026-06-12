@@ -68,7 +68,12 @@ export function defaultConfig() {
       }
     },
     filters: {
-      customRules: []
+      customRules: [],
+      // WS2c precision dials. minConfidence 0 = current behavior (gate nothing);
+      // allowlist [] = no operator FP exceptions. Both additive; neither can
+      // suppress a hard-block type (secret/api_key/kr_rrn/card) — see core.
+      minConfidence: 0,
+      allowlist: []
     },
     keys: {
       provider: "local",
@@ -210,7 +215,14 @@ export function createRuntime(config, providers = {}) {
       auditSink,
       // Bound recursion depth so a deeply-nested payload fails closed (4xx)
       // rather than overflowing the stack (uncaught 500).
-      limits: { maxNestingDepth: normalized.limits.maxNestingDepth }
+      limits: { maxNestingDepth: normalized.limits.maxNestingDepth },
+      // WS2c precision controls (additive; defaults preserve 1.1 behavior). The
+      // detect→decide path drops sub-minConfidence soft detections and suppresses
+      // allowlisted soft detections — never a hard-block type (enforced in core).
+      precision: {
+        minConfidence: normalized.filters.minConfidence,
+        allowlist: normalized.filters.allowlist
+      }
     })
   };
 }
@@ -373,6 +385,7 @@ export function normalizeConfig(config) {
     throw new Error("limits.upstreamTimeoutMs must be a positive number");
   }
   validatePolicyExtras(merged.policy);
+  validateFilters(merged.filters);
   if (!["none", "bearer", "external", "plugin"].includes(merged.auth.provider)) {
     throw new Error(`Invalid auth.provider: ${merged.auth.provider}`);
   }
@@ -392,6 +405,46 @@ export function normalizeConfig(config) {
 
 export function isValidPort(port) {
   return Number.isInteger(port) && port >= 0 && port <= 65535;
+}
+
+// Fail-closed validation of the WS2c precision controls. minConfidence is a
+// number in [0,1]; allowlist is an array of exact-value strings and/or
+// { value?, path? } objects (at least one of value/path must be a non-empty
+// string). A malformed config throws rather than silently degrading.
+function validateFilters(filters) {
+  if (filters.minConfidence !== undefined) {
+    if (typeof filters.minConfidence !== "number" || Number.isNaN(filters.minConfidence)
+      || filters.minConfidence < 0 || filters.minConfidence > 1) {
+      throw new Error("filters.minConfidence must be a number in [0, 1]");
+    }
+  }
+  if (filters.allowlist !== undefined) {
+    if (!Array.isArray(filters.allowlist)) {
+      throw new Error("filters.allowlist must be an array");
+    }
+    for (const entry of filters.allowlist) {
+      if (typeof entry === "string") {
+        if (!entry) {
+          throw new Error("filters.allowlist string entries must be non-empty");
+        }
+        continue;
+      }
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        throw new Error("filters.allowlist entries must be a string or a { value?, path? } object");
+      }
+      const hasValue = entry.value !== undefined;
+      const hasPath = entry.path !== undefined;
+      if (!hasValue && !hasPath) {
+        throw new Error("filters.allowlist object entries must set value and/or path");
+      }
+      if (hasValue && (typeof entry.value !== "string" || !entry.value)) {
+        throw new Error("filters.allowlist entry.value must be a non-empty string");
+      }
+      if (hasPath && (typeof entry.path !== "string" || !entry.path)) {
+        throw new Error("filters.allowlist entry.path must be a non-empty string");
+      }
+    }
+  }
 }
 
 function validatePolicyExtras(policy) {

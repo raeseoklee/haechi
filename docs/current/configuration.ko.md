@@ -93,6 +93,8 @@ upstream JSON 응답을 검사합니다(기본적으로 꺼져 있습니다 — 
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
 | `filters.customRules` | 규칙 객체 배열 | `[]` | 추가 탐지 규칙입니다: `{ id, type, pattern, flags?, confidence? }`. 패턴은 ReDoS 검사를 통과해야 하며(≤500자, 중첩 한정자 없음, 역참조 없음), 안전하지 않으면 로드 시 거부됩니다. |
+| `filters.minConfidence` | `[0, 1]` 범위의 숫자 | `0` | 정밀도 다이얼입니다. 각 규칙은 `confidence`(0.6~0.95)를 가지며, confidence가 이 임계값 **미만**인 탐지는 policy 결정 전에 버려집니다. 기본값 `0`은 아무것도 게이트하지 않아 기존 동작을 보존합니다. **하드 블록 예외:** 하드 블록 타입(`secret`, `api_key`, `kr_rrn`, `card`)은 confidence만으로는 **절대** 버려지지 않습니다 — `minConfidence`는 정밀도 위험이 큰 소프트 타입(예: `phone`, `email`, `injection`)만 다듬으므로, confidence가 낮은 자격증명/PII 누출도 여전히 조치됩니다(fail-closed). |
+| `filters.allowlist` | 문자열 및/또는 `{ value?, path? }` 의 배열 | `[]` | 운영자 false-positive 예외입니다. 매칭된 **value**가 문자열/`value` 항목과 같거나, PII-safe JSON **path**(audit에 표시되는 해시된 `pathText`)가 `path` 항목과 같은 탐지는 policy 결정 전에 억제됩니다(항목이 `value`와 `path`를 모두 설정하면 **둘 다** 일치해야 합니다). **하드 블록 예외:** 하드 블록 타입(`secret`/`api_key`/`kr_rrn`/`card`)을 억제하려는 항목은 **무시되며** 탐지는 그대로 발생합니다 — allowlist는 양성(benign) **소프트 타입** FP만 정리할 수 있고, 자격증명/PII 누출은 절대 침묵시킬 수 없습니다. 모든 억제와 모든 `minConfidence` 드롭은 개수와 타입으로 **감사 로그에 기록됩니다**(`summary.suppressedByType` / `summary.droppedByType` / `suppressedCount` / `droppedCount`) — 원시 값은 절대 기록하지 않습니다. 규칙 전체를 삭제하지 않고 양성 FP 하나만 정리할 때 사용하십시오. |
 
 ### 탐지 벤치마크
 

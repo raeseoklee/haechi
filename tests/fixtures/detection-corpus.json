@@ -39,6 +39,11 @@
       "note": "clean negative: bare 10-digit non-0-led runs are rejected by krPhoneValid"
     },
     {
+      "text": "request id 550e8400-e29b-41d4-a716-446655440000 logged at the gateway",
+      "expect": [{ "type": "phone", "present": false }],
+      "note": "WS2c CLOSED (phone UUID-substring FP): the '…a716-446655440000' tail of a UUID used to mis-fire as a phone (the inner 16-44665544 ran the kr-phone rule). The leading/trailing word-boundary anchors stop a phone matching as a SUBSTRING of a longer hex/dashed run. Hard-negative."
+    },
+    {
       "text": "synthetic resident registration number 900101-1234568 on the form",
       "expect": [{ "type": "kr_rrn", "present": true }],
       "note": "clean positive: KR RRN-shaped value with a VALID checksum (synthetic)"
@@ -91,7 +96,7 @@
     {
       "text": "Bearer 0123456789abcdef is mentioned in this prose paragraph as an example phrase.",
       "expect": [{ "type": "secret", "present": false }],
-      "note": "FALSE POSITIVE the audit reproduced: the word 'Bearer' followed by a 16-char token inside prose mis-fires as a secret. Hard-negative. (Records as a current FP in the baseline; WS2c prose/context anchors will close it.)"
+      "note": "WS2c LEFT (Bearer-in-prose FP): a bare 'Bearer <hex>' in prose mis-fires as a secret. NOT fixed — detection runs per string LEAF and a real payload carries the credential as its own leaf ({\"Authorization\":\"Bearer <token>\"} walks to the bare value \"Bearer <token>\"), so an Authorization-context anchor would MISS the realistic case (a recall regression on the hard-block `secret` type). secret is fail-closed; this prose FP is the accepted cost. minConfidence/allowlist CANNOT clear it either — secret is a hard-block type. Stays a baked-in FP in the baseline."
     },
     {
       "text": "password: changeme123456 is a placeholder in the README, replace it.",

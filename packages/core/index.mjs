@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { HARD_BLOCK_TYPES } from "../filter/index.mjs";
 
 const NO_ENFORCE_MODES = new Set(["dry-run", "report-only"]);
 
@@ -10,7 +11,7 @@ const NO_ENFORCE_MODES = new Set(["dry-run", "report-only"]);
 // limits.maxNestingDepth through createHaechi → protectJson instead.
 export const DEFAULT_MAX_NESTING_DEPTH = 256;
 
-export function createHaechi({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run", limits = {} }) {
+export function createHaechi({ filterEngine, policyEngine, cryptoProvider, auditSink, tokenVault = null, mode = "dry-run", limits = {}, precision = {} }) {
   if (!filterEngine || !policyEngine || !cryptoProvider || !auditSink) {
     throw new Error("Haechi requires filterEngine, policyEngine, cryptoProvider, and auditSink");
   }
@@ -19,6 +20,15 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
   const maxNestingDepth = Number.isInteger(limits.maxNestingDepth) && limits.maxNestingDepth > 0
     ? limits.maxNestingDepth
     : DEFAULT_MAX_NESTING_DEPTH;
+
+  // WS2c precision controls, resolved once. `minConfidence` is the precision dial
+  // (drop a detection below the threshold) and `allowlist` is the operator FP
+  // exception set. Both are FAIL-OPEN-FOR-PROTECTION: they may only TRIM
+  // precision-risky soft-type detections and can NEVER suppress a hard-block type
+  // (secret/api_key/kr_rrn/card) — that load-bearing exemption is enforced in
+  // applyPrecisionControls, not trusted to config. Default {} = current behavior.
+  const minConfidence = Number.isFinite(precision.minConfidence) ? precision.minConfidence : 0;
+  const allowlist = compileAllowlist(precision.allowlist);
 
   async function protectJson(payload, rawContext = {}) {
     // A per-request policy engine (a named profile selected from identity)
@@ -35,7 +45,13 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     // `context.direction` ("request" | "response") gates direction-scoped rules
     // (injection) and the response-only marker exclusion in the filter engine.
     // The proxy sets it per direction; do not drop it here.
-    const detections = await filterEngine.detect({ entries, context });
+    const rawDetections = await filterEngine.detect({ entries, context });
+    // WS2c precision controls run AFTER detect and BEFORE decide: drop a low-
+    // confidence soft-type detection (minConfidence) and suppress an allowlisted
+    // soft-type detection — never a hard-block type. `precisionAudit` carries the
+    // per-type counts of what was suppressed/dropped so the audit event records
+    // it (counts/types only, never the raw value). See applyPrecisionControls.
+    const { detections, precisionAudit } = applyPrecisionControls(rawDetections, { minConfidence, allowlist });
     const decisions = [];
 
     for (const detection of detections) {
@@ -62,7 +78,8 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
       blocked,
       payload,
       detections,
-      decisions
+      decisions,
+      precisionAudit
     });
 
     await auditSink.record(auditEvent);
@@ -70,7 +87,7 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     return {
       payload: protectedPayload,
       blocked,
-      summary: summarize(detections, decisions),
+      summary: summarize(detections, decisions, precisionAudit),
       auditEvent,
       issuedTokens: [...issuedTokens]
     };
@@ -274,7 +291,7 @@ export function shapeOnly(value) {
   return { type: value === null ? "null" : typeof value };
 }
 
-export function summarize(detections, decisions) {
+export function summarize(detections, decisions, precisionAudit = null) {
   const byType = {};
   const byAction = {};
 
@@ -286,10 +303,120 @@ export function summarize(detections, decisions) {
     byAction[decision.action] = (byAction[decision.action] ?? 0) + 1;
   }
 
-  return {
+  const summary = {
     detectionCount: detections.length,
     byType,
     byAction
+  };
+
+  // WS2c: additively record how many detections the precision controls removed
+  // before decide — `suppressedCount`/`suppressedByType` for allowlist FP
+  // exceptions and `droppedCount`/`droppedByType` for sub-minConfidence drops.
+  // Counts and types only; the matched value is NEVER recorded (no-plaintext-in-
+  // audit). Omitted entirely when nothing was removed, so 1.1 events are byte-
+  // identical and the audit hash-chain canonicalization is unaffected.
+  if (precisionAudit && precisionAudit.suppressedCount > 0) {
+    summary.suppressedCount = precisionAudit.suppressedCount;
+    summary.suppressedByType = precisionAudit.suppressedByType;
+  }
+  if (precisionAudit && precisionAudit.droppedCount > 0) {
+    summary.droppedCount = precisionAudit.droppedCount;
+    summary.droppedByType = precisionAudit.droppedByType;
+  }
+
+  return summary;
+}
+
+// Compile the configured allowlist into fast lookup sets. An entry is either a
+// bare string (an exact matched-VALUE exception) or an object { value?, path? }
+// (value exception, JSON-path exception via the PII-safe pathText, or both —
+// when both are present BOTH must match). Returns null when there is nothing to
+// allowlist so the hot path can skip the work entirely.
+function compileAllowlist(allowlist) {
+  if (!Array.isArray(allowlist) || allowlist.length === 0) {
+    return null;
+  }
+  const values = new Set();
+  const paths = new Set();
+  const pairs = [];
+  for (const entry of allowlist) {
+    if (typeof entry === "string") {
+      values.add(entry);
+      continue;
+    }
+    const hasValue = typeof entry.value === "string";
+    const hasPath = typeof entry.path === "string";
+    if (hasValue && hasPath) {
+      pairs.push({ value: entry.value, path: entry.path });
+    } else if (hasValue) {
+      values.add(entry.value);
+    } else if (hasPath) {
+      paths.add(entry.path);
+    }
+  }
+  return { values, paths, pairs };
+}
+
+// Does this detection's matched value / JSON path match an allowlist entry? The
+// path comparison uses the PII-safe `pathText` (the same hashed path the audit
+// records), so an operator allowlists `key_<hash>.…` — never a raw key name.
+function isAllowlisted(detection, allowlist) {
+  if (!allowlist) {
+    return false;
+  }
+  const { values, paths, pairs } = allowlist;
+  if (typeof detection.value === "string" && values.has(detection.value)) {
+    return true;
+  }
+  if (typeof detection.pathText === "string" && paths.has(detection.pathText)) {
+    return true;
+  }
+  for (const pair of pairs) {
+    if (detection.value === pair.value && detection.pathText === pair.path) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// WS2c precision controls — run AFTER detect, BEFORE decide. Returns the kept
+// detections plus a precisionAudit of what was removed (counts/types only).
+//
+// HARD-BLOCK INVARIANT (load-bearing, fail-closed): a detection whose type is in
+// HARD_BLOCK_TYPES (secret/api_key/kr_rrn/card) is NEVER removed here — neither a
+// low confidence nor an allowlist entry can suppress it. minConfidence trims only
+// the precision-risky SOFT types; an allowlist entry that would suppress a hard-
+// block type is ignored and the detection still fires. This guard lives in core
+// (not trusted to config) so the invariant holds for every caller.
+export function applyPrecisionControls(detections, { minConfidence = 0, allowlist = null } = {}) {
+  const kept = [];
+  const suppressedByType = {};
+  const droppedByType = {};
+  let suppressedCount = 0;
+  let droppedCount = 0;
+
+  for (const detection of detections) {
+    const hardBlock = HARD_BLOCK_TYPES.has(detection.type);
+    // Allowlist suppression first (an operator-declared FP exception), but never
+    // for a hard-block type.
+    if (!hardBlock && isAllowlisted(detection, allowlist)) {
+      suppressedByType[detection.type] = (suppressedByType[detection.type] ?? 0) + 1;
+      suppressedCount += 1;
+      continue;
+    }
+    // minConfidence drop — only for soft types. A low-confidence hard-block
+    // detection (e.g. a card at confidence 0.75) is kept and acted on.
+    if (!hardBlock && Number.isFinite(detection.confidence) && detection.confidence < minConfidence) {
+      droppedByType[detection.type] = (droppedByType[detection.type] ?? 0) + 1;
+      droppedCount += 1;
+      continue;
+    }
+    kept.push(detection);
+  }
+
+  return {
+    detections: kept,
+    precisionAudit: { suppressedCount, suppressedByType, droppedCount, droppedByType }
   };
 }
 
@@ -424,7 +551,7 @@ async function replacementFor(segment, detection, decision, { context, cryptoPro
   }
 }
 
-function buildAuditEvent({ context, mode, enforced, blocked, payload, detections, decisions }) {
+function buildAuditEvent({ context, mode, enforced, blocked, payload, detections, decisions, precisionAudit = null }) {
   return {
     // Reader-facing audit-event schema version (frozen as part of the 1.0 API
     // contract — see docs/current/api-stability.md). Additive-only: a new field
@@ -463,7 +590,7 @@ function buildAuditEvent({ context, mode, enforced, blocked, payload, detections
       action: decisions[index]?.action ?? "unknown",
       enforced
     })),
-    summary: summarize(detections, decisions)
+    summary: summarize(detections, decisions, precisionAudit)
   };
 }
 
