@@ -40,6 +40,69 @@ const DEFAULT_RULES = [
     confidence: 0.95
   },
   {
+    // AWS access key id: a long-lived (AKIA) or temporary (ASIA) key id is a
+    // hard-anchored prefix + EXACTLY 16 uppercase-alphanumeric chars. The fixed
+    // prefix + fixed length is what makes this high-precision (no bare base64).
+    id: "aws-access-key-id",
+    type: "api_key",
+    pattern: "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b",
+    flags: "g",
+    confidence: 0.95
+  },
+  {
+    // GitHub token: pat (ghp_), oauth (gho_), user-to-server (ghu_), server-to-
+    // server (ghs_), refresh (ghr_). Anchored prefix + a long base64-ish body.
+    // GitHub's own format is 36 chars after the prefix; we allow >=36 (the
+    // corpus fixture is 38) and cap to keep the match bounded.
+    id: "github-token",
+    type: "secret",
+    pattern: "\\bgh[pousr]_[A-Za-z0-9]{36,255}\\b",
+    flags: "g",
+    confidence: 0.95
+  },
+  {
+    // Google API key: anchored AIza + exactly 35 chars from the URL-safe
+    // alphabet. Fixed prefix + fixed length = high precision.
+    id: "google-api-key",
+    type: "api_key",
+    pattern: "\\bAIza[0-9A-Za-z_-]{35}\\b",
+    flags: "g",
+    confidence: 0.9
+  },
+  {
+    // Slack token: bot (xoxb-), user (xoxa/xoxp-), refresh (xoxr-), legacy
+    // (xoxs-). Anchored xox[baprs]- + a >=10-char body. The corpus value is a
+    // deliberately low-entropy placeholder, so the rule anchors on the prefix +
+    // body shape, not entropy.
+    id: "slack-token",
+    type: "secret",
+    pattern: "\\bxox[baprs]-[0-9A-Za-z-]{10,}\\b",
+    flags: "g",
+    confidence: 0.9
+  },
+  {
+    // JWT: three dot-separated base64url segments where the FIRST starts with
+    // `eyJ` — the base64 of `{"`, i.e. the opening of the JSON header. Anchoring
+    // on `eyJ` + two more base64url groups keeps this from matching arbitrary
+    // dotted tokens (a bare base64 triplet without the JSON header is not a JWT).
+    id: "jwt",
+    type: "secret",
+    pattern: "\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b",
+    flags: "g",
+    confidence: 0.9
+  },
+  {
+    // PEM private key: the armored header. We match the header line itself
+    // (`-----BEGIN [...] PRIVATE KEY-----`) — its presence is the credential
+    // signal; the body is high-entropy base64 we do not need to span. Covers
+    // RSA/EC/OPENSSH/DSA/ENCRYPTED variants and the bare `PRIVATE KEY` form.
+    id: "pem-private-key",
+    type: "secret",
+    pattern: "-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----",
+    flags: "g",
+    confidence: 0.98
+  },
+  {
     id: "bearer-token",
     type: "secret",
     pattern: "\\bBearer\\s+[A-Za-z0-9._~+/-]{16,}\\b",
@@ -50,10 +113,57 @@ const DEFAULT_RULES = [
     id: "assignment-secret",
     type: "secret",
     // Lookbehind keeps the key name out of the match so transforms replace
-    // only the secret value, not the assignment prefix.
-    pattern: "(?<=\\b(?:api[_-]?key|secret|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
+    // only the secret value, not the assignment prefix. The key vocabulary
+    // covers the common credential-assignment names (cloud secrets, OAuth
+    // client secrets, PEM/private keys, access/refresh tokens) so a
+    // `<key> = <value>` leak is caught even when the value itself has no
+    // self-describing prefix (e.g. an AWS secret access key is bare base64).
+    pattern: "(?<=\\b(?:api[_-]?key|api[_-]?secret|secret[_-]?key|secret|aws[_-]?secret[_-]?access[_-]?key|client[_-]?secret|private[_-]?key|access[_-]?token|refresh[_-]?token|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
     flags: "gi",
     confidence: 0.85
+  },
+  {
+    // US SSN: AAA-GG-SSSS. The format alone collides with 9-digit ids, so a
+    // validator rejects the SSA-invalid ranges (area 000/666/900-999, group 00,
+    // serial 0000). The separators are required by the pattern — a bare 9-digit
+    // run is intentionally NOT matched (it is indistinguishable from an id).
+    id: "us-ssn",
+    type: "us_ssn",
+    pattern: "(?<![\\w-])\\d{3}-\\d{2}-\\d{4}(?![\\w-])",
+    flags: "g",
+    confidence: 0.85,
+    validate: usSsnValid
+  },
+  {
+    // IBAN: country(2 alpha) + 2 check digits + BBAN. The mod-97 checksum is
+    // what makes this high-precision — a random alnum run of the right shape
+    // almost never satisfies mod-97 == 1. Length 15-34 per ISO 13616.
+    id: "iban",
+    type: "iban",
+    pattern: "(?<![A-Z0-9])[A-Z]{2}\\d{2}[A-Z0-9]{11,30}(?![A-Z0-9])",
+    flags: "g",
+    confidence: 0.9,
+    validate: ibanValid
+  },
+  {
+    // E.164 international phone: ONLY with a leading `+` (a bare digit run is an
+    // id/timestamp, never matched here). `+` country digit (1-9) then 6-14 more.
+    id: "e164-phone",
+    type: "phone",
+    pattern: "(?<![\\w+])\\+[1-9]\\d{6,14}(?![\\w])",
+    flags: "g",
+    confidence: 0.8
+  },
+  {
+    // US national phone: ONLY with separators — `(NXX) NXX-XXXX` or
+    // `NXX-NXX-XXXX`. A separator-less 10-digit run is deliberately NOT matched
+    // (it collides with ids/timestamps; the kr-phone rule already guards bare
+    // runs). Conservative by design — phone is the highest false-positive risk.
+    id: "us-phone",
+    type: "phone",
+    pattern: "(?<![\\w-])(?:\\(\\d{3}\\)\\s?|\\d{3}-)\\d{3}-\\d{4}(?![\\w-])",
+    flags: "g",
+    confidence: 0.75
   },
   // Indirect prompt injection heuristics. Response/tool-result direction only,
   // and the policy default for the injection type is `allow` (report-only):
@@ -290,4 +400,48 @@ function krRrnValid(value) {
   const sum = weights.reduce((total, weight, index) => total + weight * Number(digits[index]), 0);
   const check = (11 - (sum % 11)) % 10;
   return check === Number(digits[12]);
+}
+
+// US SSN structural validity (SSA allocation rules). The format `AAA-GG-SSSS`
+// alone collides with arbitrary 9-digit ids, so we reject the never-issued
+// ranges: area 000, 666, and 900-999; group 00; serial 0000. This is what turns
+// the loose shape into a high-precision detection.
+function usSsnValid(value) {
+  const match = /^(\d{3})-(\d{2})-(\d{4})$/.exec(value);
+  if (!match) {
+    return false;
+  }
+  const area = Number(match[1]);
+  const group = Number(match[2]);
+  const serial = Number(match[3]);
+  if (area === 0 || area === 666 || area >= 900) {
+    return false;
+  }
+  if (group === 0) {
+    return false;
+  }
+  if (serial === 0) {
+    return false;
+  }
+  return true;
+}
+
+// IBAN mod-97 checksum (ISO 7064 / ISO 13616). Move the first four chars to the
+// end, map letters to 10-35, and the resulting integer must be congruent to 1
+// mod 97. Computed digit-by-digit so the big integer never overflows. This
+// checksum is the precision guarantee — random alnum runs almost never pass.
+function ibanValid(value) {
+  const iban = value.replace(/\s/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) {
+    return false;
+  }
+  const rearranged = iban.slice(4) + iban.slice(0, 4);
+  let remainder = 0;
+  for (const char of rearranged) {
+    const mapped = /\d/.test(char) ? char : String(char.charCodeAt(0) - 55);
+    for (const digit of mapped) {
+      remainder = (remainder * 10 + Number(digit)) % 97;
+    }
+  }
+  return remainder === 1;
 }

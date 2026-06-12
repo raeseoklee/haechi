@@ -192,7 +192,34 @@ identity가 인증되면 **scope → label → `default`** 순으로 profile이 
 
 ## Detection type과 action
 
-내장 탐지 `type` 값은 다음과 같습니다: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, `injection`(응답 방향 휴리스틱, 기본 report-only). 커스텀 규칙으로 새로운 type을 추가할 수 있습니다.
+내장 탐지 `type` 값은 다음과 같습니다: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, `us_ssn`, `iban`, `injection`(응답 방향 휴리스틱, 기본 report-only). 커스텀 규칙으로 새로운 type을 추가할 수 있습니다.
+
+### 지원하는 자격증명·PII 매트릭스
+
+탐지는 정규식 + 선택적 validator로 동작합니다(ML 미사용). 모든 규칙은 정밀도를 높게 유지하기 위해 **단단히 anchoring**되어 있으며, recall보다 precision을 우선합니다. 코퍼스(`tests/fixtures/detection-corpus.json`)에는 규칙마다 hard-negative가 포함됩니다. KR phone 규칙과 US SSN/IBAN validator는 유사 형태의 id·timestamp를 거부합니다.
+
+| Type | 탐지 대상 | Anchor / validator | 비고 |
+|---|---|---|---|
+| `email` | RFC 형식 주소 | local + domain + TLD | — |
+| `phone` | KR 휴대폰(`01[016789]`, `+82`) | 구분자 없는 bare run은 `0`으로 시작해야 함 | KR 유선번호는 범위 외입니다. |
+| `phone` | E.164 국제번호 | **선행 `+` 필수**(`+[1-9]` + 6–14자리) | bare 숫자열은 절대 매칭하지 않습니다(id·timestamp와 충돌). |
+| `phone` | US/NANP 국내번호 | **구분자 필수**(`(NXX) NXX-XXXX` 또는 `NXX-NXX-XXXX`) | 구분자 없는 10자리 숫자열은 매칭하지 않습니다. |
+| `kr_rrn` | 주민등록번호 | 검증 숫자 validator | 형식은 맞으나 checksum 불일치 → 거부. |
+| `card` | 결제 카드(PAN) | Luhn validator, 13–19자리 | — |
+| `us_ssn` | 미국 사회보장번호 | `AAA-GG-SSSS` + SSA 범위 validator(area `000`/`666`/`900-999`, group `00`, serial `0000` 거부) | 구분자 필수이며, bare 9자리 id는 SSN이 아닙니다. |
+| `iban` | 국제 은행계좌번호 | **mod-97 checksum** validator | checksum이 정밀도 가드입니다 — IBAN 형태이지만 97 비검증 문자열은 거부됩니다. |
+| `api_key` | OpenAI 형식(`sk_`/`rk_`/`pk_`) | prefix + 24자 이상 | — |
+| `api_key` | AWS access key id | `AKIA`/`ASIA` + 정확히 16자 대문자-alnum | — |
+| `api_key` | Google API key | `AIza` + 35자 URL-safe 문자 | — |
+| `secret` | `Bearer <token>` | `Bearer` + 16자 이상 | — |
+| `secret` | 할당식 `<key> = <value>` | 키 어휘: `api_key`, `api_secret`, `secret`, `secret_key`, `aws_secret_access_key`, `client_secret`, `private_key`, `access_token`, `refresh_token`, `token`, `password` | bare-base64 시크릿(예: AWS secret access key)을 할당식 형태로 포착합니다. |
+| `secret` | GitHub token | `gh[pousr]_` + 36자 이상 base64 유사 문자 | pat/oauth/user/server/refresh 변형. |
+| `secret` | Slack token | `xox[baprs]-` + 10자 이상 본문 | bot/user/refresh/legacy 변형. |
+| `secret` | JWT | 점으로 구분된 3개 base64url 세그먼트, 첫 세그먼트가 `eyJ`(즉 `{"`의 base64)로 시작 | `eyJ` anchor가 임의의 점-구분 토큰을 거부합니다. |
+| `secret` | PEM private key | `-----BEGIN … PRIVATE KEY-----` armor 헤더 | 헤더 존재가 신호이며, "private key"를 언급한 산문은 매칭하지 않습니다. |
+| `injection` | 프롬프트 인젝션 휴리스틱 | 응답 방향 전용, 기본 `allow` | [Action strength](#action-strength) 참고; report-only. |
+
+탐지는 문자열 값, JSON number leaf(요청 방향), object key를 대상으로 합니다. Base64/인코딩 값과 URL query 문자열은 문서화된 제외 항목입니다(`docs/current/threat-model.md` 참고). 응답 방향에서는 Haechi 자체 transform marker와 bare JSON number leaf를 건너뜁니다(요청 방향은 항상 전체 스캔).
 
 Action(약한 것 → 강한 것 순):
 

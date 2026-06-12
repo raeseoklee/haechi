@@ -192,7 +192,34 @@ When an identity authenticates, its profile resolves in order **scope → label 
 
 ## Detection types & actions
 
-Built-in detection `type` values: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, and `injection` (response-direction heuristic, report-only by default). Custom rules may introduce new types.
+Built-in detection `type` values: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, `us_ssn`, `iban`, and `injection` (response-direction heuristic, report-only by default). Custom rules may introduce new types.
+
+### Supported credential & PII matrix
+
+Detection is regex + optional validator (no ML). Every rule is **anchored tightly** to keep precision high; precision is prioritized over recall, and the corpus (`tests/fixtures/detection-corpus.json`) carries a hard-negative for each rule. The KR phone rule and the US SSN/IBAN validators reject look-alike ids/timestamps.
+
+| Type | Detects | Anchor / validator | Notes |
+|---|---|---|---|
+| `email` | RFC-style addresses | local + domain + TLD | — |
+| `phone` | KR mobile (`01[016789]`, `+82`) | bare separator-less runs must be `0`-led | KR landlines out of scope. |
+| `phone` | E.164 international | **leading `+` required** (`+[1-9]` + 6–14 digits) | A bare digit run is never matched (collides with ids/timestamps). |
+| `phone` | US/NANP national | **separators required** (`(NXX) NXX-XXXX` or `NXX-NXX-XXXX`) | A separator-less 10-digit run is not matched. |
+| `kr_rrn` | KR resident registration number | check-digit validator | Shape-valid but checksum-invalid → rejected. |
+| `card` | Payment card (PAN) | Luhn validator, 13–19 digits | — |
+| `us_ssn` | US Social Security Number | `AAA-GG-SSSS` + SSA-range validator (rejects area `000`/`666`/`900-999`, group `00`, serial `0000`) | Separators required; a bare 9-digit id is not an SSN. |
+| `iban` | International Bank Account Number | **mod-97 checksum** validator | The checksum is the precision guard — IBAN-shaped non-97-valid strings are rejected. |
+| `api_key` | OpenAI-style (`sk_`/`rk_`/`pk_`) | prefix + ≥24 chars | — |
+| `api_key` | AWS access key id | `AKIA`/`ASIA` + exactly 16 uppercase-alnum | — |
+| `api_key` | Google API key | `AIza` + 35 URL-safe chars | — |
+| `secret` | `Bearer <token>` | `Bearer` + ≥16 chars | — |
+| `secret` | Assignment `<key> = <value>` | key vocabulary: `api_key`, `api_secret`, `secret`, `secret_key`, `aws_secret_access_key`, `client_secret`, `private_key`, `access_token`, `refresh_token`, `token`, `password` | Catches bare-base64 secrets (e.g. AWS secret access key) via the assignment form. |
+| `secret` | GitHub token | `gh[pousr]_` + ≥36 base64-ish chars | pat/oauth/user/server/refresh variants. |
+| `secret` | Slack token | `xox[baprs]-` + ≥10-char body | bot/user/refresh/legacy variants. |
+| `secret` | JWT | three base64url segments, first starts `eyJ` (the base64 of `{"`) | The `eyJ` anchor rejects arbitrary dotted tokens. |
+| `secret` | PEM private key | `-----BEGIN … PRIVATE KEY-----` armor header | The header presence is the signal; prose mentioning "private key" is not matched. |
+| `injection` | prompt-injection heuristics | response-direction only, `allow` by default | See [Action strength](#action-strength); report-only. |
+
+Detection covers string values, JSON number leaves (request direction), and object keys. Base64/encoded values and URL query strings are documented exclusions (see `docs/current/threat-model.md`). On the response direction, Haechi's own transform markers and bare JSON number leaves are skipped (request direction is always full-scan).
 
 Actions (weakest → strongest):
 

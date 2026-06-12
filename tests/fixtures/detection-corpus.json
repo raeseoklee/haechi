@@ -1,7 +1,7 @@
 {
-  "$schema-note": "Labeled detection corpus for WS2a (reliability-hardening-track). Each case is { text, direction?, expect: [{ type, present }], note }. `present:true` = the engine SHOULD detect this type in `text`; `present:false` = it must NOT (a hard negative). `direction` defaults to \"request\"; injection rules are response-direction only. Scored per-type by scripts/bench-detection.mjs; regression-gated against scripts/detection-baseline.json.",
-  "$safety": "ALL VALUES ARE SYNTHETIC TEST FIXTURES. No real secret, key, or PII appears here. Card numbers are the public 4242.../4111... test cards; AWS uses the documented AKIAIOSFODNN7EXAMPLE; the JWT/PEM/tokens are fabricated or public RFC/sample values. Storing real secrets/PII is forbidden by CLAUDE.md.",
-  "$baseline-legend": "Some positives are KNOWN COVERAGE GAPS the audit reproduced as MISS (no rule exists yet — WS2b). They are labeled present:true with `\"gap\": true` so the corpus documents the target while the baseline records today's miss. The gate fails on a REGRESSION below baseline, never on an already-recorded gap.",
+  "$schema-note": "Labeled detection corpus for WS2a/WS2b (reliability-hardening-track). Each case is { text, direction?, expect: [{ type, present }], note }. `present:true` = the engine SHOULD detect this type in `text`; `present:false` = it must NOT (a hard negative). `direction` defaults to \"request\"; injection rules are response-direction only. Scored per-type by scripts/bench-detection.mjs; regression-gated against scripts/detection-baseline.json.",
+  "$safety": "ALL VALUES ARE SYNTHETIC TEST FIXTURES. No real secret, key, or PII appears here. Card numbers are the public 4242.../4111... test cards; AWS uses the documented AKIAIOSFODNN7EXAMPLE; the SSN is the public misprinted-wallet 078-05-1120; the IBAN is the public ECB example DE89370400440532013000; the JWT/PEM/tokens are fabricated or public RFC/sample values. Storing real secrets/PII is forbidden by CLAUDE.md.",
+  "$baseline-legend": "WS2b closed the credential/PII coverage gaps WS2a measured: the AWS/GitHub/Google/Slack keys, JWT, and PEM headers are now true-positives, and new international-PII types (us_ssn, iban) plus E.164/US phone forms were added — each with a hard-negative case and (for us_ssn/iban) a validator-boundary case. The baseline is re-pinned to capture the improved per-type precision/recall. The gate still fails only on a REGRESSION below baseline.",
   "cases": [
     {
       "text": "Please contact me at minji.kim@example.com about the invoice.",
@@ -128,53 +128,124 @@
     },
     {
       "text": "AWS access key AKIAIOSFODNN7EXAMPLE used in the docs example",
-      "expect": [{ "type": "api_key", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): the documented AWS example access key is currently MISSED — no AKIA rule exists. Baseline records the miss; the gate must not fail on it today."
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "WS2b CLOSED: the documented AWS example access key (AKIA + 16 uppercase-alnum) is now detected by the anchored aws-access-key-id rule."
+    },
+    {
+      "text": "the deploy ran AKIA1234 first then AKIANOTLONGENOUGH afterward",
+      "expect": [{ "type": "api_key", "present": false }],
+      "note": "HARD NEGATIVE (aws-access-key-id): AKIA followed by fewer than 16 uppercase-alnum chars must NOT match — the rule requires the exact AKIA/ASIA + 16 shape, not a bare AKIA prefix."
     },
     {
       "text": "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY noted here",
-      "expect": [{ "type": "secret", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): the documented AWS secret as an `aws_secret_access_key = ...` assignment is currently MISSED — the assignment-secret lookbehind only anchors on bare `api_key|secret|token|password` immediately before `=`, not the `aws_secret_access_key` vocabulary (WS2b expands the key vocabulary). Baseline records the miss."
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "WS2b CLOSED: the documented AWS secret as an `aws_secret_access_key = ...` assignment is now caught by the expanded assignment-secret key vocabulary (aws_secret_access_key, client_secret, private_key, access_token, refresh_token, secret_key, api_secret)."
+    },
+    {
+      "text": "client_secret: 0123456789abcdef0123 was committed to the repo",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "clean positive: the expanded assignment-secret vocabulary also matches the OAuth `client_secret: <value>` form."
     },
     {
       "text": "GitHub PAT ghp_0123456789abcdefghijklmnopqrstuvwxyzAB committed by mistake",
-      "expect": [{ "type": "secret", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): a GitHub ghp_ personal-access-token (fabricated random chars) is currently MISSED — no ghp_ rule. Baseline records the miss."
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "WS2b CLOSED: a GitHub ghp_ personal-access-token (fabricated chars) is now detected by the anchored gh[pousr]_ rule."
+    },
+    {
+      "text": "the changelog mentions ghp_short and a ghp prefix without a token body",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (github-token): a bare `ghp_` prefix with a too-short body must NOT match — the rule requires >=36 base64-ish chars after the prefix."
     },
     {
       "text": "Google API key AIzaSyA1234567890abcdefghijklmnopqrstuv in the client config",
-      "expect": [{ "type": "api_key", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): a Google AIza... API key (fabricated) is currently MISSED — no AIza rule. Baseline records the miss."
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "WS2b CLOSED: a Google AIza... API key (fabricated) is now detected by the anchored AIza + 35-char rule."
+    },
+    {
+      "text": "the word AIza appears here as AIzaShort without a full 35-char body",
+      "expect": [{ "type": "api_key", "present": false }],
+      "note": "HARD NEGATIVE (google-api-key): an AIza prefix without exactly 35 trailing URL-safe chars must NOT match."
     },
     {
       "text": "Slack bot token xoxb-PLACEHOLDER-PLACEHOLDER-notARealSlackTokenForTests leaked",
-      "expect": [{ "type": "secret", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): a Slack xoxb- shaped token (synthetic placeholder — deliberately no realistic entropy so secret scanners don't flag it) is currently MISSED — no xox[baprs]- rule. Baseline records the miss."
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "WS2b CLOSED: a Slack xoxb- shaped token (synthetic low-entropy placeholder) is now detected by the anchored xox[baprs]- rule — which keys on prefix+body shape, not entropy."
+    },
+    {
+      "text": "the deploy log printed xoxb-short and xoxe-unknownprefix here",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (slack-token): a too-short body (xoxb-short) and a non-allowlisted second char (xoxe-) must NOT match."
     },
     {
       "text": "JWT eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U in the auth flow",
-      "expect": [{ "type": "secret", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): a three-segment JWT (public jwt.io sample) is currently MISSED — no eyJ three-segment rule. Baseline records the miss."
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "WS2b CLOSED: a three-segment JWT (public jwt.io sample) is now detected by the eyJ + two-base64url-segments rule."
+    },
+    {
+      "text": "the build id abc.def.ghi and a value foo.bar.baz are dotted but not JWTs",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (jwt): a dotted three-part token whose first segment does NOT start with `eyJ` (the base64 of `{\"`) must NOT match — the eyJ anchor is the precision guard."
     },
     {
       "text": "-----BEGIN RSA PRIVATE KEY----- MIIBOgIBAAJBAKj34GkxFh... -----END RSA PRIVATE KEY-----",
-      "expect": [{ "type": "secret", "present": true, "gap": true }],
-      "note": "FALSE NEGATIVE (coverage gap, WS2b): a PEM PRIVATE KEY header (truncated/fabricated body) is currently MISSED — no PEM rule. Baseline records the miss."
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "WS2b CLOSED: a PEM PRIVATE KEY header (truncated/fabricated body) is now detected by the -----BEGIN ... PRIVATE KEY----- header rule."
+    },
+    {
+      "text": "rotate the private key before deploy and store the secret material safely",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (pem-private-key): a sentence merely containing the words 'private key' with no PEM armor header must NOT match — the rule anchors on the -----BEGIN ... PRIVATE KEY----- header, not the prose."
     },
     {
       "text": "US SSN 078-05-1120 on the intake form",
-      "expect": [{ "type": "kr_rrn", "present": false }],
-      "note": "FALSE NEGATIVE / locale gap (WS2b): the famous synthetic US SSN (078-05-1120) is not KR-locale PII and has no US-SSN rule. Recorded as a documented locale exclusion; expect:false for kr_rrn confirms it is NOT mis-classified as a KR RRN today."
+      "expect": [
+        { "type": "us_ssn", "present": true },
+        { "type": "kr_rrn", "present": false }
+      ],
+      "note": "WS2b CLOSED (international PII): the famous synthetic US SSN (078-05-1120, the public misprinted-wallet SSN) is now detected by the us-ssn rule + SSA-range validator. kr_rrn stays false — it is not mis-classified as a KR RRN."
     },
     {
-      "text": "US phone (212) 555-0143 from the reserved 555-01xx test range",
-      "expect": [{ "type": "phone", "present": false }],
-      "note": "FALSE NEGATIVE / locale gap (WS2b): a US/NANP phone (reserved 555-01xx test number) has no rule (KR-locale only). expect:false confirms it is not mis-detected as a KR phone today."
+      "text": "order number 666123456 and reference 078051120 are nine-digit ids",
+      "expect": [{ "type": "us_ssn", "present": false }],
+      "note": "HARD NEGATIVE (us-ssn): a bare 9-digit order/reference number (no separators) must NOT match — the rule requires the AAA-GG-SSSS separators, so a 9-digit id is never an SSN."
+    },
+    {
+      "text": "intake form lists SSN 666-12-1234 which is a structurally invalid area",
+      "expect": [{ "type": "us_ssn", "present": false }],
+      "note": "HARD NEGATIVE (us-ssn validator): area 666 is never issued — the validator rejects it even though the AAA-GG-SSSS shape matches."
     },
     {
       "text": "IBAN DE89370400440532013000 from the ECB example set",
-      "expect": [{ "type": "card", "present": false }],
-      "note": "FALSE NEGATIVE / locale gap (WS2b): the public German IBAN example has no mod-97 IBAN rule. expect:false for card confirms the embedded digit run is not mis-detected as a card today."
+      "expect": [
+        { "type": "iban", "present": true },
+        { "type": "card", "present": false }
+      ],
+      "note": "WS2b CLOSED (international PII): the public German IBAN example is now detected by the iban rule + mod-97 checksum validator. card stays false — the embedded 20-digit run is out of card length and not Luhn-valid."
+    },
+    {
+      "text": "reference DE89370400440532013001 looks IBAN-shaped but fails mod-97",
+      "expect": [{ "type": "iban", "present": false }],
+      "note": "HARD NEGATIVE (iban validator): an IBAN-shaped string whose final digit breaks the mod-97 checksum must NOT match — the checksum is what makes the rule high-precision."
+    },
+    {
+      "text": "call the US line +14155552671 to confirm the booking",
+      "expect": [{ "type": "phone", "present": true }],
+      "note": "WS2b CLOSED (E.164): a +1 E.164 number (leading + required) is now detected by the e164-phone rule."
+    },
+    {
+      "text": "US phone (415) 555-2671 from the reserved 555-xxxx test range",
+      "expect": [{ "type": "phone", "present": true }],
+      "note": "WS2b CLOSED (US national): a separated US/NANP number (415) 555-2671 is now detected by the us-phone rule."
+    },
+    {
+      "text": "US phone (212) 555-0143 from the reserved 555-01xx test range",
+      "expect": [{ "type": "phone", "present": true }],
+      "note": "WS2b CLOSED (US national): the previously-uncovered NANP test number is now detected by the us-phone rule (parenthesized form)."
+    },
+    {
+      "text": "the account id 12345678901 and ticket 4155552671 are bare digit runs",
+      "expect": [{ "type": "phone", "present": false }],
+      "note": "HARD NEGATIVE (e164/us-phone): a separator-less, plus-less digit run must NOT match — E.164 requires a leading +, US national requires separators, and the kr-phone rule already guards bare runs. An id/timestamp is never a phone."
     }
   ]
 }

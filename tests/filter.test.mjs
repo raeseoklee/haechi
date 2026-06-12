@@ -159,6 +159,83 @@ test("KR phone detector ignores bare ambiguous numbers but keeps real phone form
   assert.deepEqual(phones, ["intl", "noSep", "sep"]);
 });
 
+// All values below are SYNTHETIC test fixtures (documented examples / fabricated
+// random chars) — never real credentials, per CLAUDE.md.
+async function typesFor(text, direction = "request") {
+  const filter = createDefaultFilterEngine();
+  const detections = await filter.detect({
+    entries: collectStringEntries({ content: text }),
+    context: { direction }
+  });
+  return new Set(detections.map((d) => d.type));
+}
+
+test("WS2b credential rules detect anchored cloud/VCS/JWT/PEM formats", async () => {
+  // AWS access key id: anchored AKIA/ASIA + exactly 16 uppercase-alnum.
+  assert.ok((await typesFor("AWS access key AKIAIOSFODNN7EXAMPLE used")).has("api_key"));
+  // GitHub token: anchored gh[pousr]_ + long base64-ish body.
+  assert.ok((await typesFor("PAT ghp_0123456789abcdefghijklmnopqrstuvwxyzAB leaked")).has("secret"));
+  // Google API key: anchored AIza + 35 chars.
+  assert.ok((await typesFor("key AIzaSyA1234567890abcdefghijklmnopqrstuv here")).has("api_key"));
+  // Slack token: anchored xox[baprs]- + >=10-char body (low-entropy placeholder).
+  assert.ok((await typesFor("xoxb-PLACEHOLDER-PLACEHOLDER-notARealSlackTokenForTests")).has("secret"));
+  // JWT: three base64url segments, first starts eyJ.
+  assert.ok((await typesFor("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")).has("secret"));
+  // PEM private key header.
+  assert.ok((await typesFor("-----BEGIN RSA PRIVATE KEY----- MIIBOg... -----END RSA PRIVATE KEY-----")).has("secret"));
+});
+
+test("WS2b credential rules are anchored — no bare-prefix / no-armor false positives", async () => {
+  // AKIA without the full 16-char body must not match.
+  assert.ok(!(await typesFor("the value AKIA1234 and AKIANOTLONGENOUGH appear")).has("api_key"));
+  // ghp_ with a short body must not match.
+  assert.ok(!(await typesFor("see ghp_short in the notes")).has("secret"));
+  // AIza without a 35-char body must not match.
+  assert.ok(!(await typesFor("AIzaShort is not a key")).has("api_key"));
+  // Slack: too-short body and a non-allowlisted prefix char.
+  assert.ok(!(await typesFor("xoxb-short and xoxe-unknownprefix")).has("secret"));
+  // A dotted triplet whose first segment is not eyJ is not a JWT.
+  assert.ok(!(await typesFor("build foo.bar.baz and abc.def.ghi")).has("secret"));
+  // The words "private key" with no PEM armor header are not a secret.
+  assert.ok(!(await typesFor("rotate the private key before the deploy")).has("secret"));
+});
+
+test("WS2b expanded assignment-secret vocabulary catches cloud/OAuth secret assignments", async () => {
+  assert.ok((await typesFor("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")).has("secret"));
+  assert.ok((await typesFor("client_secret: 0123456789abcdef0123 committed")).has("secret"));
+  assert.ok((await typesFor("refresh_token = 0123456789abcdef0123 in the env")).has("secret"));
+});
+
+test("WS2b US SSN rule + SSA-range validator", async () => {
+  // The public synthetic SSN passes the validator.
+  assert.ok((await typesFor("US SSN 078-05-1120 on the form")).has("us_ssn"));
+  // Area 666 is never issued — rejected by the validator.
+  assert.ok(!(await typesFor("SSN 666-12-1234 is invalid")).has("us_ssn"));
+  // Area 900-999, group 00, serial 0000 are rejected too.
+  assert.ok(!(await typesFor("SSN 900-12-1234")).has("us_ssn"));
+  assert.ok(!(await typesFor("SSN 078-00-1120")).has("us_ssn"));
+  assert.ok(!(await typesFor("SSN 078-05-0000")).has("us_ssn"));
+  // A bare 9-digit id (no separators) is never an SSN.
+  assert.ok(!(await typesFor("order number 078051120 shipped")).has("us_ssn"));
+});
+
+test("WS2b IBAN rule + mod-97 checksum validator", async () => {
+  // The public ECB German IBAN example passes mod-97.
+  assert.ok((await typesFor("IBAN DE89370400440532013000 from ECB")).has("iban"));
+  // An IBAN-shaped string that breaks mod-97 is rejected.
+  assert.ok(!(await typesFor("ref DE89370400440532013001 fails checksum")).has("iban"));
+});
+
+test("WS2b phone rules: E.164 needs a leading +, US national needs separators, bare runs rejected", async () => {
+  // E.164 with a leading +.
+  assert.ok((await typesFor("call +14155552671 now")).has("phone"));
+  // US national with separators (both parenthesized and dashed forms).
+  assert.ok((await typesFor("call (415) 555-2671 today")).has("phone"));
+  assert.ok((await typesFor("call 415-555-2671 today")).has("phone"));
+  // A bare separator-less, plus-less digit run is NOT a phone (collides with ids).
+  assert.ok(!(await typesFor("account id 12345678901 and ticket 4155552671")).has("phone"));
+});
+
 test("custom filter rejects unsafe regex shapes", () => {
   assert.throws(
     () => createDefaultFilterEngine({
