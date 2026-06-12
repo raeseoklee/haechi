@@ -8,7 +8,7 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.1-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.2-brightgreen)](docs/current/api-stability.md)
 
 **English** | [한국어](README.ko.md)
 
@@ -29,6 +29,28 @@ The current scope focuses on local adoption:
 - `haechi status`: show what is and is not protected under the current config
 - `haechi audit-verify`: verify the audit hash chain and print its head hash
 - `haechi mcp-wrap -- <command>`: wrap an MCP server with bidirectional stdio protection
+
+## Demo
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi live end-to-end demo against a real model: detection then tokenize/mask/redact, the masked phone the model can only repeat, a no-plaintext audit, live readiness + Prometheus metrics, and a blocked card" width="900">
+</p>
+
+The recording above is a **live** end-to-end run against a real self-hosted model (Qwen3.6-35B on vLLM) in `enforce` mode. The model is asked to repeat the phone number it was given — and it can only return the **masked** form, because the real number never reached it. It also shows the no-plaintext audit, the live `/__haechi/ready` + `/__haechi/metrics` surface, and a card blocked fail-closed before any upstream call.
+
+Run it yourself — a no-backend, reproducible version with a stub upstream:
+
+```bash
+npm run demo
+```
+
+…or against your own OpenAI-compatible server:
+
+```bash
+HAECHI_LIVE_UPSTREAM=http://127.0.0.1:8000 node examples/local-proxy-demo/live-demo.mjs
+```
+
+See [`examples/local-proxy-demo/`](examples/local-proxy-demo/).
 
 ## Install
 

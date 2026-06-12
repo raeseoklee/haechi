@@ -8,7 +8,7 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.1-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.2-brightgreen)](docs/current/api-stability.md)
 
 [English](README.md) | **한국어**
 
@@ -29,6 +29,28 @@ Haechi는 LLM·MCP·vLLM·Ollama 및 에이전트 payload가 모델, 도구, 로
 - `haechi status`: 현재 설정에서 무엇이 보호되고 무엇이 보호되지 않는지 보여 줍니다
 - `haechi audit-verify`: audit hash chain을 검증하고 head hash를 출력합니다
 - `haechi mcp-wrap -- <command>`: MCP 서버를 양방향 stdio 보호로 감쌉니다
+
+## 데모
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi 라이브 end-to-end 데모(실제 모델): 탐지 후 tokenize/mask/redact, 모델은 마스킹된 전화만 반복, 무평문 감사, 라이브 readiness + Prometheus metrics, 카드 차단" width="900">
+</p>
+
+위 녹화는 실제 self-hosted 모델(vLLM의 Qwen3.6-35B)에 붙인 **라이브** end-to-end 실행입니다(`enforce` 모드). 모델에게 받은 전화번호를 그대로 반복하라고 시키면 — 진짜 번호는 모델에 도달조차 하지 않았으므로 **마스킹된** 형태만 돌려줄 수 있습니다. 무평문 감사, 라이브 `/__haechi/ready` + `/__haechi/metrics`, upstream 호출 전에 fail-closed로 차단되는 카드도 함께 보여줍니다.
+
+직접 실행해 보십시오 — 백엔드 없이 재현 가능한 스텁 버전:
+
+```bash
+npm run demo
+```
+
+…또는 본인의 OpenAI-호환 서버 상대로:
+
+```bash
+HAECHI_LIVE_UPSTREAM=http://127.0.0.1:8000 node examples/local-proxy-demo/live-demo.mjs
+```
+
+[`examples/local-proxy-demo/`](examples/local-proxy-demo/)를 참고하십시오.
 
 ## 설치
 
