@@ -94,6 +94,17 @@ The detect→decide core. See [Detection types & actions](#detection-types--acti
 |---|---|---|---|
 | `filters.customRules` | array of rule objects | `[]` | Extra detection rules: `{ id, type, pattern, flags?, confidence? }`. Patterns are ReDoS-screened (≤500 chars, no nested quantifiers, no backreferences) and rejected at load if unsafe. |
 
+### Detection benchmark
+
+Detection precision/recall is measured, not assumed. A labeled corpus of synthetic test fixtures (`tests/fixtures/detection-corpus.json` — positive samples per type plus benign hard-negatives) drives a per-type scorer:
+
+```bash
+npm run bench:detection   # print the per-type TP/FP/FN + precision/recall table
+npm run scan:detection    # CI regression gate: fail if any type regresses below baseline
+```
+
+`bench:detection` (`scripts/bench-detection.mjs`) runs the default filter engine over each corpus case and reports true/false positives and false negatives per type. `scan:detection` compares the live scores against the pinned baseline (`scripts/detection-baseline.json`) and **fails only on a regression** — a precision or recall drop below the recorded numbers. The baseline deliberately bakes in the current imperfect state (the audit-reproduced false positives on `phone`/`card`/`secret`, and the known coverage-gap misses for AWS/GitHub/Google/Slack keys, JWT, and PEM headers), so the gate passes today and trips only when a change makes detection worse. It runs in `release:preflight` after the doc-freshness gate. Regenerate the baseline after an intentional rule change with `node scripts/bench-detection.mjs --write-baseline` and review the diff. Closing the recorded gaps and false positives is WS2b/WS2c of the reliability-hardening track.
+
 ## `keys`
 
 | Key | Type / values | Default | Notes |

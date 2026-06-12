@@ -1,0 +1,55 @@
+{
+  "note": "Pinned per-type TP/FP/FN baseline for the detection regression gate (WS2a). Records the CURRENT imperfect state — the audit-reproduced false positives and the known coverage-gap misses are baked in here so the gate passes today and fails only on a regression below these numbers. Regenerate with: node scripts/bench-detection.mjs --write-baseline.",
+  "generatedFrom": "tests/fixtures/detection-corpus.json",
+  "perType": {
+    "email": {
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    },
+    "phone": {
+      "tp": 2,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.666667,
+      "recall": 1
+    },
+    "kr_rrn": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    },
+    "card": {
+      "tp": 2,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.666667,
+      "recall": 1
+    },
+    "api_key": {
+      "tp": 2,
+      "fp": 0,
+      "fn": 2,
+      "precision": 1,
+      "recall": 0.5
+    },
+    "secret": {
+      "tp": 2,
+      "fp": 2,
+      "fn": 5,
+      "precision": 0.5,
+      "recall": 0.285714
+    },
+    "injection": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    }
+  }
+}

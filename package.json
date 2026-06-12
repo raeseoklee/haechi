@@ -74,6 +74,8 @@
     "sbom": "node scripts/generate-sbom.mjs",
     "checksums": "node scripts/release-checksums.mjs",
     "bench:payload": "node scripts/bench-payload.mjs",
+    "bench:detection": "node scripts/bench-detection.mjs",
+    "scan:detection": "node scripts/bench-detection.mjs --gate",
     "check:peer-ranges": "node scripts/check-satellite-peer-ranges.mjs",
     "release:preflight": "node scripts/release-preflight.mjs && node scripts/check-satellite-peer-ranges.mjs",
     "release:preflight:npm": "node scripts/release-preflight.mjs --require-npm-auth && node scripts/check-satellite-peer-ranges.mjs",
