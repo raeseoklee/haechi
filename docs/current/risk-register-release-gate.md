@@ -1,8 +1,8 @@
 # Haechi Risk Register and Release Gates
 
-- Status: Living document (tracks core 1.1.x)
+- Status: Living document (tracks core 1.2.x)
 - Date: 2026-06-11
-- Target version: 1.1.x
+- Target version: 1.2.x
 - Branch: `main`
 
 ## 1. Current Assessment
@@ -27,6 +27,7 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | G4 | 0.9.0 observability + interactive-auth satellite cut | P1-SEC-026 / P1-OPS-009 mitigated and P2-CRYPTO-001 accepted; `haechi-dashboard` + `haechi-auth-oidc` + `haechi-crypto-kms@0.2.0` tests green; satellite tarballs zero-dep; core bumped to 0.9.0 (only an additive FORBIDDEN_KEYS audit hardening) | Pass |
 | G5 | 1.0.0 stable API contract + signed-plugin sandbox | P1-SEC-024 / P1-SEC-025 mitigated, P2-API-001 / P2-OPS-006 resolved; the API freeze + deprecation policy + `tests/api-contract.test.mjs` green; the Ed25519 signed-plugin contract + `assertAuthProviderConformance` + the worker-isolated `authProvider` sandbox tests green; PR0 satellite peer-ranges widened to `>=0.8.0 <2.0.0` and the `check-satellite-peer-ranges.mjs` preflight gate green; core stays zero runtime dependency; core bumped to 1.0.0 | Pass |
 | G6 | 1.1.0 plugin capability enforcement (`process-isolated`) | P1-SEC-027 / P1-SEC-028 mitigated; the `process-isolated` runtime (child under `--permission`, zero grants, `data:`-URL load, stdio-ignored, JSON-string IPC) + the fail-closed `--allow-net` feature detection (`netEnforcement:"require-permission"`) + the core `haechi/ssrf` guard + host-mediated key material + the spawn-storm circuit breaker; the fs/net/stdio red-team + SSRF + config tests green (the behavioral suite runs on a `--allow-net` Node and skips fail-closed otherwise); the API freeze stays green (additive `./ssrf` export + additive config keys); core stays zero runtime dependency; core bumped to 1.1.0 (additive + opt-in minor) | Pass |
+| G7 | 1.2.0 Reliability Hardening Track (WS1–WS6) | Detection quality measured + tightened (WS2: a labeled-corpus precision/recall `bench:detection` gate, credential + international-PII coverage, `filters.minConfidence` / `filters.allowlist` with the hard-block-types invariant, NFKC unicode-evasion folding with offset-integrity); WS3 injectable `rateLimiter` seam + bounded fixed-window map; WS4 operability (`/__haechi/live`+`/ready` split, injectable `/metrics`, structured logs + per-request `correlationId`, graceful drain, max-in-flight backpressure, env overlay, hardened Dockerfile/compose/runbook, `configVersion`); WS6 proxy TLS / remote-bind hardening (`proxy.tls` / `proxy.trustForwardedProto`, fail-closed `assertSafeProxyTransport`) + OWASP-LLM/NIST control-mapping whitepaper + RFC 9116 `security.txt` + vulnerability-disclosure path. Every change is additive behind 1.1-preserving defaults (`tests/api-contract.test.mjs` green); the no-plaintext-in-audit invariant extends to telemetry; core stays zero runtime dependency; core bumped to 1.2.0 (additive minor) | Pass |
 
 ## 3. P0 Distribution-Blocking Risk Status
 

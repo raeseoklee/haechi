@@ -1,6 +1,6 @@
 # Haechi 운영 런북 (Day-2)
 
-- 상태: Living document (코어 1.1.x 추적)
+- 상태: Living document (코어 1.2.x 추적)
 
 Haechi를 프로덕션에서 운영하기 위한 실무 가이드입니다: 배포, 환경변수 오버레이를 통한 설정, health/readiness/metrics 모니터링, 우아한 종료, 백프레셔 튜닝, 그리고 해시 체인을 깨지 않는 audit 로그 회전입니다.
 

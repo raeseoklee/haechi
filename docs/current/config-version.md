@@ -1,6 +1,6 @@
 # Haechi `configVersion` & Upgrade Notes
 
-- Status: Living document (tracks core 1.1.x)
+- Status: Living document (tracks core 1.2.x)
 
 `configVersion` is a single integer stamped at the top of `haechi.config.json`
 (and `haechi.config.example.json`). It is a **versioned anchor** so a future
@@ -34,7 +34,7 @@ the "policies only get stronger / fail closed" invariant intact.
 
 | `configVersion` | Core line | Notes |
 |---|---|---|
-| `1` | 1.0 – 1.1.x | Initial stamp. All keys are additive over the 1.0 frozen config surface (`api-stability.md` §2.4). The 1.1.x additive keys (`logging`, `metrics`, the WS4-B `limits.maxInFlight` / `limits.shutdownGraceMs` / `limits.requestTimeoutMs` / `limits.headersTimeoutMs`, `configVersion` itself) all default to prior behavior. No migration needed. |
+| `1` | 1.0 – 1.2.x | Initial stamp. All keys are additive over the 1.0 frozen config surface (`api-stability.md` §2.4). The 1.1.x additive keys (`logging`, `metrics`, the WS4-B `limits.maxInFlight` / `limits.shutdownGraceMs` / `limits.requestTimeoutMs` / `limits.headersTimeoutMs`, `configVersion` itself) and the 1.2.0 Reliability-Hardening keys (`filters.minConfidence` / `filters.allowlist`, `proxy.tls` / `proxy.trustForwardedProto`) all default to prior behavior. No migration needed. |
 
 ## Upgrading
 
