@@ -1,3 +1,5 @@
+import { isUtf8 } from "node:buffer";
+
 // The hard-block detection types: a leak of one of these is a load-bearing
 // fail-closed concern, so the WS2c precision dials (filters.minConfidence,
 // filters.allowlist) may NOT suppress a detection of any of them. minConfidence
@@ -232,8 +234,13 @@ const DEFAULT_RULES = [
   }
 ];
 
-export function createDefaultFilterEngine({ customRules = [] } = {}) {
+export function createDefaultFilterEngine({ customRules = [], decodeAndRescan = false } = {}) {
   const rules = DEFAULT_RULES.concat(customRules.map(normalizeCustomRule));
+  // The opt-in base64/percent decode-and-rescan pass (WS2d residual). Default OFF
+  // => byte-identical to prior behavior. Held in the engine CLOSURE, NOT threaded
+  // through the protect `context`: the request context is data and must not carry
+  // this control flag (it would pollute tokenize AAD / audit).
+  const decodeOptions = { decodeAndRescan: decodeAndRescan === true };
 
   return {
     id: "haechi.filter.default",
@@ -243,12 +250,32 @@ export function createDefaultFilterEngine({ customRules = [] } = {}) {
       networkEgress: false
     },
     async detect({ entries, context }) {
-      return entries.flatMap((entry) => detectEntry(entry, rules, context));
+      return entries.flatMap((entry) => detectEntry(entry, rules, context, decodeOptions));
     }
   };
 }
 
-export function detectEntry(entry, rules, context = {}) {
+export function detectEntry(entry, rules, context = {}, options = {}) {
+  const baseDetections = scanEntry(entry, rules, context);
+  // WS2d residual — opt-in (default OFF) base64/percent decode-and-rescan. After
+  // the normal NFKC scan above, if the flag is on, attempt to decode the leaf and
+  // rescan the decoded text. A decoded hit has NO valid offset in the encoded leaf
+  // (decoding remaps everything), so it fails closed to a WHOLE-LEAF detection of
+  // the original encoded leaf — and only fires for a validator-backed/hard-block
+  // hit so random base64 never false-positives. See decodeAndRescanEntry.
+  if (options?.decodeAndRescan === true) {
+    const decoded = decodeAndRescanEntry(entry, rules, context);
+    if (decoded.length > 0) {
+      return baseDetections.concat(decoded);
+    }
+  }
+  return baseDetections;
+}
+
+// The original per-leaf NFKC scan (WS2d), unchanged. Extracted from detectEntry so
+// the opt-in decode-and-rescan pass wraps it without touching the byte-identical
+// default path.
+function scanEntry(entry, rules, context = {}) {
   const detections = [];
   // On the RESPONSE direction, a bare JSON NUMBER leaf is inference-server
   // metadata (a nanosecond `*_duration`, a token count, a numeric id/timestamp) —
@@ -364,11 +391,17 @@ function scanForDetections(scanText, rules, context, markerSpans, entry, origina
 // value: the whole original leaf). The response-direction marker skip does NOT
 // apply here: a length-divergent leaf cannot BE a Haechi marker (markers are ASCII
 // and NFKC-stable), so an evasion attempt can never masquerade as one.
-function wholeLeafDetections(normalized, rules, context, entry, originalValue) {
+function wholeLeafDetections(normalized, rules, context, entry, originalValue, ruleFilter = null) {
   const seenTypes = new Set();
   const detections = [];
   for (const rule of rules) {
     if (rule.direction && rule.direction !== context?.direction) {
+      continue;
+    }
+    // The decode-and-rescan caller passes a precision filter so only validator-
+    // backed / hard-block rules can fire on decoded text (random base64 guard).
+    // The Case-3 NFKC caller passes nothing → every rule is eligible (unchanged).
+    if (ruleFilter && !ruleFilter(rule)) {
       continue;
     }
     if (seenTypes.has(rule.type)) {
@@ -399,6 +432,132 @@ function wholeLeafDetections(normalized, rules, context, entry, originalValue) {
     });
   }
   return detections;
+}
+
+// WS2d residual — opt-in base64/percent decode-and-rescan (default OFF). An
+// always-on decode is false-positive-prone (random base64 decodes to bytes that
+// can shape-match a soft rule), so this is gated behind `filters.decodeAndRescan`
+// AND a precision guard: a decoded hit only fires when it is VALIDATOR-BACKED or a
+// HARD-BLOCK type (a Luhn-passing card, a checksum kr_rrn/us_ssn, an IBAN mod-97,
+// or a secret/api_key on its anchored rule). A decoded soft-type-without-validator
+// match (a bare phone-shaped run in random decoded bytes) does NOT fire — requiring
+// validators keeps precision ~100% (random base64 Luhn-passing as a 16-digit card
+// is astronomically unlikely).
+//
+// OFFSET HANDLING (fail closed): a detection found in the DECODED text has no valid
+// offset in the original encoded leaf (decoding remaps everything), so we emit a
+// WHOLE-LEAF detection per matched type (start:0, end:leaf.length, value: the whole
+// original encoded leaf) — exactly the WS2d Case-3 path. The transform then
+// redacts/blocks the entire encoded leaf. We never map a decoded offset back.
+function decodeAndRescanEntry(entry, rules, context) {
+  // Only string leaves carry an encoded value; a number/boolean leaf cannot be a
+  // base64/percent blob (and the response-direction number skip already applies in
+  // the base scan).
+  if (entry.kind === "number") {
+    return [];
+  }
+  const decoded = decodeLeaf(entry.value);
+  if (decoded === null) {
+    return [];
+  }
+  // Reuse the Case-3 whole-leaf path, but restricted to precision-eligible rules so
+  // random base64 never false-positives. `decoded` supplies the scan text; the
+  // recorded detection still spans the ORIGINAL encoded leaf (entry.value).
+  return wholeLeafDetections(decoded, rules, context, entry, entry.value, isDecodeEligibleRule);
+}
+
+// A decoded whole-leaf detection only fires for a "meaningful" hit: a hard-block
+// type (secret/api_key/kr_rrn/card) on its anchored rule, OR a checksum-validated
+// type. The `phone` type is excluded even though kr-phone carries a `validate`
+// helper — that helper is a trunk-prefix heuristic, not a checksum, so a phone-
+// shaped run in random decoded bytes must NOT fire (the spec's named exclusion).
+function isDecodeEligibleRule(rule) {
+  if (HARD_BLOCK_TYPES.has(rule.type)) {
+    return true;
+  }
+  return typeof rule.validate === "function" && rule.type !== "phone";
+}
+
+// Attempt to decode a string leaf to UTF-8 text, returning the decoded string or
+// null when the leaf does not look like (or does not cleanly round-trip as) an
+// encoded value. Two encodings, each precision-guarded so a benign value is skipped
+// rather than mis-decoded:
+//   - base64 / base64url: the leaf must LOOK like base64 (no spaces, the base64 or
+//     base64url alphabet, a valid length for that variant) within bounds, decode to
+//     VALID UTF-8, and RE-ENCODE back to exactly the leaf (rejects the bytes that
+//     Buffer.from leniently accepts but are not the canonical encoding of the leaf).
+//   - percent-encoding: only when the leaf actually contains a `%XX` escape;
+//     decodeURIComponent in a try/catch (a malformed escape → skip, never throws).
+// base64 is tried first (a `%`-bearing string is not base64), then percent.
+const DECODE_MIN_LEN = 16;
+const DECODE_MAX_LEN = 8192;
+const BASE64_STD = /^[A-Za-z0-9+/]+={0,2}$/;
+const BASE64_URL = /^[A-Za-z0-9_-]+$/;
+
+function decodeLeaf(value) {
+  if (typeof value !== "string" || value.length < DECODE_MIN_LEN || value.length > DECODE_MAX_LEN) {
+    return null;
+  }
+  const base64 = decodeBase64Leaf(value);
+  if (base64 !== null) {
+    return base64;
+  }
+  return decodePercentLeaf(value);
+}
+
+function decodeBase64Leaf(value) {
+  // Standard base64: length must be a multiple of 4. base64url: length mod 4 may be
+  // 0, 2, or 3 (1 is impossible for any byte run) and the alphabet is `-_` not `+/`.
+  // A `%` or whitespace disqualifies it (handled by the anchored alphabet regexes).
+  let encoding = null;
+  if (BASE64_STD.test(value) && value.length % 4 === 0) {
+    encoding = "base64";
+  } else if (BASE64_URL.test(value) && value.length % 4 !== 1) {
+    encoding = "base64url";
+  } else {
+    return null;
+  }
+  let bytes;
+  try {
+    bytes = Buffer.from(value, encoding);
+  } catch {
+    return null;
+  }
+  if (bytes.length === 0) {
+    return null;
+  }
+  // Round-trip guard: Buffer.from is lenient (it ignores stray chars / bad padding),
+  // so a non-canonical string can "decode". Re-encoding the bytes must reproduce the
+  // EXACT leaf — otherwise the leaf was not really this base64 value.
+  if (bytes.toString(encoding) !== value) {
+    return null;
+  }
+  // The decoded bytes must be valid UTF-8 text; a card/RRN/secret is text. Random
+  // base64 usually decodes to non-UTF-8 bytes, which we skip here (a cheap, strong
+  // false-positive filter before we even run the rules).
+  if (!isUtf8(bytes)) {
+    return null;
+  }
+  return bytes.toString("utf8");
+}
+
+function decodePercentLeaf(value) {
+  // Only attempt when there is an actual `%XX` escape — otherwise decodeURIComponent
+  // is a no-op and we would needlessly rescan an identical string.
+  if (!/%[0-9A-Fa-f]{2}/.test(value)) {
+    return null;
+  }
+  let decoded;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // Malformed percent-escape (e.g. a bare `%` or `%zz`) → skip, never throw.
+    return null;
+  }
+  if (decoded === value) {
+    return null;
+  }
+  return decoded;
 }
 
 // Sound precondition for Case 2: a match's {start,end} on the NFKC-normalized

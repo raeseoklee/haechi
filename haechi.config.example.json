@@ -50,7 +50,8 @@
   "filters": {
     "customRules": [],
     "minConfidence": 0,
-    "allowlist": []
+    "allowlist": [],
+    "decodeAndRescan": false
   },
   "keys": {
     "provider": "local",
