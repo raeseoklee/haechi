@@ -21,7 +21,7 @@ export const BASELINE_PATH = fileURLToPath(new URL("./detection-baseline.json", 
 
 // The fixed set of built-in detection types the corpus scores. Custom-rule
 // types are out of scope for the baseline gate.
-export const SCORED_TYPES = ["email", "phone", "kr_rrn", "card", "api_key", "secret", "injection"];
+export const SCORED_TYPES = ["email", "phone", "kr_rrn", "card", "api_key", "secret", "injection", "us_ssn", "iban"];
 
 export function loadCorpus(path = CORPUS_PATH) {
   const parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -150,7 +150,7 @@ export function buildBaseline(scores) {
     };
   }
   return {
-    note: "Pinned per-type TP/FP/FN baseline for the detection regression gate (WS2a). Records the CURRENT imperfect state — the audit-reproduced false positives and the known coverage-gap misses are baked in here so the gate passes today and fails only on a regression below these numbers. Regenerate with: node scripts/bench-detection.mjs --write-baseline.",
+    note: "Pinned per-type TP/FP/FN baseline for the detection regression gate (WS2a corpus, WS2b rules). Records the CURRENT state — WS2b closed the credential/PII coverage gaps (AWS/GitHub/Google/Slack keys, JWT, PEM, US SSN, IBAN, E.164/US phone are now true-positives), so recall is at 1 across types; the remaining false positives (phone order-id, card order-number, Bearer-in-prose, password-placeholder) are the WS2c targets and stay baked in so the gate fails only on a regression below these numbers. Regenerate with: node scripts/bench-detection.mjs --write-baseline.",
     generatedFrom: "tests/fixtures/detection-corpus.json",
     perType
   };
