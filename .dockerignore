@@ -1,0 +1,45 @@
+# Keep secrets, state, dev cruft, and non-runtime files OUT of the Docker build
+# context (and therefore out of the image). See the Dockerfile + the operations
+# runbook. This is defence in depth on top of the Dockerfile copying only the
+# runtime paths explicitly.
+
+# Secrets + runtime state — NEVER bake these into an image.
+.haechi/
+*.keys.json
+haechi.config.json
+
+# VCS + CI
+.git/
+.github/
+.gitignore
+
+# Tests + benchmarks + dev tooling
+tests/
+scripts/
+jsconfig.json
+tsconfig.json
+*.test.mjs
+
+# Satellites are separately published packages, not part of the core runtime image.
+satellites/
+
+# Docs sources, wiki working memory, and design drafts.
+docs/
+wiki/
+*.md
+!README.md
+
+# Node / editor cruft
+node_modules/
+npm-debug.log
+.DS_Store
+.omc/
+.vscode/
+.idea/
+
+# Build/deploy artifacts that should not re-enter the context.
+Dockerfile
+.dockerignore
+docker-compose.yml
+sbom.cdx.json
+*.tgz

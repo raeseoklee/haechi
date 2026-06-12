@@ -26,7 +26,8 @@ const COUNTERS = {
   haechi_upstream_timeout_total: "Upstream requests that timed out.",
   haechi_upstream_error_total: "Upstream requests that failed (non-timeout).",
   haechi_response_unprotected_total: "Responses forwarded without protection (size/encoding/parse).",
-  haechi_internal_error_total: "Unexpected internal proxy errors."
+  haechi_internal_error_total: "Unexpected internal proxy errors.",
+  haechi_overloaded_total: "Requests rejected by the max-in-flight backpressure ceiling (503)."
 };
 
 const HISTOGRAMS = {

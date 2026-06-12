@@ -1,0 +1,66 @@
+# Haechi reference docker-compose — an example, NOT a turnkey production stack.
+# NOT published to npm. See docs/current/operations-runbook.md for the full
+# deploy + operability procedure (env overlay, health/readiness, metrics scraping,
+# graceful shutdown, backpressure tuning, chain-aware audit rotation).
+#
+# SECURITY CAVEATS (read before exposing this):
+#   - The published port below binds to 127.0.0.1 on the HOST. Haechi has NO TLS
+#     of its own and ships bearer auth that must be configured. Do NOT publish it
+#     on a public interface directly: front it with a TLS-terminating, authenticating
+#     reverse proxy (nginx / Caddy / Traefik / an API gateway) and let only that
+#     proxy reach the Haechi port.
+#   - Secrets (the local key file, auth token store) live in the mounted ./.haechi
+#     volume and/or the mounted config file — NEVER in environment variables. Only
+#     the NON-SECRET HAECHI_* operational keys below are env-overlayable.
+
+services:
+  haechi:
+    build: .
+    # Or pull a pinned image instead of building:
+    # image: ghcr.io/your-org/haechi:1.1.2
+    restart: unless-stopped
+
+    # Publish ONLY to host loopback. Point your TLS/auth reverse proxy here; do
+    # not change this to 0.0.0.0 unless that proxy is the only thing in front.
+    ports:
+      - "127.0.0.1:11016:11016"
+
+    # NON-SECRET operational overlay only. These map onto proxy.port/proxy.host/
+    # target.upstream/mode/logging.format and WIN over the mounted config file.
+    # An invalid value (bad port, unknown mode) fails the container closed at
+    # startup. NEVER put a key/token/secret here.
+    environment:
+      HAECHI_PROXY_HOST: "0.0.0.0"      # inside the container; the host mapping stays loopback
+      HAECHI_PROXY_PORT: "11016"
+      HAECHI_MODE: "enforce"
+      HAECHI_LOG_FORMAT: "json"
+      HAECHI_UPSTREAM: "http://your-llm-upstream:8000"
+
+    # Read-only root filesystem with a writable state volume. Core writes only to
+    # /app/.haechi (audit chain, key file, token vault); everything else can be RO.
+    read_only: true
+    volumes:
+      - haechi-state:/app/.haechi
+      # Mount your own config (with secrets) over the image default:
+      # - ./haechi.config.json:/app/haechi.config.json:ro
+    tmpfs:
+      - /tmp
+
+    # Defence in depth: no new privileges, drop all caps (the gateway needs none).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Container-level liveness/readiness mirrors the Dockerfile HEALTHCHECK; an
+    # orchestrator should probe /__haechi/ready for traffic-readiness (503 until
+    # the audit sink is writable) and /__haechi/live for restart liveness.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:11016/__haechi/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  haechi-state:
