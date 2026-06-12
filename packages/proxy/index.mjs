@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { inspectResponseStream } from "../stream-filter/index.mjs";
 
-export const DEFAULT_PROXY_PORT = 1016;
+export const DEFAULT_PROXY_PORT = 11016;
 
 export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "127.0.0.1", allowRemoteBind = false }) {
   assertSafeProxyBind({ host, allowRemoteBind });

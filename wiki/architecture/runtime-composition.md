@@ -21,4 +21,4 @@ Every collaborator can be replaced via the `providers` argument. This is deliber
 
 ## Config coupling
 
-When changing config shape, three places must move together: `defaultConfig()`, `normalizeConfig()` validation, and `haechi.config.example.json`. The proxy port default (1016, `DEFAULT_PROXY_PORT`) lives in `packages/proxy/index.mjs` and is imported by runtime.
+When changing config shape, three places must move together: `defaultConfig()`, `normalizeConfig()` validation, and `haechi.config.example.json`. The proxy port default (11016, `DEFAULT_PROXY_PORT`) lives in `packages/proxy/index.mjs` and is imported by runtime.

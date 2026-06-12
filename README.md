@@ -60,7 +60,7 @@ The default config runs in `dry-run` mode. It detects sensitive values and write
 node packages/cli/bin/haechi.mjs proxy --config haechi.config.json
 ```
 
-Point an existing HTTP JSON client at `http://localhost:1016` and set `target.upstream` in `haechi.config.json`. Change `proxy.port` in the config or pass `--port` to use a different local port.
+Point an existing HTTP JSON client at `http://localhost:11016` and set `target.upstream` in `haechi.config.json`. Change `proxy.port` in the config or pass `--port` to use a different local port.
 
 The proxy binds to loopback by default. Binding to `0.0.0.0`, `::`, or another non-loopback host fails unless `--allow-remote-bind` is provided. Use that flag only behind explicit network access controls.
 
@@ -92,7 +92,7 @@ Haechi includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ol
 }
 ```
 
-Then point an OpenAI-compatible client at `http://127.0.0.1:1016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy.
+Then point an OpenAI-compatible client at `http://127.0.0.1:11016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy.
 
 ## Token Round-Trip
 
@@ -187,7 +187,7 @@ The satellites are `node:`-only by default (heavy SDKs are optional peers) and k
 | `mode` / `policy.mode` | `dry-run` | `dry-run` and `report-only` detect + audit only; `enforce` transforms/blocks. `policy.mode` wins over `mode` |
 | `target.type` / `target.adapter` | `llm-http` / `openai-compatible` | Upstream protocol: `openai-compatible`, `vllm-openai`, `ollama`, `llama-cpp`. Unknown types fail closed |
 | `target.upstream` | `http://127.0.0.1:9999` | The only upstream the proxy will forward to (absolute-URL request targets are rejected) |
-| `proxy.host` / `proxy.port` | `127.0.0.1` / `1016` | Proxy bind address. See remote binding below |
+| `proxy.host` / `proxy.port` | `127.0.0.1` / `11016` | Proxy bind address. See remote binding below |
 | `responseProtection.enabled` | `false` | Inspect upstream JSON responses. `failureMode: fail-closed` rejects non-JSON/compressed/oversized responses |
 | `responseProtection.maxBytes` | `1048576` | Hard response size cap — enforced even in `failureMode: allow` |
 | `streaming.requestMode` | `block` | `block` 501s streaming; `inspect` stream-filters SSE/NDJSON responses; `pass-through` forwards uninspected (audited). Ollama chat/generate count as streaming unless `stream: false` |
@@ -228,7 +228,7 @@ haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 
 **The proxy has no client authentication yet** (planned for 0.6): anyone who can reach the port can use your upstream and the token round-trip path. Use `--allow-remote-bind` only behind explicit network controls:
 
-- **Containers**: binding `0.0.0.0` inside a container is the normal pattern — restrict exposure at the port mapping, e.g. `-p 127.0.0.1:1016:1016`
+- **Containers**: binding `0.0.0.0` inside a container is the normal pattern — restrict exposure at the port mapping, e.g. `-p 127.0.0.1:11016:11016`
 - **LAN/remote**: put a firewall, VPN (e.g. Tailscale), or an authenticating reverse proxy in front
 
 ## Privacy Profiles

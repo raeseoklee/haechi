@@ -94,10 +94,10 @@ test("proxy refuses non-loopback bind unless explicitly allowed", () => {
 });
 
 test("proxy listen options are configurable with a safe default port", () => {
-  assert.equal(DEFAULT_PROXY_PORT, 1016);
+  assert.equal(DEFAULT_PROXY_PORT, 11016);
   assert.deepEqual(defaultConfig().proxy, {
     host: "127.0.0.1",
-    port: 1016
+    port: 11016
   });
   assert.deepEqual(normalizeConfig({
     proxy: {

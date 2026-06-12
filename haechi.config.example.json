@@ -7,7 +7,7 @@
   },
   "proxy": {
     "host": "127.0.0.1",
-    "port": 1016
+    "port": 11016
   },
   "responseProtection": {
     "enabled": false,

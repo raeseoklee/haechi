@@ -11,7 +11,7 @@
 {
   "mode": "dry-run",
   "target": { "type": "llm-http", "adapter": "openai-compatible", "upstream": "http://127.0.0.1:9999" },
-  "proxy": { "host": "127.0.0.1", "port": 1016 },
+  "proxy": { "host": "127.0.0.1", "port": 11016 },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
   "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000 },
@@ -44,7 +44,7 @@
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
 | `proxy.host` | 비어 있지 않은 문자열 | `127.0.0.1` | 바인드 주소. loopback이 아닌 host를 사용하려면 `--allow-remote-bind` CLI 플래그가 필요하다 — 설정 파일만으로는 시작되지 않는다([loopback 밖으로 바인딩](#binding-beyond-loopback) 참고). |
-| `proxy.port` | 정수 0–65535 | `1016` | 리슨 포트(`0` = 임시 포트). `--port`로 실행 시마다 덮어쓸 수 있다. |
+| `proxy.port` | 정수 0–65535 | `11016` | 리슨 포트(`0` = 임시 포트). `--port`로 실행 시마다 덮어쓸 수 있다. |
 
 ## `responseProtection`
 
@@ -246,7 +246,7 @@ proxy는 CLI 플래그를 명시적으로 전달하지 않으면 loopback이 아
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 ```
 
-**proxy는 아직 클라이언트 인증을 제공하지 않는다**(0.6 계획): 포트에 접근할 수 있는 누구든 upstream과 token round-trip 경로를 사용할 수 있다. `--allow-remote-bind`는 명시적인 네트워크 통제 하에서만 사용해야 한다 — 컨테이너 내에서 `0.0.0.0`으로 바인드하고 host 포트 매핑을 제한하거나(`-p 127.0.0.1:1016:1016`), 방화벽/VPN/인증 reverse proxy 뒤에 두어야 한다.
+**proxy는 아직 클라이언트 인증을 제공하지 않는다**(0.6 계획): 포트에 접근할 수 있는 누구든 upstream과 token round-trip 경로를 사용할 수 있다. `--allow-remote-bind`는 명시적인 네트워크 통제 하에서만 사용해야 한다 — 컨테이너 내에서 `0.0.0.0`으로 바인드하고 host 포트 매핑을 제한하거나(`-p 127.0.0.1:11016:11016`), 방화벽/VPN/인증 reverse proxy 뒤에 두어야 한다.
 
 ## 검증 요약
 
