@@ -33,13 +33,21 @@ The current scope focuses on local adoption:
 ## Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi local end-to-end demo: detection then tokenize/mask/redact, the email token round-trip, a no-plaintext audit, live readiness + Prometheus metrics, and a blocked card" width="900">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi live end-to-end demo against a real model: detection then tokenize/mask/redact, the masked phone the model can only repeat, a no-plaintext audit, live readiness + Prometheus metrics, and a blocked card" width="900">
 </p>
 
-A self-contained, reproducible end-to-end walkthrough — a stub upstream behind the **real** proxy in `enforce` mode, no remote model required. It shows the model only ever seeing protected values, the email token round-trip (the caller gets the original back while the masked phone and redacted keys stay protected), the no-plaintext audit, the live `/__haechi/ready` + `/__haechi/metrics` surface, and a card blocked fail-closed. Run it yourself:
+The recording above is a **live** end-to-end run against a real self-hosted model (Qwen3.6-35B on vLLM) in `enforce` mode. The model is asked to repeat the phone number it was given — and it can only return the **masked** form, because the real number never reached it. It also shows the no-plaintext audit, the live `/__haechi/ready` + `/__haechi/metrics` surface, and a card blocked fail-closed before any upstream call.
+
+Run it yourself — a no-backend, reproducible version with a stub upstream:
 
 ```bash
 npm run demo
+```
+
+…or against your own OpenAI-compatible server:
+
+```bash
+HAECHI_LIVE_UPSTREAM=http://127.0.0.1:8000 node examples/local-proxy-demo/live-demo.mjs
 ```
 
 See [`examples/local-proxy-demo/`](examples/local-proxy-demo/).

@@ -33,13 +33,21 @@ Haechi는 LLM·MCP·vLLM·Ollama 및 에이전트 payload가 모델, 도구, 로
 ## 데모
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi 로컬 end-to-end 데모: 탐지 후 tokenize/mask/redact, 이메일 토큰 라운드트립, 무평문 감사, 라이브 readiness + Prometheus metrics, 카드 차단" width="900">
+  <img src="https://raw.githubusercontent.com/raeseoklee/haechi/main/docs/assets/haechi-demo.gif" alt="Haechi 라이브 end-to-end 데모(실제 모델): 탐지 후 tokenize/mask/redact, 모델은 마스킹된 전화만 반복, 무평문 감사, 라이브 readiness + Prometheus metrics, 카드 차단" width="900">
 </p>
 
-원격 모델 없이 재현 가능한 end-to-end 데모입니다 — 스텁 업스트림 앞에 **실제** proxy를 `enforce` 모드로 둡니다. 모델은 보호된 값만 보고, 이메일 토큰은 라운드트립으로 복원되며(호출자는 원본을 돌려받고 마스킹된 전화·리댁션된 키는 보호 유지), 감사 로그에는 평문이 없고, 라이브 `/__haechi/ready` + `/__haechi/metrics`가 노출되며, 카드는 fail-closed로 차단됩니다. 직접 실행해 보십시오:
+위 녹화는 실제 self-hosted 모델(vLLM의 Qwen3.6-35B)에 붙인 **라이브** end-to-end 실행입니다(`enforce` 모드). 모델에게 받은 전화번호를 그대로 반복하라고 시키면 — 진짜 번호는 모델에 도달조차 하지 않았으므로 **마스킹된** 형태만 돌려줄 수 있습니다. 무평문 감사, 라이브 `/__haechi/ready` + `/__haechi/metrics`, upstream 호출 전에 fail-closed로 차단되는 카드도 함께 보여줍니다.
+
+직접 실행해 보십시오 — 백엔드 없이 재현 가능한 스텁 버전:
 
 ```bash
 npm run demo
+```
+
+…또는 본인의 OpenAI-호환 서버 상대로:
+
+```bash
+HAECHI_LIVE_UPSTREAM=http://127.0.0.1:8000 node examples/local-proxy-demo/live-demo.mjs
 ```
 
 [`examples/local-proxy-demo/`](examples/local-proxy-demo/)를 참고하십시오.
