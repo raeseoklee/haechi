@@ -236,6 +236,35 @@ test("WS2b phone rules: E.164 needs a leading +, US national needs separators, b
   assert.ok(!(await typesFor("account id 12345678901 and ticket 4155552671")).has("phone"));
 });
 
+test("WS2c kr-phone boundary: a UUID substring is not mis-detected as a phone, real numbers still match", async () => {
+  const filter = createDefaultFilterEngine();
+  // The '…a716-446655440000' tail of a UUID used to mis-fire (the inner
+  // 16-44665544 ran the kr-phone rule). The word-boundary anchors stop a phone
+  // matching as a SUBSTRING of a longer hex/dashed run.
+  const uuid = await filter.detect({
+    entries: collectStringEntries({ requestId: "550e8400-e29b-41d4-a716-446655440000" }),
+    context: {}
+  });
+  assert.ok(!uuid.some((d) => d.type === "phone"), "a UUID must not produce a phone detection");
+  // A bare phone-shaped run embedded in a longer alnum run is also rejected.
+  const embedded = await filter.detect({
+    entries: collectStringEntries({ blob: "x01012345678x" }),
+    context: {}
+  });
+  assert.ok(!embedded.some((d) => d.type === "phone"), "a phone glued inside a longer alnum run is not matched");
+  // Recall preserved: a real separated KR mobile and a +82 form still match.
+  const real = await filter.detect({
+    entries: collectStringEntries({
+      sep: "010-1234-5678",
+      intl: "+82 10 1234 5678",
+      noSep: "01012345678"
+    }),
+    context: {}
+  });
+  const phonePaths = real.filter((d) => d.type === "phone").map((d) => d.path.join(".")).sort();
+  assert.deepEqual(phonePaths, ["intl", "noSep", "sep"], "real KR mobile / +82 numbers still detected");
+});
+
 test("custom filter rejects unsafe regex shapes", () => {
   assert.throws(
     () => createDefaultFilterEngine({
