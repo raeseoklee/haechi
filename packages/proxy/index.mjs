@@ -8,7 +8,11 @@ export const DEFAULT_PROXY_PORT = 11016;
 export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "127.0.0.1", allowRemoteBind = false }) {
   assertSafeProxyBind({ host, allowRemoteBind });
   const { haechi, config, protocolAdapter } = runtime;
-  const rateLimiter = createRateLimiter();
+  // The runtime owns the rate limiter (an injectable collaborator). Fall back to
+  // a local per-process default so a hand-built runtime object without a
+  // rateLimiter still works (backward-compatible). The default and the runtime's
+  // default share the same allow(key, limit) -> boolean fixed-window contract.
+  const rateLimiter = runtime.rateLimiter ?? createRateLimiter();
 
   const server = createServer(async (request, response) => {
     try {
@@ -208,13 +212,36 @@ function hasBearerHeader(request) {
 }
 
 function createRateLimiter() {
-  // In-memory fixed-window counter. Per-process: resets on restart, not shared
-  // across replicas — acceptable for a single-process self-hosted preview.
+  // Backward-compat fallback ONLY: the canonical default lives in the runtime
+  // (createRuntime owns providers.rateLimiter). This path runs when a hand-built
+  // runtime object lacks rateLimiter. In-memory fixed-window counter, per-process
+  // (resets on restart, not shared across replicas). The window Map is bounded by
+  // a lazy, amortized sweep — NO timer — so aged-out one-shot identities do not
+  // accumulate unboundedly (mirrors runtime's createRateLimiter).
   const windows = new Map();
   const windowMs = 60000;
+  const sweepThreshold = 1024;
+  const sweepBudget = 256;
+
+  function sweepExpired(now) {
+    let scanned = 0;
+    for (const [key, slot] of windows) {
+      if (scanned >= sweepBudget) {
+        break;
+      }
+      scanned += 1;
+      if (now - slot.windowStart >= windowMs) {
+        windows.delete(key);
+      }
+    }
+  }
+
   return {
     allow(key, limit) {
       const now = Date.now();
+      if (windows.size >= sweepThreshold) {
+        sweepExpired(now);
+      }
       const slot = windows.get(key);
       if (!slot || now - slot.windowStart >= windowMs) {
         windows.set(key, { windowStart: now, count: 1 });

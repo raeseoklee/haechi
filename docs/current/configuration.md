@@ -186,11 +186,23 @@ Per-client controls layered on top of the base `policy`. See [Named profiles](#n
 | `policy.profiles` | `{ <name>: { presets?, actions?, modelAllowlist?, rate? } }` | `{}` | Named profiles; each overrides the base policy. |
 | `policy.profileBinding` | `{ byScope?, byLabel?, default }` | unset | Maps identity scopes/labels (`"k=v"` for labels) to profile names. `default` is **required** when `profiles` is set and should be the strictest profile (fail-closed). |
 | `policy.modelAllowlist` | string array | unset | Allowed `model` values (base level; also settable per profile). A disallowed model → `403`. Empty/absent = allow all. |
-| `policy.rate` | `{ requestsPerMinute }` | unset | Per-identity request rate limit (base level or per profile). Over the limit → `429`. In-memory, per-process. |
+| `policy.rate` | `{ requestsPerMinute }` | unset | Per-identity request rate limit (base level or per profile). Over the limit → `429`. In-memory, per-process; see [Rate limiter injection](#rate-limiter-injection) for the multi-replica seam. |
 
 ### Named profiles
 
 When an identity authenticates, its profile resolves in order **scope → label → `default`**; scope precedes label and the first match wins. Without `profiles`, or under `auth.provider: none`, the base policy applies. The resolved profile's policy engine, `modelAllowlist`, and `rate` govern that request.
+
+### Rate limiter injection
+
+The rate limiter is an **injectable collaborator**, supplied programmatically through the `providers` argument of `createRuntime(config, providers)` — the same seam as the external `cryptoProvider`/`authProvider`. It is **not** a JSON config key.
+
+```js
+const runtime = createRuntime(config, { rateLimiter });
+```
+
+An injected `rateLimiter` must implement `allow(key, limit) -> boolean` (where `key` is the per-identity bucket and `limit` is the resolved `requestsPerMinute`); `createRuntime` fails closed at construction if it does not. The proxy consults `runtime.rateLimiter` for every rate-governed request.
+
+The **default** is a per-process, in-memory fixed-window counter: it resets on restart and is **not shared across replicas**, so total throughput multiplies by the replica count behind a load balancer. Its window map is self-bounding (a lazy, amortized sweep evicts aged-out one-shot identities — no background timer). For a multi-replica deployment, enforce a per-identity limit at a shared front door **or** inject a shared-store implementation (e.g. Redis-backed) that satisfies the same `allow(key, limit)` contract. See [Shared responsibility §4](./shared-responsibility.md#4-horizontal-scale--multiple-replicas).
 
 ## Detection types & actions
 
