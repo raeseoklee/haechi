@@ -1,8 +1,7 @@
 # Haechi Release Process
 
-- 문서 상태: Draft 0.1
+- 문서 상태: Living document (core 1.1.x 추적)
 - 작성일: 2026-06-10
-- 기준 버전: 0.3.2
 
 ## 1. 로컬 릴리즈 검증
 

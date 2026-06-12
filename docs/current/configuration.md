@@ -1,7 +1,6 @@
 # Haechi Configuration Reference
 
-- Status: Living document
-- Target version: 0.6.0
+- Status: Living document (tracks core 1.1.x)
 
 `haechi init` writes `haechi.config.json`; a non-secret template is at `haechi.config.example.json`. Every command reads it with `--config <path>` (default `haechi.config.json`). Configuration is **validated fail-closed**: unknown providers, out-of-range numbers, and malformed values throw at load time rather than degrading silently. `haechi config` prints this reference; `haechi status` prints the *effective* state of a given config.
 
@@ -14,7 +13,7 @@
   "proxy": { "host": "127.0.0.1", "port": 11016 },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
-  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000 },
+  "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256 },
   "policy": { "mode": "dry-run", "presets": ["korean-pii", "secrets-only", "llm-redact"], "defaultAction": "redact", "actions": { "card": "block" } },
   "filters": { "customRules": [] },
   "keys": { "provider": "local", "keyFile": ".haechi/dev.keys.json" },
@@ -74,6 +73,7 @@ Inspects upstream JSON responses (off by default — turn on to protect what com
 |---|---|---|---|
 | `limits.maxRequestBytes` | positive integer | `1048576` | Request body cap; over the limit returns `413`. Enforced incrementally (the body is not fully buffered first). |
 | `limits.upstreamTimeoutMs` | positive integer | `120000` | Upstream request timeout; on expiry returns `504 haechi_upstream_timeout`. Connection failure returns `502 haechi_upstream_unreachable`. |
+| `limits.maxNestingDepth` | positive integer | `256` | Max JSON nesting depth walked during detection. A more deeply nested body is rejected `413 haechi_request_too_deeply_nested` (fail-closed, before upstream), guarding the recursive payload walk against a stack overflow. Bounds container descent; leaves at the limit are still inspected. (Separately, a non-UTF-8 request body is rejected fail-closed: `400 haechi_request_body_not_utf8`.) |
 
 ## `policy`
 
@@ -246,7 +246,7 @@ The proxy refuses non-loopback hosts unless the CLI flag is passed explicitly �
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
 ```
 
-**The proxy has no client authentication yet** (planned for 0.6): anyone who can reach the port can use your upstream and the token round-trip path. Use `--allow-remote-bind` only behind explicit network controls — bind `0.0.0.0` inside a container and restrict the host port mapping (`-p 127.0.0.1:11016:11016`), or front it with a firewall/VPN/authenticating reverse proxy.
+**The proxy ships bearer client authentication** (`auth.provider: bearer`, shipped in 0.6): a hashed token store, per-identity policy profiles, a model allowlist, and a per-identity rate limit (see [`auth`](#auth) and [Named profiles](#named-profiles)). The default `auth.provider: none` leaves the proxy unauthenticated — with `none`, anyone who can reach the port can use your upstream and the token round-trip path. The built-in rate limit is single-process (in-memory, per-process); front multiple replicas with a shared limiter. Use `--allow-remote-bind` only behind explicit network controls regardless — bind `0.0.0.0` inside a container and restrict the host port mapping (`-p 127.0.0.1:11016:11016`), or front it with a firewall/VPN/authenticating reverse proxy.
 
 ## Validation cheatsheet
 

@@ -1,21 +1,20 @@
 # Haechi Risk Register and Release Gates
 
-- Status: Draft 0.4
+- Status: Living document (tracks core 1.1.x)
 - Date: 2026-06-11
-- Target version: 1.0.0
+- Target version: 1.1.x
 - Branch: `main`
 
 ## 1. Current Assessment
 
-0.3.2 resolves the additional security and operational risks identified during the full 0.3.1 code review, meeting the bar for developer preview. The external operator gates (npm account authentication, package ownership, GitHub tag/release) were passed on 2026-06-10: `haechi@0.3.2` is published to npm via local passkey authentication, tagged `v0.3.2`, and released as a GitHub pre-release. npm provenance remains deferred to the GitHub Actions trusted publishing path.
+Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haechi@0.3.2`) and every gate through G6 (1.1.0 plugin capability enforcement) are passed; the gate history below is retained as the audit trail. 1.0.0 declared the frozen API contract under strict semver (with a documented deprecation policy and `tests/api-contract.test.mjs` as the freeze guard) and narrowly lifted the dynamic-loading ban for a signed, sandboxed `authProvider` plugin; 1.1.0 added the opt-in `process-isolated` plugin runtime with kernel-enforced capability denial. The previously distribution-blocking conditions for the stable label — 1.0 API stability, the external `cryptoProvider`/KMS reference adapter (`haechi-crypto-kms`), and stream-aware enforcement (`streaming.requestMode: "inspect"`) — are all in place. Haechi remains a self-hosted security toolkit, not a compliance guarantee, and production deployments still own network access control, upstream authentication, and key custody (see §5 of the threat model).
 
 | Category | Judgment | Rationale |
 |---|---|---|
-| GitHub public | Allowed | Security limitations, threat model, shared responsibility, and developer preview language are documented |
-| GitHub release/tag | Allowed | Must be presented as developer preview, not production-ready |
-| npm developer preview | Allowed (published) | `haechi@0.3.2` published from an authenticated account on 2026-06-10; provenance deferred to trusted publishing |
-| npm stable | On hold | Stable label prohibited until 1.0 API stability, production KMS/HSM/Vault reference adapter, and stream-aware enforcement are in place |
-| Production use | Prohibited | 0.3.2 is a self-hosted developer preview; production auth/authz/key custody is the user's responsibility |
+| GitHub public | Allowed | Security limitations, threat model, and shared responsibility are documented |
+| GitHub release/tag | Allowed | Stable `1.x` line; release notes track each gate (G0–G6) |
+| npm stable | Allowed | The 1.0 stable label conditions — frozen API contract, external KMS reference adapter, and stream-aware enforcement — are met; core publishes with provenance |
+| Production use | Operator-gated | Supported as a self-hosted gateway when the operator supplies network access control, authentication/authorization, and production key custody; Haechi is not a compliance guarantee |
 
 ## 2. Release Gates
 
@@ -136,14 +135,16 @@ These IDs are scoped to the 1.0.0 stable cut (the API freeze + the Ed25519 signe
 | P2-DOC-003 | Region/privacy profile not implemented | Resolved for baseline | `haechi/privacy-profiles`, `privacy.profile` applied at runtime |
 | P2-DOC-004 | No API stability policy | Resolved | `docs/current/api-stability.md` |
 
-## 7. npm Developer Preview Pre-Distribution Checklist
+## 7. npm Release Pre-Distribution Checklist
 
-External npm gate check results (2026-06-10, post-publish):
+This checklist is the standing pre-distribution template for every release on the `1.x` stable line; it was first exercised for the `0.3.2` developer preview, whose results are retained below as the reference record.
+
+External npm gate check results (`0.3.2` developer preview, 2026-06-10, post-publish):
 
 - `npm whoami`: `raeseoklee`
 - `npm view haechi version`: `0.3.2`
 
-All checklist items below were completed for 0.3.2 on 2026-06-10 except the provenance publish path, which is deferred to GitHub Actions trusted publishing (`v0.3.2` tag and GitHub pre-release were completed). The checklist remains the template for future releases.
+All checklist items below were completed for 0.3.2 on 2026-06-10 except the provenance publish path, which was deferred to GitHub Actions trusted publishing (`v0.3.2` tag and GitHub pre-release were completed). Subsequent stable releases publish through the trusted-publishing path with provenance.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
@@ -169,19 +170,16 @@ Dynamic npm package loading is prohibited until the 1.0 plugin sandbox. External
 
 ## 9. Current Permitted Use
 
-0.3.2 is intended for use in the following contexts:
+The `1.x` stable line is intended for use in the following contexts:
 
 - Local development environments
 - Sample payload validation
-- OpenAI-compatible/vLLM/Ollama/llama.cpp proxy PoC
+- OpenAI-compatible/vLLM/Ollama/llama.cpp proxy PoC and self-hosted gateway
 - Policy/filter/audit pipeline review
 - GitHub code review and security design discussion
-- npm developer preview
+- A self-hosted production gateway **when** the operator supplies network access control, authentication/authorization, and production key custody in front (see §1)
 
-0.3.2 is not intended for the following uses:
+Haechi is still not intended for the following uses:
 
-- Production LLM gateway
-- Proxy directly exposed to the internet
-- Processing real customer/patient/payment/authentication data
-- Compliance evidence or legal conformance proof
-- npm stable package
+- A proxy directly exposed to the internet without the operator's own network controls and authentication
+- Compliance evidence or legal conformance proof (Haechi is not a compliance guarantee)

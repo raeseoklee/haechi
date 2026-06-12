@@ -1,21 +1,20 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Draft 0.4
+- 문서 상태: Living document(core 1.1.x 추적)
 - 작성일: 2026-06-11
-- 기준 버전: 1.0.0
+- 기준 버전: 1.1.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
 
-0.3.2는 0.3.1 전체 코드 리뷰에서 식별된 추가 보안/운영 리스크를 developer preview 기준으로 해소했습니다. 외부 운영자 게이트(npm 계정 인증, package ownership, GitHub tag/release)는 2026-06-10에 통과했습니다. `haechi@0.3.2`가 로컬 패스키 인증으로 npm에 배포되었고, `v0.3.2` 태그와 GitHub pre-release가 생성되었습니다. npm provenance는 GitHub Actions trusted publishing 경로로 이월합니다.
+Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트(G2, `haechi@0.3.2`)부터 G6(1.1.0 plugin capability 강제)까지 모든 게이트가 통과되었으며, 아래 게이트 이력은 감사 추적으로 보존합니다. 1.0.0은 strict semver 하의 frozen API 계약을 선언하고(문서화된 deprecation 정책과 freeze 가드 `tests/api-contract.test.mjs` 포함), signed·sandboxed `authProvider` plugin에 한해 dynamic-loading 금지를 좁게 해제했습니다. 1.1.0은 커널 수준 capability 거부를 갖춘 opt-in `process-isolated` plugin 런타임을 추가했습니다. stable 표현을 막던 조건 — 1.0 API 안정성, 외부 `cryptoProvider`/KMS reference adapter(`haechi-crypto-kms`), stream-aware enforcement(`streaming.requestMode: "inspect"`) — 은 모두 갖춰졌습니다. Haechi는 여전히 컴플라이언스를 보장하지 않는 self-hosted 보안 toolkit이며, 운영 배포는 네트워크 접근 통제, upstream 인증, key custody를 직접 책임집니다(threat model §5 참고).
 
 | 구분 | 판단 | 이유 |
 |---|---|---|
-| GitHub public | 허용 | 보안 한계, threat model, shared responsibility, developer preview 문구가 문서화됨 |
-| GitHub release/tag | 허용 | production-ready가 아닌 developer preview로 표현해야 함 |
-| npm developer preview | 허용 (배포 완료) | 2026-06-10 인증된 계정에서 `haechi@0.3.2` publish 완료, provenance는 trusted publishing으로 이월 |
-| npm stable | 보류 | 1.0 API 안정성, 운영 KMS/HSM/Vault reference adapter, stream-aware enforcement 전까지 stable 표현 금지 |
-| production use | 금지 | 0.3.2는 self-hosted developer preview이며 운영 인증/인가/key custody는 사용자 책임 |
+| GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
+| GitHub release/tag | 허용 | stable `1.x` 라인; 릴리스 노트가 각 게이트(G0–G6)를 추적 |
+| npm stable | 허용 | 1.0 stable 라벨 조건 — frozen API 계약, 외부 KMS reference adapter, stream-aware enforcement — 충족; core는 provenance와 함께 발행 |
+| production use | 운영자 게이트 | 운영자가 네트워크 접근 통제, 인증/인가, 운영 key custody를 앞단에 두면 self-hosted 게이트웨이로 지원; Haechi는 컴플라이언스 보장이 아님 |
 
 ## 2. 릴리스 게이트
 
@@ -136,14 +135,16 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 | P2-DOC-003 | region/privacy profile 미구현 | Resolved for baseline | `haechi/privacy-profiles`, `privacy.profile` runtime 적용 |
 | P2-DOC-004 | API stability 정책 없음 | Resolved | `docs/current/api-stability.md` |
 
-## 7. npm developer preview 배포 전 체크리스트
+## 7. npm 릴리스 배포 전 체크리스트
 
-현재 외부 npm 게이트 확인 결과는 다음과 같습니다.
+이 체크리스트는 `1.x` stable 라인의 모든 릴리스에 대한 상시 배포 전 템플릿이며, `0.3.2` developer preview에서 처음 적용되었습니다. 그 결과를 아래에 참조 기록으로 보존합니다.
+
+외부 npm 게이트 확인 결과(`0.3.2` developer preview, 2026-06-10, 배포 후)는 다음과 같습니다.
 
 - `npm whoami`: `raeseoklee`
 - `npm view haechi version`: `0.3.2`
 
-아래 체크리스트는 2026-06-10 0.3.2 배포에서 provenance publish 경로를 제외하고 완료되었습니다(`v0.3.2` 태그와 GitHub pre-release 완료). provenance는 GitHub Actions trusted publishing으로 이월하며, 체크리스트는 이후 릴리스의 템플릿으로 유지합니다.
+아래 체크리스트는 2026-06-10 0.3.2 배포에서 provenance publish 경로를 제외하고 완료되었습니다(`v0.3.2` 태그와 GitHub pre-release 완료). provenance는 GitHub Actions trusted publishing으로 이월되었으며, 이후 stable 릴리스는 provenance와 함께 trusted-publishing 경로로 발행합니다.
 
 1. `npm run release:preflight`
 2. `npm run sbom`
@@ -169,19 +170,16 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 ## 9. 현재 허용 가능한 사용 범위
 
-현재 0.3.2는 다음 범위에서 사용합니다.
+`1.x` stable 라인은 다음 범위에서 사용합니다.
 
 - 로컬 개발 환경
 - 샘플 payload 검증
-- OpenAI-compatible/vLLM/Ollama/llama.cpp proxy PoC
+- OpenAI-compatible/vLLM/Ollama/llama.cpp proxy PoC 및 self-hosted 게이트웨이
 - 정책/필터/감사 pipeline 검토
 - GitHub 코드 리뷰와 보안 설계 논의
-- npm developer preview
+- 운영자가 네트워크 접근 통제, 인증/인가, 운영 key custody를 앞단에 두는 **경우**의 self-hosted 운영 게이트웨이(§1 참고)
 
-현재 0.3.2는 다음 용도로 사용하지 않습니다.
+Haechi는 여전히 다음 용도로는 사용하지 않습니다.
 
-- production LLM gateway
-- 인터넷에 직접 노출되는 proxy
-- 실제 고객/환자/결제/인증정보 처리
-- compliance evidence 또는 법적 준수 증명
-- npm stable package
+- 운영자 자체의 네트워크 통제와 인증 없이 인터넷에 직접 노출되는 proxy
+- compliance evidence 또는 법적 준수 증명(Haechi는 컴플라이언스 보장이 아님)
