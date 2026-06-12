@@ -8,7 +8,9 @@
   },
   "proxy": {
     "host": "127.0.0.1",
-    "port": 11016
+    "port": 11016,
+    "tls": null,
+    "trustForwardedProto": false
   },
   "responseProtection": {
     "enabled": false,

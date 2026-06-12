@@ -12,7 +12,13 @@ Only the current `1.x` stable line is considered in scope. From 1.0 the public A
 
 ## Reporting
 
-Report suspected vulnerabilities privately to the repository maintainer. Do not include real secrets, production prompts, customer data, or personal information in reports.
+**Preferred channel: GitHub private vulnerability reporting.** Open a private report through the repository's Security Advisories at <https://github.com/raeseoklee/haechi/security/advisories> (the "Report a vulnerability" button). This keeps the report confidential until a fix is coordinated. The machine-readable disclosure metadata is published at [`/.well-known/security.txt`](.well-known/security.txt) (RFC 9116; mirrored at the repo root).
+
+Do not include real secrets, production prompts, customer data, or personal information in reports — describe the issue and a minimal, sanitized reproduction instead.
+
+**Triage target (best-effort, not an SLA for a pre-1.0/OSS project):** we aim to **acknowledge a report within 3 business days** and to share an initial assessment (accepted / needs-info / out-of-scope) within **10 business days**. A disclosed, in-scope vulnerability is eligible for an in-minor security fix under the `1.x` stability exception (`docs/current/api-stability.md`).
+
+A control mapping (OWASP LLM Top 10 2025 / NIST AI RMF) and a structured self-pentest are documented in [`docs/current/security-whitepaper.md`](docs/current/security-whitepaper.md). This is a self-assessment, not an independent audit or certification.
 
 ## Security Invariants
 

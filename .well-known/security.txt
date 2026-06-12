@@ -1,0 +1,14 @@
+# Haechi security disclosure policy (RFC 9116).
+# This file is a repository/disclosure asset and is NOT published to the npm
+# tarball (it is intentionally absent from the package.json "files" allowlist).
+#
+# Expires is set far in the future; refresh it periodically (RFC 9116 §2.5.5
+# recommends an Expires no more than ~1 year out for a live deployment). When
+# Haechi is deployed at a real origin, host this file at
+# https://<that-origin>/.well-known/security.txt and update Canonical.
+
+Contact: https://github.com/raeseoklee/haechi/security/advisories
+Expires: 2027-06-12T00:00:00.000Z
+Preferred-Languages: en, ko
+Policy: https://github.com/raeseoklee/haechi/blob/main/SECURITY.md
+Canonical: https://github.com/raeseoklee/haechi/blob/main/.well-known/security.txt

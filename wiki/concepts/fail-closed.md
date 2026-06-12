@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-10
+updated: 2026-06-12
 tags: [concept, security, invariant]
 ---
 
@@ -14,7 +14,7 @@ The project's central design philosophy: when Haechi cannot positively verify th
 | Config validation | Unknown providers, invalid reveal policies, bad failure modes, unknown `target.type` → throw at load |
 | Response protection | Non-JSON, invalid JSON, compressed, oversized → 502 unless explicitly allowed; oversized is a hard deny even in `failureMode: "allow"` |
 | Streaming | `stream: true` → 501 unless `pass-through` opted in; Ollama chat/generate treated as streaming unless `stream: false` ([[streaming-protection-gap]]) |
-| Proxy bind | Non-loopback hosts refused without `--allow-remote-bind` |
+| Proxy bind | Non-loopback hosts refused without `--allow-remote-bind`; and a remote bind further requires Haechi-terminated TLS (`proxy.tls`) or a trusted-hop acknowledgement (`proxy.trustForwardedProto`, enforcing `X-Forwarded-Proto: https`) or it throws at startup ([[trust-assets-ws6]]) |
 | Policy merges | Weakening a stronger action throws (`ACTION_STRENGTH`); privacy profiles may only strengthen |
 | Token reveal | `revealPolicy: "disabled"` by default ([[token-vault]]) |
 | MCP filter | Non-2.0 JSON-RPC, disallowed methods, batch arrays → rejected; notifications dropped silently per spec |

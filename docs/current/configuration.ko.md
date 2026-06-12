@@ -11,7 +11,7 @@
   "configVersion": 1,
   "mode": "dry-run",
   "target": { "type": "llm-http", "adapter": "openai-compatible", "upstream": "http://127.0.0.1:9999" },
-  "proxy": { "host": "127.0.0.1", "port": 11016 },
+  "proxy": { "host": "127.0.0.1", "port": 11016, "tls": null, "trustForwardedProto": false },
   "responseProtection": { "enabled": false, "mode": "enforce", "failureMode": "fail-closed", "allowNonJson": false, "allowCompressed": false, "maxBytes": 1048576 },
   "streaming": { "requestMode": "block" },
   "limits": { "maxRequestBytes": 1048576, "upstreamTimeoutMs": 120000, "maxNestingDepth": 256, "maxInFlight": 0, "shutdownGraceMs": 10000, "requestTimeoutMs": null, "headersTimeoutMs": null },
@@ -48,6 +48,8 @@
 |---|---|---|---|
 | `proxy.host` | 비어 있지 않은 문자열 | `127.0.0.1` | 바인드 주소입니다. loopback이 아닌 host를 사용하려면 `--allow-remote-bind` CLI 플래그가 필요합니다. 설정 파일만으로는 시작되지 않습니다([loopback 밖으로 바인딩](#binding-beyond-loopback) 참고). |
 | `proxy.port` | 정수 0–65535 | `11016` | 리슨 포트입니다(`0` = 임시 포트). `--port`로 실행할 때마다 덮어쓸 수 있습니다. |
+| `proxy.tls` | `null` 또는 `{ keyFile, certFile }` / `{ pfxFile, passphrase? }` | `null` | 기동 시 **파일 경로**에서 읽어들이는 TLS 자료입니다. 설정되면 Haechi가 직접 TLS를 종단합니다(`https` 제공). remote bind에는 `trustForwardedProto`와 함께 둘 중 하나가 필요합니다([loopback 밖으로 바인딩](#binding-beyond-loopback) 참고). fail-closed: non-null이지만 사용 가능한 자료 `((key && cert) 또는 pfx)`로 해석되지 않거나, `pfxFile`을 `keyFile`/`certFile`과 함께 쓰거나, 읽을 수 없는 파일을 지정하면 로드 시 throw합니다. |
+| `proxy.trustForwardedProto` | boolean | `false` | **신뢰하는 reverse proxy가 Haechi 앞단에서 TLS를 종단함**을 운영자가 명시적으로 확인하는 값입니다. `true`이면 remote bind가 plain `http`로 유지될 수 있으나, Haechi는 **`X-Forwarded-Proto`가 `https`가 아닌 모든 요청을 거부**합니다(auth/body 이전에 검사하며, `/__haechi/*` liveness 라우트는 예외입니다). Haechi 자체가 인터넷에 직접 노출될 때는 실제 TLS를 대체하지 못합니다. |
 
 ## `responseProtection`
 
@@ -363,17 +365,32 @@ preset과 override(또는 privacy profile)가 충돌할 경우 **강한** action
 
 ## loopback 밖으로 바인딩
 
-proxy는 CLI 플래그를 명시적으로 전달하지 않으면 loopback이 아닌 host를 거부합니다 — 설정 파일에 `proxy.host: "0.0.0.0"`을 지정해도 의도적으로 시작되지 않습니다:
+proxy는 CLI 플래그를 명시적으로 전달하지 않으면 loopback이 아닌 host를 거부합니다 — 설정 파일에 `proxy.host: "0.0.0.0"`을 지정해도 의도적으로 시작되지 않습니다. remote bind에는 **TLS가 추가로 필요합니다**: Haechi가 직접 TLS를 종단하거나(`proxy.tls`), 앞단의 TLS 종단기를 명시적으로 확인해야 합니다(`proxy.trustForwardedProto`). 둘 다 없는 remote bind는 **기동 시 throw**합니다 — Haechi는 loopback이 아닌 리스너에서 bearer token과 payload를 평문으로 제공하지 않습니다.
 
+**옵션 A — Haechi가 직접 TLS를 종단**(`https` 제공):
+
+```jsonc
+// haechi.config.json
+"proxy": { "host": "0.0.0.0", "tls": { "keyFile": "/etc/haechi/tls/key.pem", "certFile": "/etc/haechi/tls/cert.pem" } }
+// 또는 PKCS#12: "tls": { "pfxFile": "/etc/haechi/tls/server.pfx", "passphrase": "…" }
+```
 ```bash
 haechi proxy --config haechi.config.json --host 0.0.0.0 --allow-remote-bind
+# → Haechi proxy listening on https://0.0.0.0:11016
 ```
+
+**옵션 B — 신뢰하는 reverse proxy가 앞단에서 TLS를 종단**(Haechi는 그 뒤 사설망에서 plain `http`로 유지):
+
+```jsonc
+"proxy": { "host": "0.0.0.0", "trustForwardedProto": true }
+```
+`trustForwardedProto: true`이면 Haechi는 **`X-Forwarded-Proto`가 `https`가 아닌 모든 요청을**(TLS hop을 우회한 평문 요청을) auth/body 이전에 fail-closed `403`으로 거부합니다. `/__haechi/*` liveness/metrics 라우트는 loopback sidecar가 스크레이프할 수 있도록 예외입니다. 오직 신뢰하는 종단기만 `X-Forwarded-Proto`를 설정해야 합니다 — 신뢰할 수 없는 클라이언트가 Haechi 포트에 직접 도달할 수 있다면 이 옵션을 켜지 마십시오.
 
 **proxy는 bearer 클라이언트 인증을 제공합니다**(`auth.provider: bearer`, 0.6에서 출시). 해시 기반 token 저장소, identity별 policy profile, model allowlist, identity별 rate limit을 함께 제공합니다([`auth`](#auth)와 [Named profiles](#named-profiles) 참고). 기본값 `auth.provider: none`은 proxy를 인증 없이 둡니다 — `none`에서는 포트에 접근할 수 있는 누구든 upstream과 token round-trip 경로를 사용할 수 있습니다. 내장 rate limit은 단일 프로세스(인메모리, 프로세스별)이므로, 여러 replica는 공유 limiter를 앞에 두어야 합니다. `--allow-remote-bind`는 어느 경우에도 명시적인 네트워크 통제 하에서만 사용해야 합니다 — 컨테이너 안에서 `0.0.0.0`으로 바인드하고 host 포트 매핑을 제한하거나(`-p 127.0.0.1:11016:11016`), 방화벽/VPN/인증 reverse proxy 뒤에 두어야 합니다.
 
 ## 검증 요약
 
-다음은 로드 시 오류(fail-closed)를 발생시킵니다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; boolean이 아닌 `responseProtection.scanNumbers`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.maxRequestBytes`/`limits.upstreamTimeoutMs`/`limits.maxNestingDepth`; 음수이거나 정수가 아닌 `limits.maxInFlight`/`limits.shutdownGraceMs`; `null`이 아니면서 음수이거나 정수가 아닌 `limits.requestTimeoutMs`/`limits.headersTimeoutMs`; 양수 정수가 아니거나 **지원 범위를 넘는** `configVersion`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도; `text`/`json`이 아닌 `logging.format`; boolean이 아닌 `metrics.enabled`; 잘못된 `HAECHI_*` 환경변수 오버레이 값(잘못된 `HAECHI_PROXY_PORT`, 알 수 없는 `HAECHI_MODE`, 형식이 잘못된 `HAECHI_UPSTREAM` 등).
+다음은 로드 시 오류(fail-closed)를 발생시킵니다: 알 수 없는 `keys.provider`; 빈 `proxy.host`; 범위를 벗어난 `proxy.port`; boolean이 아닌 `proxy.trustForwardedProto`; non-`null`이지만 object가 아니거나, `keyFile`만 있고 `certFile`이 없거나(또는 그 반대), `pfxFile`을 `keyFile`/`certFile`과 함께 쓰거나, 읽을 수 없는 파일을 지정하거나, 사용 가능한 자료 `((key && cert) 또는 pfx)`로 해석되지 않는 `proxy.tls`; `jsonl`이 아닌 `audit.sink`; `local`이 아닌 `tokenVault.provider`; 잘못된 `revealPolicy`; 양수가 아닌 `retentionDays`; boolean이 아닌 `deterministic`/`detokenizeResponses`; 비어 있거나 문자열이 아닌 `deterministicTypes`; 비어 있거나 문자열이 아닌 `mcp.allowedMethods`; boolean이 아닌 `mcp.*` 플래그; 알 수 없는 `privacy.profile`; 잘못된 `responseProtection.failureMode`; 양수가 아닌 `responseProtection.maxBytes`; boolean이 아닌 `responseProtection.scanNumbers`; 잘못된 `streaming.requestMode`; 잘못된 `streaming.responseMode`; 양수가 아닌 `streaming.maxMatchBytes`; 잘못된 `auth.provider`; 빈 `auth.store`; 문자열이 아닌 `auth.allowedLabelKeys`; 객체가 아닌 `policy.profiles`; 유효한 `default` 없는 `policy.profileBinding`; 문자열이 아닌 `policy.modelAllowlist`; 양수가 아닌 `policy.rate.requestsPerMinute`; 양수가 아닌 `limits.maxRequestBytes`/`limits.upstreamTimeoutMs`/`limits.maxNestingDepth`; 음수이거나 정수가 아닌 `limits.maxInFlight`/`limits.shutdownGraceMs`; `null`이 아니면서 음수이거나 정수가 아닌 `limits.requestTimeoutMs`/`limits.headersTimeoutMs`; 양수 정수가 아니거나 **지원 범위를 넘는** `configVersion`; 알 수 없는 `target.type`/`adapter`; 안전하지 않은 커스텀 정규식; `allowUnsafeOverrides` 없이 action을 약화하려는 시도; `text`/`json`이 아닌 `logging.format`; boolean이 아닌 `metrics.enabled`; 잘못된 `HAECHI_*` 환경변수 오버레이 값(잘못된 `HAECHI_PROXY_PORT`, 알 수 없는 `HAECHI_MODE`, 형식이 잘못된 `HAECHI_UPSTREAM` 등).
 
 # Satellite 운영자 설정 (0.9)
 

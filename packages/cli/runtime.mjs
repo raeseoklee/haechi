@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHaechi } from "../core/index.mjs";
 import { createDefaultFilterEngine } from "../filter/index.mjs";
@@ -12,7 +13,7 @@ import { createMetrics } from "../metrics/index.mjs";
 import { applyPrivacyProfile, getPrivacyProfile } from "../privacy-profiles/index.mjs";
 import { createBearerAuthProvider } from "../auth/index.mjs";
 import { createSandboxedAuthProviderSync, createProcessIsolatedAuthProviderSync } from "../plugin/index.mjs";
-import { DEFAULT_PROXY_PORT } from "../proxy/index.mjs";
+import { DEFAULT_PROXY_PORT, hasUsableTlsMaterial } from "../proxy/index.mjs";
 
 // Capability keys an operator may allowlist for a plugin. Mirrors the plugin
 // manifest's declared-capability set plus the authProvider-specific
@@ -48,7 +49,17 @@ export function defaultConfig() {
     },
     proxy: {
       host: "127.0.0.1",
-      port: DEFAULT_PROXY_PORT
+      port: DEFAULT_PROXY_PORT,
+      // WS6 TLS hardening (additive; defaults preserve 1.1 loopback-plain-http
+      // behavior). proxy.tls null = no TLS material; a non-null object is file
+      // PATHS loaded at startup into a tlsContext: { keyFile, certFile } or
+      // { pfxFile, passphrase? }. A remote (non-loopback) bind REQUIRES either a
+      // usable tlsContext OR trustForwardedProto (see assertSafeProxyBind).
+      // proxy.trustForwardedProto false = the operator has NOT acknowledged a
+      // fronting TLS terminator; true = a trusted reverse proxy terminates TLS in
+      // front of Haechi (Haechi then enforces X-Forwarded-Proto: https).
+      tls: null,
+      trustForwardedProto: false
     },
     responseProtection: {
       enabled: false,
@@ -369,10 +380,7 @@ export function normalizeConfig(config) {
       ...defaultConfig().target,
       ...(config.target ?? {})
     },
-    proxy: {
-      ...defaultConfig().proxy,
-      ...(config.proxy ?? {})
-    },
+    proxy: normalizeProxy(config.proxy),
     responseProtection: {
       ...defaultConfig().responseProtection,
       ...(config.responseProtection ?? {})
@@ -449,6 +457,18 @@ export function normalizeConfig(config) {
   }
   if (!isValidPort(merged.proxy.port)) {
     throw new Error("proxy.port must be an integer from 0 to 65535");
+  }
+  if (typeof merged.proxy.trustForwardedProto !== "boolean") {
+    throw new Error("proxy.trustForwardedProto must be boolean");
+  }
+  // proxy.tls has already been resolved by normalizeProxy into either null or a
+  // usable tlsContext ({ key, cert } or { pfx, passphrase? }). A non-null value
+  // that is not usable TLS material is a fail-closed error (it would otherwise
+  // green-light a remote bind that then serves plaintext). normalizeProxy throws
+  // first for a malformed shape / unreadable file; this is the belt-and-braces
+  // material assertion mirroring the dashboard's tlsContext check.
+  if (merged.proxy.tls !== null && !hasUsableTlsMaterial(merged.proxy.tls)) {
+    throw new Error("proxy.tls must resolve to usable TLS material ((key && cert) or pfx)");
   }
   if (merged.audit.sink !== "jsonl") {
     throw new Error("Current implementation only supports jsonl audit sink");
@@ -578,6 +598,84 @@ export function normalizeConfig(config) {
 
 export function isValidPort(port) {
   return Number.isInteger(port) && port >= 0 && port <= 65535;
+}
+
+// WS6 proxy normalization. Shallow-merges proxy over the default and resolves
+// proxy.tls from FILE PATHS into a tlsContext loaded at startup. proxy.tls may be:
+//   - null (default): no TLS material.
+//   - { keyFile, certFile }: PEM key+cert file paths → { key, cert }.
+//   - { pfxFile, passphrase? }: a PKCS#12 file path → { pfx, passphrase? }.
+// Fail-closed, enumerated throws: an unknown shape, a missing required field, an
+// unreadable file, or a mix of pfx and key/cert all throw at config time rather
+// than degrading to a plaintext listener later. The loaded buffers ARE the
+// tlsContext handed to https.createServer; node:fs.readFileSync is a builtin
+// (zero runtime dependency).
+function normalizeProxy(proxy) {
+  const merged = {
+    ...defaultConfig().proxy,
+    ...(proxy ?? {})
+  };
+  merged.tls = resolveProxyTls(merged.tls);
+  return merged;
+}
+
+function resolveProxyTls(tls) {
+  if (tls === undefined || tls === null) {
+    return null;
+  }
+  if (typeof tls !== "object" || Array.isArray(tls)) {
+    throw new Error("proxy.tls must be null or an object ({ keyFile, certFile } or { pfxFile, passphrase? })");
+  }
+  // Already a loaded tlsContext (a hand-built config passing { key, cert } / { pfx }
+  // directly, e.g. a test or an embedder) — accept it as-is; the material check in
+  // normalizeConfig still gates it. Only resolve the FILE-PATH form below.
+  const hasFilePaths = tls.keyFile !== undefined || tls.certFile !== undefined || tls.pfxFile !== undefined;
+  const hasInlineMaterial = tls.key !== undefined || tls.cert !== undefined || tls.pfx !== undefined;
+  if (hasInlineMaterial && !hasFilePaths) {
+    return tls;
+  }
+
+  const usingPfx = tls.pfxFile !== undefined;
+  const usingKeyCert = tls.keyFile !== undefined || tls.certFile !== undefined;
+  if (usingPfx && usingKeyCert) {
+    throw new Error("proxy.tls must use either { keyFile, certFile } or { pfxFile }, not both");
+  }
+  if (!usingPfx && !usingKeyCert) {
+    throw new Error("proxy.tls must set { keyFile, certFile } or { pfxFile }");
+  }
+
+  if (usingPfx) {
+    if (typeof tls.pfxFile !== "string" || !tls.pfxFile.trim()) {
+      throw new Error("proxy.tls.pfxFile must be a non-empty string path");
+    }
+    if (tls.passphrase !== undefined && typeof tls.passphrase !== "string") {
+      throw new Error("proxy.tls.passphrase must be a string when set");
+    }
+    const context = { pfx: readTlsFile(tls.pfxFile, "proxy.tls.pfxFile") };
+    if (tls.passphrase !== undefined) {
+      context.passphrase = tls.passphrase;
+    }
+    return context;
+  }
+
+  if (typeof tls.keyFile !== "string" || !tls.keyFile.trim()) {
+    throw new Error("proxy.tls.keyFile must be a non-empty string path");
+  }
+  if (typeof tls.certFile !== "string" || !tls.certFile.trim()) {
+    throw new Error("proxy.tls.certFile must be a non-empty string path");
+  }
+  return {
+    key: readTlsFile(tls.keyFile, "proxy.tls.keyFile"),
+    cert: readTlsFile(tls.certFile, "proxy.tls.certFile")
+  };
+}
+
+function readTlsFile(path, label) {
+  try {
+    return readFileSync(path);
+  } catch (error) {
+    throw new Error(`${label} could not be read: ${error.code ?? error.message}`);
+  }
 }
 
 // Fail-closed validation of the WS2c precision controls. minConfidence is a

@@ -1,0 +1,13 @@
+# Haechi security disclosure policy (RFC 9116).
+# The canonical location is /.well-known/security.txt; this repo-root copy mirrors
+# it for discoverability. Both are repository/disclosure assets and are NOT in the
+# npm tarball (absent from the package.json "files" allowlist).
+#
+# Expires is set far in the future; refresh it periodically (RFC 9116 §2.5.5
+# recommends an Expires no more than ~1 year out for a live deployment).
+
+Contact: https://github.com/raeseoklee/haechi/security/advisories
+Expires: 2027-06-12T00:00:00.000Z
+Preferred-Languages: en, ko
+Policy: https://github.com/raeseoklee/haechi/blob/main/SECURITY.md
+Canonical: https://github.com/raeseoklee/haechi/blob/main/.well-known/security.txt
