@@ -1,6 +1,6 @@
 {
   "name": "haechi-dashboard",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Zero-dependency, read-only audit viewer satellite for Haechi — a node:http server over the audit JSONL and its hash-chain status.",
   "license": "Apache-2.0",
   "type": "module",

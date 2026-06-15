@@ -65,7 +65,7 @@ async function tempDir() {
 // Build a real audit JSONL via the real sink so the schema + integrity chain
 // are authentic. `pathOverride` lets a detection carry an attacker-influenced
 // path (the XSS-bearing field).
-async function writeAuditFixture(dir, { count = 3, anchor = false, paths = [] } = {}) {
+async function writeAuditFixture(dir, { count = 3, anchor = false, paths = [], correlationIds = [] } = {}) {
   const auditPath = join(dir, "audit.jsonl");
   const anchorPath = anchor ? join(dir, "audit.anchor.jsonl") : null;
   const sink = createJsonlAuditSink({
@@ -75,7 +75,7 @@ async function writeAuditFixture(dir, { count = 3, anchor = false, paths = [] } 
 
   for (let i = 0; i < count; i += 1) {
     const detPath = paths[i] ?? `body.messages[${i}].content`;
-    await sink.record({
+    const record = {
       protocol: "openai-compatible",
       operation: "protect",
       identity: {
@@ -109,7 +109,13 @@ async function writeAuditFixture(dir, { count = 3, anchor = false, paths = [] } 
         byAction: { redact: 1 },
         detectionCount: 1
       }
-    });
+    };
+    // Thread an optional per-request correlationId (a UUID). When omitted, the
+    // field is left absent so the projection's null/absent-safe path is exercised.
+    if (correlationIds[i] !== undefined) {
+      record.correlationId = correlationIds[i];
+    }
+    await sink.record(record);
   }
   return { auditPath, anchorPath };
 }
@@ -1245,6 +1251,218 @@ test("/api/events surfaces the PII-safe actor and the client renders an actor co
       const js = await (await fetch(`${base}/assets/app.js`, { headers: { host: new URL(base).host } })).text();
       assert.match(js, /"actor"/);
       assert.match(js, /identity\.id/);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// correlationId — projection, request tracing, /api/events filters
+// ---------------------------------------------------------------------------
+
+const CID_A = "11111111-2222-4333-8444-555555555555";
+const CID_B = "66666666-7777-4888-8999-aaaaaaaaaaaa";
+
+test("/api/events projects correlationId when set and is null/absent-safe when not", async () => {
+  const dir = await tempDir();
+  try {
+    // Record 0 carries CID_A; record 1 has NO correlationId (absent on disk).
+    const { auditPath } = await writeAuditFixture(dir, { count: 2, correlationIds: [CID_A] });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      const res = await fetchJson(base, "/api/events");
+      assert.equal(res.status, 200);
+      // Newest-first: seq 2 (no correlationId) then seq 1 (CID_A).
+      const bySeq = {};
+      for (const ev of res.body.events) {
+        bySeq[ev.auditIntegrity.sequence] = ev;
+      }
+      assert.equal(bySeq[1].correlationId, CID_A);
+      // The record with no correlationId on disk projects cleanly: pick() omits the
+      // undefined key (it is simply absent, never a thrown error or a leak).
+      assert.equal(Object.prototype.hasOwnProperty.call(bySeq[2], "correlationId"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the served app.js renders a correlationId column with click-to-filter (CSP-safe, no innerHTML)", async () => {
+  const dir = await tempDir();
+  try {
+    const { auditPath } = await writeAuditFixture(dir, { count: 1, correlationIds: [CID_A] });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      const js = await (await fetch(`${base}/assets/app.js`, { headers: { host: new URL(base).host } })).text();
+      assert.match(js, /"correlationId"/);
+      assert.match(js, /correlationFilter/);
+      // Click-to-filter uses addEventListener (never an inline handler / innerHTML).
+      assert.match(js, /addEventListener\("click"/);
+      assert.doesNotMatch(js, /\.innerHTML\s*=/);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("/api/events?correlationId= returns only matching events", async () => {
+  const dir = await tempDir();
+  try {
+    // seq1=CID_A, seq2=CID_B, seq3=CID_A.
+    const { auditPath } = await writeAuditFixture(dir, {
+      count: 3,
+      correlationIds: [CID_A, CID_B, CID_A]
+    });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      const res = await fetchJson(base, `/api/events?correlationId=${CID_A}`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.events.length, 2);
+      for (const ev of res.body.events) {
+        assert.equal(ev.correlationId, CID_A);
+      }
+      // The other request's event is excluded.
+      assert.ok(res.body.events.every((ev) => ev.correlationId !== CID_B));
+
+      // A valid UUID that matches nothing -> 200 with an empty list (never an
+      // error, never a scan).
+      const none = await fetchJson(base, "/api/events?correlationId=99999999-8888-4777-8666-555555555555");
+      assert.equal(none.status, 200);
+      assert.ok(Array.isArray(none.body.events));
+      assert.equal(none.body.events.length, 0);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("/api/events?correlationId= rejects a malformed value FAIL-CLOSED (400, no scan)", async () => {
+  const dir = await tempDir();
+  try {
+    const { auditPath } = await writeAuditFixture(dir, { count: 2, correlationIds: [CID_A, CID_A] });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      for (const bad of [
+        "not-a-uuid",
+        "11111111-2222-4333-8444-55555555555", // too short
+        "11111111-2222-4333-8444-5555555555555", // too long
+        "../../etc/passwd",
+        "' OR 1=1 --",
+        "11111111222243338444555555555555", // no dashes
+        "zzzzzzzz-2222-4333-8444-555555555555" // non-hex
+      ]) {
+        const res = await fetchJson(base, `/api/events?correlationId=${encodeURIComponent(bad)}`);
+        assert.equal(res.status, 400, bad);
+        assert.deepEqual(res.body, { error: "bad_request" }, bad);
+      }
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("/api/events?decision= filters by action and rejects an unknown decision FAIL-CLOSED", async () => {
+  const dir = await tempDir();
+  try {
+    // The fixture records all carry summary.byAction = { redact: 1 }.
+    const { auditPath } = await writeAuditFixture(dir, { count: 3 });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      // A known decision present in byAction returns the matching events.
+      const redacted = await fetchJson(base, "/api/events?decision=redact");
+      assert.equal(redacted.status, 200);
+      assert.equal(redacted.body.events.length, 3);
+
+      // A known decision NOT present in any event's byAction returns empty.
+      const blocked = await fetchJson(base, "/api/events?decision=block");
+      assert.equal(blocked.status, 200);
+      assert.equal(blocked.body.events.length, 0);
+
+      // An unknown decision is rejected fail-closed (never a free-text scan).
+      for (const bad of ["bogus", "redact;DROP", "../../x", "REDACT"]) {
+        const res = await fetchJson(base, `/api/events?decision=${encodeURIComponent(bad)}`);
+        assert.equal(res.status, 400, bad);
+        assert.deepEqual(res.body, { error: "bad_request" }, bad);
+      }
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("correlationId + decision filters combine (AND) and never widen the window", async () => {
+  const dir = await tempDir();
+  try {
+    const { auditPath } = await writeAuditFixture(dir, {
+      count: 3,
+      correlationIds: [CID_A, CID_B, CID_A]
+    });
+    const { server, base } = await startServer({ auditPath });
+    try {
+      // Both filters: CID_A AND decision=redact -> the two CID_A events (both redact).
+      const both = await fetchJson(base, `/api/events?correlationId=${CID_A}&decision=redact`);
+      assert.equal(both.status, 200);
+      assert.equal(both.body.events.length, 2);
+      for (const ev of both.body.events) {
+        assert.equal(ev.correlationId, CID_A);
+      }
+      // CID_A AND a decision not present -> empty.
+      const empty = await fetchJson(base, `/api/events?correlationId=${CID_A}&decision=block`);
+      assert.equal(empty.status, 200);
+      assert.equal(empty.body.events.length, 0);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an event with a correlationId does NOT leak any other new/non-allowlisted field", async () => {
+  const dir = await tempDir();
+  try {
+    // Build a real record carrying a correlationId, then splice synthetic fields at
+    // each level and overwrite the file. The projection must surface correlationId
+    // yet still drop every non-allowlisted key.
+    const { auditPath: realPath } = await writeAuditFixture(dir, { count: 1, correlationIds: [CID_A] });
+    const auditPath = join(dir, "audit2.jsonl");
+    const { readFile } = await import("node:fs/promises");
+    const record = JSON.parse((await readFile(realPath, "utf8")).trim());
+    assert.equal(record.correlationId, CID_A); // present on disk
+    record.SECRET_TOP = "leak-top";
+    record.traceId = "leak-trace"; // a plausible-but-non-allowlisted sibling
+    record.detections[0].SECRET_DET = "leak-det";
+    record.identity.scopes = ["should-not-leak"];
+    await writeFile(auditPath, `${JSON.stringify(record)}\n`, "utf8");
+
+    const { server, base } = await startServer({ auditPath });
+    try {
+      const res = await fetchJson(base, "/api/events");
+      assert.equal(res.status, 200);
+      const ev = res.body.events[0];
+      // correlationId IS surfaced.
+      assert.equal(ev.correlationId, CID_A);
+      // Everything non-allowlisted is dropped.
+      const serialized = JSON.stringify(res.body);
+      assert.doesNotMatch(serialized, /leak-/);
+      assert.doesNotMatch(serialized, /should-not-leak/);
+      assert.equal(ev.SECRET_TOP, undefined);
+      assert.equal(ev.traceId, undefined);
+      assert.equal(ev.detections[0].SECRET_DET, undefined);
+      assert.equal(ev.identity.scopes, undefined);
     } finally {
       await server.close();
     }

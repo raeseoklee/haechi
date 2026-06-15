@@ -39,6 +39,8 @@ export const HTML_SHELL = `<!doctype html>
 <h2>Events</h2>
 <div id="events-controls">
 <button id="refresh-btn" type="button">Refresh</button>
+<button id="clear-filter-btn" type="button" hidden>Clear filter</button>
+<span id="active-filter" hidden></span>
 <span id="window-marker" hidden></span>
 </div>
 <div id="events-body">Loading&hellip;</div>
@@ -82,6 +84,20 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-brea
 .detections { margin: 0.25rem 0 0; padding-left: 1rem; font-size: 0.8rem; }
 button { font: inherit; padding: 0.3rem 0.75rem; cursor: pointer; }
 #window-marker { margin-left: 0.75rem; color: var(--danger); font-size: 0.85rem; }
+#active-filter { margin-left: 0.75rem; color: var(--muted); font-size: 0.85rem; }
+.corr-btn {
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  word-break: break-all;
+  text-align: left;
+}
+tr.corr-group { border-left: 3px solid var(--border); }
 .error { color: var(--danger); }
 `;
 
@@ -156,6 +172,26 @@ export const APP_JS = `"use strict";
     body.appendChild(dl);
   }
 
+  // Active correlationId filter (null = no filter). Set by clicking a correlation
+  // cell; cleared via the "Clear filter" button. It is a UUID echoed back from the
+  // server's projected events — re-sent as ?correlationId= for an exact server-side
+  // match (the server re-validates the UUID shape fail-closed).
+  var correlationFilter = null;
+
+  function renderActiveFilter() {
+    var label = document.getElementById("active-filter");
+    var clearBtn = document.getElementById("clear-filter-btn");
+    if (correlationFilter) {
+      label.hidden = false;
+      label.textContent = "filtered by correlationId: " + correlationFilter;
+      clearBtn.hidden = false;
+    } else {
+      label.hidden = true;
+      label.textContent = "";
+      clearBtn.hidden = true;
+    }
+  }
+
   function renderEvents(data) {
     var body = document.getElementById("events-body");
     clear(body);
@@ -175,14 +211,23 @@ export const APP_JS = `"use strict";
     var table = el("table");
     var thead = el("thead");
     var hr = el("tr");
-    ["seq", "time", "protocol", "operation", "actor", "mode", "blocked", "detections"].forEach(function (h) {
+    ["seq", "time", "protocol", "operation", "actor", "mode", "blocked", "correlationId", "detections"].forEach(function (h) {
       hr.appendChild(el("th", h));
     });
     thead.appendChild(hr);
     table.appendChild(thead);
     var tbody = el("tbody");
+    // Visually group consecutive events that share a correlationId so the request-
+    // and response-direction events of ONE request read together. A run with the
+    // same non-null correlationId carries a left border (CSS .corr-group).
+    var prevCorr = undefined;
     events.forEach(function (ev) {
+      var corr = ev.correlationId != null ? ev.correlationId : null;
       var tr = el("tr");
+      if (corr && corr === prevCorr) {
+        tr.className = "corr-group";
+      }
+      prevCorr = corr;
       tr.appendChild(el("td", ev.auditIntegrity ? ev.auditIntegrity.sequence : "", "mono"));
       tr.appendChild(el("td", ev.timestamp));
       tr.appendChild(el("td", ev.protocol));
@@ -192,6 +237,24 @@ export const APP_JS = `"use strict";
       tr.appendChild(el("td", ev.identity && ev.identity.id ? ev.identity.id : "—", "mono"));
       tr.appendChild(el("td", ev.mode));
       tr.appendChild(el("td", String(ev.blocked)));
+      // correlationId: a UUID (or null for a non-proxy event). When present, render
+      // a click-to-filter button (createElement + textContent + addEventListener —
+      // never an inline handler / innerHTML, so the CSP + Trusted Types hold). The
+      // value is server-generated, but it is still rendered with textContent only.
+      var ccell = el("td", null, "mono");
+      if (corr) {
+        var btn = el("button", corr, "corr-btn");
+        btn.type = "button";
+        btn.title = "Filter to this request's events";
+        btn.addEventListener("click", function () {
+          correlationFilter = corr;
+          load();
+        });
+        ccell.appendChild(btn);
+      } else {
+        ccell.textContent = "—";
+      }
+      tr.appendChild(ccell);
       var dcell = el("td");
       var dets = ev.detections || [];
       if (dets.length === 0) {
@@ -220,13 +283,29 @@ export const APP_JS = `"use strict";
     body.appendChild(el("p", message, "error"));
   }
 
+  function eventsUrl() {
+    var params = new URLSearchParams();
+    params.set("limit", "50");
+    if (correlationFilter) {
+      // URLSearchParams encodes the value; the server re-validates the UUID shape
+      // fail-closed and matches it against the projected events only.
+      params.set("correlationId", correlationFilter);
+    }
+    return "/api/events?" + params.toString();
+  }
+
   function load() {
+    renderActiveFilter();
     getJson("/api/chain").then(renderChain).catch(function () { showError("chain-body", "Failed to load chain status."); });
     getJson("/api/summary").then(renderSummary).catch(function () { showError("summary-body", "Failed to load summary."); });
-    getJson("/api/events?limit=50").then(renderEvents).catch(function () { showError("events-body", "Failed to load events."); });
+    getJson(eventsUrl()).then(renderEvents).catch(function () { showError("events-body", "Failed to load events."); });
   }
 
   document.getElementById("refresh-btn").addEventListener("click", load);
+  document.getElementById("clear-filter-btn").addEventListener("click", function () {
+    correlationFilter = null;
+    load();
+  });
   load();
 })();
 `;
