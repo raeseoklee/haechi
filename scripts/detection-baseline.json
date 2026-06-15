@@ -1,5 +1,5 @@
 {
-  "note": "Pinned per-type TP/FP/FN baseline for the detection regression gate (WS2a corpus, WS2b rules, WS2c context anchors, WS2d Unicode-evasion normalization). Records the CURRENT state — WS2b closed the credential/PII coverage gaps (AWS/GitHub/Google/Slack keys, JWT, PEM, US SSN, IBAN, E.164/US phone are true-positives), so recall is at 1 across types. WS2c added a word-boundary anchor to the kr-phone rule that stops a phone matching as a SUBSTRING of a longer hex/dashed run (UUID tail) — a new hard-negative the corpus proves; recall held (no FN reintroduced). WS2d added NFKC normalization in detectEntry so full-width / mathematical / confusable evasion no longer defeats every rule: the new full-width-digit card, full-width KR phone, full-width-@ email, full-width-body sk_ key (same-length NFKC, exact-span redaction) and the mathematical-bold KR RRN (length-divergent NFKC, fail-closed whole-leaf detection) are now true-positives, so TP rose per type while recall held at 1 and the new ligature/ascii hard-negatives added NO false positives (precision for card/phone improved as TP grew with no new FP). The remaining false positives are LEFT by design and stay baked in: phone order-id and a Luhn-passing card order-number are structurally identical to a real bare KR mobile / real card so an anchor would cost recall (card is hard-block); Bearer-in-prose is left because detection runs per string leaf and a real {\"Authorization\":\"Bearer <token>\"} payload walks to a bare \"Bearer <token>\" leaf, so an Authorization-context anchor would MISS the realistic case (a recall regression on the hard-block `secret` type); the password-placeholder is arguably a true positive. An operator clears a benign SOFT-type FP (e.g. the phone order-id) via filters.minConfidence / filters.allowlist; those controls can NEVER suppress a hard-block type (secret/api_key/kr_rrn/card). The gate fails only on a regression below these numbers. Regenerate with: node scripts/bench-detection.mjs --write-baseline.",
+  "note": "Pinned per-type TP/FP/FN baseline for the detection regression gate (WS2a corpus, WS2b rules, WS2c context anchors, WS2d Unicode-evasion normalization, plus the international-PII expansion: jp_mynumber/fr_nir/es_dni/uk_nino). Records the CURRENT state — WS2b closed the credential/PII coverage gaps (AWS/GitHub/Google/Slack keys, JWT, PEM, US SSN, IBAN, E.164/US phone are true-positives), so recall is at 1 across types. WS2c added a word-boundary anchor to the kr-phone rule that stops a phone matching as a SUBSTRING of a longer hex/dashed run (UUID tail) — a new hard-negative the corpus proves; recall held (no FN reintroduced). WS2d added NFKC normalization in detectEntry so full-width / mathematical / confusable evasion no longer defeats every rule: the new full-width-digit card, full-width KR phone, full-width-@ email, full-width-body sk_ key (same-length NFKC, exact-span redaction) and the mathematical-bold KR RRN (length-divergent NFKC, fail-closed whole-leaf detection) are now true-positives, so TP rose per type while recall held at 1 and the new ligature/ascii hard-negatives added NO false positives (precision for card/phone improved as TP grew with no new FP). The international-PII expansion added four validator-anchored types with a synthetic positive + a checksum/format near-miss each: jp_mynumber (mod-11 check digit), fr_nir (97-control key with Corsica 2A/2B substitution), es_dni (mod-23 check letter, NIE X/Y/Z→0/1/2), and uk_nino (format-only invalid-prefix exclusions — no checksum exists). fr_nir (mod-97 over a 15-digit structured run) and es_dni (mod-23 plus a required check letter) join HARD_BLOCK_TYPES — strong anchors and rare shapes, so a match is effectively a true positive. jp_mynumber and uk_nino stay DIAL-ELIGIBLE: a lone mod-11 check digit passes ~1/11 of common 12-digit runs and uk_nino has no checksum at all, so an operator can allowlist a benign FP (both still detect + block by default). Each new type lands at precision 1.0 / recall 1.0 and adds no false positive to any existing type. The remaining false positives are LEFT by design and stay baked in: phone order-id and a Luhn-passing card order-number are structurally identical to a real bare KR mobile / real card so an anchor would cost recall (card is hard-block); Bearer-in-prose is left because detection runs per string leaf and a real {\"Authorization\":\"Bearer <token>\"} payload walks to a bare \"Bearer <token>\" leaf, so an Authorization-context anchor would MISS the realistic case (a recall regression on the hard-block `secret` type); the password-placeholder is arguably a true positive. An operator clears a benign SOFT-type FP (e.g. the phone order-id, or a uk_nino format-only FP) via filters.minConfidence / filters.allowlist; those controls can NEVER suppress a hard-block type (secret/api_key/kr_rrn/card/fr_nir/es_dni — jp_mynumber and uk_nino are dial-eligible). The gate fails only on a regression below these numbers. Regenerate with: node scripts/bench-detection.mjs --write-baseline.",
   "generatedFrom": "tests/fixtures/detection-corpus.json",
   "perType": {
     "email": {
@@ -59,6 +59,34 @@
       "recall": 1
     },
     "iban": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    },
+    "jp_mynumber": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    },
+    "fr_nir": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    },
+    "es_dni": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1
+    },
+    "uk_nino": {
       "tp": 1,
       "fp": 0,
       "fn": 0,

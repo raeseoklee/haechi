@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDefaultFilterEngine } from "../packages/filter/index.mjs";
+import { createDefaultFilterEngine, HARD_BLOCK_TYPES } from "../packages/filter/index.mjs";
 import { collectStringEntries } from "../packages/core/index.mjs";
 
 test("default filter detects common PII and secrets", async () => {
@@ -224,6 +224,56 @@ test("WS2b IBAN rule + mod-97 checksum validator", async () => {
   assert.ok((await typesFor("IBAN DE89370400440532013000 from ECB")).has("iban"));
   // An IBAN-shaped string that breaks mod-97 is rejected.
   assert.ok(!(await typesFor("ref DE89370400440532013001 fails checksum")).has("iban"));
+});
+
+// International-PII expansion — each new type detects its SYNTHETIC valid vector
+// and REJECTS its checksum/format near-miss. All values are synthetic (computed
+// from the official check algorithm or a documented invalid prefix).
+test("jp_mynumber rule + mod-11 check-digit validator", async () => {
+  // 123456789018: the canonical worked example (prefix 12345678901 -> check 8).
+  assert.ok((await typesFor("My Number 123456789018 on the form")).has("jp_mynumber"));
+  // The wrong check digit (…010) is rejected — a bare 12-digit id is not a My Number.
+  assert.ok(!(await typesFor("placeholder 123456789010 fails the check digit")).has("jp_mynumber"));
+});
+
+test("fr_nir rule + 97-control-key validator", async () => {
+  // 185057800604830: last 2 digits are 97-(first13 mod 97)=30.
+  assert.ok((await typesFor("NIR 185057800604830 on file")).has("fr_nir"));
+  // Off-by-one control key (…31) is rejected.
+  assert.ok(!(await typesFor("ref 185057800604831 breaks the control key")).has("fr_nir"));
+});
+
+test("es_dni rule + mod-23 check-letter validator (DNI and NIE)", async () => {
+  // 12345678Z: check letter Z = table[12345678 mod 23].
+  assert.ok((await typesFor("DNI 12345678Z issued")).has("es_dni"));
+  // NIE: X maps to 0 before the mod; X1234567L is valid.
+  assert.ok((await typesFor("NIE X1234567L registered")).has("es_dni"));
+  // The wrong check letter (A) is rejected.
+  assert.ok(!(await typesFor("doc 12345678A wrong letter")).has("es_dni"));
+});
+
+test("uk_nino rule + invalid-prefix exclusions (format-only, no checksum)", async () => {
+  // AB123456C: valid prefix AB, 6 digits, A-D suffix.
+  assert.ok((await typesFor("NINO AB123456C on the P60")).has("uk_nino"));
+  // BG is a documented never-issued prefix — rejected.
+  assert.ok(!(await typesFor("code BG123456C bad prefix")).has("uk_nino"));
+  // O as the 2nd letter is excluded; an invalid suffix (E, outside A-D) is excluded.
+  assert.ok(!(await typesFor("AO123456C uses O as the second letter")).has("uk_nino"));
+  assert.ok(!(await typesFor("AB123456E uses an out-of-range suffix")).has("uk_nino"));
+});
+
+test("the strong-anchored national IDs are hard-block; weak/format-only ones are dial-eligible", async () => {
+  // fr_nir (mod-97 over a long structured run) and es_dni (mod-23 + a required
+  // check letter) have strong anchors and rare shapes -> hard-block (kr_rrn-grade).
+  for (const type of ["fr_nir", "es_dni"]) {
+    assert.ok(HARD_BLOCK_TYPES.has(type), `${type} must be a hard-block type`);
+  }
+  // jp_mynumber (a lone mod-11 check over a common 12-digit shape, ~1/11 FP) and
+  // uk_nino (no checksum) carry too much FP surface to be un-allowlistable ->
+  // dial-eligible (still detect + block by default; operator can clear an FP).
+  for (const type of ["jp_mynumber", "uk_nino"]) {
+    assert.ok(!HARD_BLOCK_TYPES.has(type), `${type} must stay dial-eligible (not hard-block)`);
+  }
 });
 
 test("WS2b phone rules: E.164 needs a leading +, US national needs separators, bare runs rejected", async () => {
