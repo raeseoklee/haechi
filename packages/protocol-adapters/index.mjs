@@ -8,6 +8,23 @@ const SSE_RESPONSES = { format: "sse", deltaPath: null };
 const SSE_LLAMA_LEGACY = { format: "sse", deltaPath: ["content"] };
 const NDJSON_OLLAMA_CHAT = { format: "ndjson", deltaPath: ["message", "content"] };
 const NDJSON_OLLAMA_GENERATE = { format: "ndjson", deltaPath: ["response"] };
+// Anthropic Messages API streams event-typed SSE frames; the incremental text
+// channel is `delta.text` inside a `content_block_delta` frame. Other frame
+// types (message_start, ping, etc.) don't carry deltaPath, so they get
+// within-frame protection but no cross-frame buffering. The stream-filter
+// preserves each frame's `event:` line on re-serialize. `flushOnType` lists the
+// frame types that END a delta sequence: before one of them the held cross-frame
+// buffer tail is flushed as a valid `content_block_delta`, so the residual lands
+// IN ORDER (before content_block_stop/message_stop) rather than after the stream
+// terminates. `ping` is intentionally absent — a match split across a keepalive
+// must still be caught by the sliding buffer. Legacy /v1/complete streams a
+// `completion` delta (no block framing, so no flushOnType needed).
+const SSE_ANTHROPIC_MESSAGES = {
+  format: "sse",
+  deltaPath: ["delta", "text"],
+  flushOnType: { path: ["type"], values: ["content_block_stop", "message_delta", "message_stop"] }
+};
+const SSE_ANTHROPIC_COMPLETE = { format: "sse", deltaPath: ["completion"] };
 
 const ADAPTERS = {
   "openai-compatible": {
@@ -49,6 +66,21 @@ const ADAPTERS = {
       route("/api/generate", "generate", { streamingDefault: true, streaming: NDJSON_OLLAMA_GENERATE }),
       route("/api/embed", "embed"),
       route("/api/embeddings", "embeddings")
+    ]
+  },
+  "anthropic": {
+    id: "anthropic",
+    protocol: "anthropic",
+    routes: [
+      // Anthropic Messages API. PII can sit in the top-level `system` string/blocks
+      // or any `messages[].content` string or content-block text/input — the core
+      // tree walk (collectStringEntries) covers every string leaf, so no custom
+      // extraction is needed. Streams via content_block_delta `delta.text`.
+      route("/v1/messages", "messages", { streaming: SSE_ANTHROPIC_MESSAGES }),
+      // count_tokens is a utility, but it carries prompt content, so protect it.
+      route("/v1/messages/count_tokens", "count-tokens", { protectRequest: true }),
+      // Legacy text completions: `prompt` is a top-level string; streams a `completion` delta.
+      route("/v1/complete", "complete", { streaming: SSE_ANTHROPIC_COMPLETE })
     ]
   }
 };
