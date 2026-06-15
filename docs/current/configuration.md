@@ -38,7 +38,7 @@
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
-| `target.type` | `llm-http` \| `openai-compatible` \| `vllm-openai` \| `ollama` \| `llama-cpp` \| `anthropic` | `llm-http` | Selects the protocol adapter. `llm-http` aliases `openai-compatible`. `anthropic` targets the Anthropic Messages API (`/v1/messages`, `/v1/messages/count_tokens`, `/v1/complete`); the client supplies Anthropic's `x-api-key`/`anthropic-version` headers and the proxy forwards them. Unknown values **fail closed** at load. |
+| `target.type` | `llm-http` \| `openai-compatible` \| `vllm-openai` \| `ollama` \| `llama-cpp` \| `anthropic` \| `gemini` | `llm-http` | Selects the protocol adapter. `llm-http` aliases `openai-compatible`. `anthropic` targets the Anthropic Messages API (`/v1/messages`, `/v1/messages/count_tokens`, `/v1/complete`); the client supplies Anthropic's `x-api-key`/`anthropic-version` headers and the proxy forwards them. `gemini` targets the Google Gemini API, whose endpoints are model-in-path with a `:method` suffix (`/v1beta/models/{model}:generateContent`, `:streamGenerateContent` (SSE), `:countTokens`, `:embedContent`, `:batchEmbedContents`; `/v1` or `/v1beta` prefix, arbitrary `{model}`); the client supplies Gemini's `x-goog-api-key` (or `?key=`) and the proxy forwards it. Unknown values **fail closed** at load. |
 | `target.adapter` | same set | `openai-compatible` | Explicit adapter override; usually leave unset and let `type` decide. |
 | `target.upstream` | URL string | `http://127.0.0.1:9999` | The only upstream the proxy forwards to. Request targets must be origin-form paths; absolute-URL targets are rejected (SSRF guard). |
 

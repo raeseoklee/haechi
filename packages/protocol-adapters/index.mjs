@@ -25,6 +25,11 @@ const SSE_ANTHROPIC_MESSAGES = {
   flushOnType: { path: ["type"], values: ["content_block_stop", "message_delta", "message_stop"] }
 };
 const SSE_ANTHROPIC_COMPLETE = { format: "sse", deltaPath: ["completion"] };
+// Google Gemini streams :streamGenerateContent as DATA-ONLY SSE (no `event:`
+// lines, like OpenAI). Each `data:` frame is a FULL GenerateContentResponse;
+// the incremental text channel is just deeper. Because frames are data-only,
+// the held cross-frame tail can flush at end-of-stream — no flushOnType needed.
+const SSE_GEMINI = { format: "sse", deltaPath: ["candidates", 0, "content", "parts", 0, "text"] };
 
 const ADAPTERS = {
   "openai-compatible": {
@@ -81,6 +86,32 @@ const ADAPTERS = {
       route("/v1/messages/count_tokens", "count-tokens", { protectRequest: true }),
       // Legacy text completions: `prompt` is a top-level string; streams a `completion` delta.
       route("/v1/complete", "complete", { streaming: SSE_ANTHROPIC_COMPLETE })
+    ]
+  },
+  "gemini": {
+    id: "gemini",
+    protocol: "gemini",
+    routes: [
+      // Google Gemini API. Endpoints are MODEL-IN-PATH with a `:method` suffix:
+      // POST /v1beta/models/{model}:generateContent (and /v1, and arbitrary
+      // model names like gemini-2.0-flash). The route key is therefore the
+      // `:method` SUFFIX, not a fixed path — declared via `methodSuffix`, which
+      // matchRoute checks only AFTER exact-path matches (so existing adapters
+      // are unaffected). PII can sit in systemInstruction.parts[].text and any
+      // contents[].parts[].text; the core tree walk (collectStringEntries)
+      // covers every string leaf, so no custom extraction is needed.
+      suffixRoute("generateContent", "generate-content"),
+      // Streaming variant: data-only SSE, full GenerateContentResponse per frame;
+      // delta text lives at candidates[0].content.parts[0].text. The :stream*
+      // endpoint ALWAYS streams (the intent is in the path, not a body flag), so
+      // mark it streamingDefault — there is no `stream:false` body field for
+      // Gemini, so isStreamingRequest always classifies it as streaming.
+      suffixRoute("streamGenerateContent", "stream-generate-content", { streamingDefault: true, streaming: SSE_GEMINI }),
+      // countTokens carries prompt content (contents/systemInstruction), so protect it.
+      suffixRoute("countTokens", "count-tokens", { protectRequest: true }),
+      // Embedding endpoints: request carries text to embed; protect it.
+      suffixRoute("embedContent", "embed", { protectRequest: true }),
+      suffixRoute("batchEmbedContents", "batch-embed", { protectRequest: true })
     ]
   }
 };
@@ -153,10 +184,45 @@ function route(path, operation, options = {}) {
   };
 }
 
+// A SUFFIX route matches by a `:method` suffix instead of an exact pathname —
+// for model-in-path APIs (Gemini) where the path embeds an arbitrary model name
+// and a version prefix (e.g. /v1beta/models/gemini-2.0-flash:generateContent).
+// `path` stays null (there is no fixed path); `methodSuffix` carries the bare
+// method name and matchRoute matches when the pathname ends with `:${suffix}`.
+// matchRoute tries exact-path routes FIRST, so this never changes existing
+// exact-match behavior for openai/anthropic/ollama/llama-cpp.
+function suffixRoute(methodSuffix, operation, options = {}) {
+  return {
+    id: operation,
+    path: null,
+    methodSuffix,
+    operation,
+    protectRequest: options.protectRequest ?? true,
+    protectResponse: options.protectResponse ?? true,
+    streamingDefault: options.streamingDefault ?? false,
+    streaming: options.streaming ?? null
+  };
+}
+
 function pathFromRequestUrl(url) {
   return new URL(url, "http://haechi.local").pathname;
 }
 
 function matchRoute(routes, pathname) {
-  return routes.find((candidate) => candidate.path === pathname);
+  // 1) EXACT pathname match (unchanged) — the only matcher for openai/anthropic/
+  //    ollama/llama-cpp, so their classification is byte-for-byte identical.
+  const exact = routes.find((candidate) => candidate.path === pathname);
+  if (exact) {
+    return exact;
+  }
+  // 2) ADDITIVE: `:method`-SUFFIX match for model-in-path APIs (Gemini). A path
+  //    like /v1beta/models/gemini-2.0-flash:generateContent matches the route
+  //    whose methodSuffix the pathname ends with (`...:generateContent`). The
+  //    `:` guard prevents a bare substring (e.g. a model literally named
+  //    "generateContent") from matching without the method delimiter.
+  return routes.find(
+    (candidate) =>
+      typeof candidate.methodSuffix === "string" &&
+      pathname.endsWith(`:${candidate.methodSuffix}`)
+  );
 }

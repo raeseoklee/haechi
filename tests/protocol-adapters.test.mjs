@@ -8,7 +8,8 @@ test("protocol adapters classify local inference routes", () => {
     "vllm-openai",
     "llama-cpp",
     "ollama",
-    "anthropic"
+    "anthropic",
+    "gemini"
   ]);
 
   const vllm = createProtocolAdapter({ adapter: "vllm-openai" });

@@ -98,7 +98,7 @@ Upstream requests time out after `limits.upstreamTimeoutMs` (default 120000) and
 
 ## Local Inference Servers
 
-Haechi includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ollama, llama.cpp, and the Anthropic Messages API.
+Haechi includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ollama, llama.cpp, the Anthropic Messages API, and the Google Gemini API.
 
 ```json
 {
@@ -118,7 +118,7 @@ Haechi includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ol
 }
 ```
 
-Then point an OpenAI-compatible client at `http://127.0.0.1:11016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy. For Claude, set `target.type: "anthropic"` and call `/v1/messages` (or `/v1/messages/count_tokens`, `/v1/complete`); the client's `x-api-key`/`anthropic-version` headers are forwarded to the upstream unchanged.
+Then point an OpenAI-compatible client at `http://127.0.0.1:11016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy. For Claude, set `target.type: "anthropic"` and call `/v1/messages` (or `/v1/messages/count_tokens`, `/v1/complete`); the client's `x-api-key`/`anthropic-version` headers are forwarded to the upstream unchanged. For Gemini, set `target.type: "gemini"` and call the model-in-path endpoints `/v1beta/models/{model}:generateContent` (or `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`); the client's `x-goog-api-key` (or `?key=`) is forwarded to the upstream unchanged.
 
 ## Token Round-Trip
 
@@ -211,7 +211,7 @@ The satellites are `node:`-only by default (heavy SDKs are optional peers) and k
 | Key | Default | Meaning |
 |---|---|---|
 | `mode` / `policy.mode` | `dry-run` | `dry-run` and `report-only` detect + audit only; `enforce` transforms/blocks. `policy.mode` wins over `mode` |
-| `target.type` / `target.adapter` | `llm-http` / `openai-compatible` | Upstream protocol: `openai-compatible`, `vllm-openai`, `ollama`, `llama-cpp`, `anthropic`. Unknown types fail closed |
+| `target.type` / `target.adapter` | `llm-http` / `openai-compatible` | Upstream protocol: `openai-compatible`, `vllm-openai`, `ollama`, `llama-cpp`, `anthropic`, `gemini`. Unknown types fail closed |
 | `target.upstream` | `http://127.0.0.1:9999` | The only upstream the proxy will forward to (absolute-URL request targets are rejected) |
 | `proxy.host` / `proxy.port` | `127.0.0.1` / `11016` | Proxy bind address. See remote binding below |
 | `responseProtection.enabled` | `false` | Inspect upstream JSON responses. `failureMode: fail-closed` rejects non-JSON/compressed/oversized responses |
