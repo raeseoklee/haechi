@@ -206,6 +206,91 @@ test("WS2b expanded assignment-secret vocabulary catches cloud/OAuth secret assi
   assert.ok((await typesFor("refresh_token = 0123456789abcdef0123 in the env")).has("secret"));
 });
 
+// ---------------------------------------------------------------------------
+// Cloud/SaaS credential expansion — anchored provider key rules. Every vector is
+// a PUSH-SAFE LOW-ENTROPY synthetic value (a recognizable EXAMPLE/zero body padded
+// to the exact length the rule requires) that matches our STRUCTURAL anchor but
+// will not trip GitHub partner secret-scanning (no real entropy/checksum). Each
+// provider: the positive detects, the near-miss is rejected, and a random base62
+// run of similar length does NOT false-fire.
+// ---------------------------------------------------------------------------
+const padRight = (s, n) => (s + "0".repeat(n)).slice(0, n);
+
+test("cloud-cred: OpenAI sk- (and sk-proj-) keys detect as secret; hyphen disambiguates from Stripe sk_", async () => {
+  const key = `sk-${padRight("EXAMPLEEXAMPLE", 31)}`;
+  const proj = `sk-proj-${padRight("EXAMPLEEXAMPLE", 31)}`;
+  assert.ok((await typesFor(`OpenAI key ${key} leaked`)).has("secret"));
+  assert.ok((await typesFor(`OpenAI project key ${proj} leaked`)).has("secret"));
+  // Near-miss: a <20-char body must not fire.
+  assert.ok(!(await typesFor("the slug sk-tooShort here")).has("secret"));
+  // The underscore Stripe/OpenAI-platform sk_ form is the OTHER rule (api_key),
+  // NOT this one — confirm the hyphen rule does not steal it (no overlap regression).
+  const stripe = await typesFor(`Stripe sk_live_${padRight("EXAMPLEEXAMPLE", 24)} committed`);
+  assert.ok(stripe.has("api_key"), "underscore sk_live_ stays api_key (existing openai-like-key rule)");
+});
+
+test("cloud-cred: Anthropic sk-ant- key detects as secret (its own rule runs first)", async () => {
+  const key = `sk-ant-api03-${padRight("EXAMPLEEXAMPLE", 40)}`;
+  assert.ok((await typesFor(`Anthropic key ${key} in env`)).has("secret"));
+  // Near-miss: a <16-char body must not fire.
+  assert.ok(!(await typesFor("the string sk-ant-tiny here")).has("secret"));
+});
+
+test("cloud-cred: Google OAuth GOCSPX- client secret detects as secret (exactly 28 chars)", async () => {
+  const key = `GOCSPX-${padRight("EXAMPLEEXAMPLEEXAMPLE", 28)}`;
+  assert.ok((await typesFor(`client secret ${key} in config`)).has("secret"));
+  // Near-miss: not exactly 28 trailing URL-safe chars.
+  assert.ok(!(await typesFor("token GOCSPX-tooShortBody here")).has("secret"));
+});
+
+test("cloud-cred: SendGrid SG.<22>.<43> API key detects as api_key", async () => {
+  const key = `SG.${padRight("EXAMPLEEXAMPLE", 22)}.${padRight("EXAMPLEEXAMPLEEXAMPLE", 43)}`;
+  assert.ok((await typesFor(`SendGrid key ${key} leaked`)).has("api_key"));
+  // Near-miss: a short second segment must not fire.
+  assert.ok(!(await typesFor("value SG.EXAMPLEEXAMPLE00000000.SHORT here")).has("api_key"));
+});
+
+test("cloud-cred: Twilio AC/SK + 32 HEX SID detects as api_key; non-hex body rejected", async () => {
+  assert.ok((await typesFor(`Twilio SID AC${padRight("", 32)} in creds`)).has("api_key"));
+  assert.ok((await typesFor(`Twilio API key SID SK${padRight("", 32)} in creds`)).has("api_key"));
+  // Near-miss: a same-length body with non-hex chars (z) must not fire — the
+  // hex-only anchor is what blocks a random base62 run.
+  assert.ok(!(await typesFor(`run AC${padRight("zzzzzzzz", 32)} here`)).has("api_key"));
+  // Near-miss: too short.
+  assert.ok(!(await typesFor("run AC0000000000 here")).has("api_key"));
+});
+
+test("cloud-cred: npm npm_ + 36 base62 token detects as secret", async () => {
+  const key = `npm_${padRight("EXAMPLEEXAMPLEEXAMPLE", 36)}`;
+  assert.ok((await typesFor(`npm token ${key} published`)).has("secret"));
+  // Near-miss: a short body must not fire.
+  assert.ok(!(await typesFor("marker npm_short here")).has("secret"));
+});
+
+test("cloud-cred: Azure Storage AccountKey= and Twilio auth_token are caught via the assignment vocabulary", async () => {
+  // An un-anchored 88-char base64 rule would false-fire on any blob, so the
+  // `AccountKey=` assignment context is the anchor.
+  assert.ok((await typesFor("AccountKey=EXAMPLEEXAMPLEEXAMPLEEXAMPLE000000==")).has("secret"));
+  // Twilio's bare 32-hex auth token has no self-describing prefix; the assignment
+  // form catches it.
+  assert.ok((await typesFor(`auth_token = ${padRight("", 32)}`)).has("secret"));
+});
+
+test("cloud-cred: a random base62 run with NO provider prefix does NOT false-fire any rule", async () => {
+  // 47-char random base62, no sk-/GOCSPX-/SG./AC/npm_ anchor. Every new rule is
+  // anchored on a fixed prefix + charclass + length, so bare entropy never matches.
+  const rnd = "Ab3xQ9KmZ2pLw7Rt5Yn1Vc8Df4Gh6Js0Bv2Nx5Mq3Pe7Wa9";
+  const types = await typesFor(`a random blob ${rnd} appears`);
+  assert.ok(!types.has("secret"), "random base62 must not fire secret");
+  assert.ok(!types.has("api_key"), "random base62 must not fire api_key");
+});
+
+test("cloud-cred: every new credential type is a hard-block type (secret/api_key, never weakened)", () => {
+  // Both target types are already in HARD_BLOCK_TYPES — confirm, do not weaken.
+  assert.ok(HARD_BLOCK_TYPES.has("secret"), "secret must stay hard-block");
+  assert.ok(HARD_BLOCK_TYPES.has("api_key"), "api_key must stay hard-block");
+});
+
 test("WS2b US SSN rule + SSA-range validator", async () => {
   // The public synthetic SSN passes the validator.
   assert.ok((await typesFor("US SSN 078-05-1120 on the form")).has("us_ssn"));

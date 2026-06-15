@@ -112,6 +112,76 @@ const DEFAULT_RULES = [
     confidence: 0.9
   },
   {
+    // Anthropic API key: `sk-ant-` + a long body. Ordered BEFORE the OpenAI rule
+    // below so a Claude key is attributed to its own rule (both emit `secret`, so
+    // removeOverlaps collapsing the shared span to either is type-identical — the
+    // ordering is for ruleId attribution, not for the scored type). The HYPHEN
+    // after `sk` is load-bearing: it keeps this OFF the underscore-based Stripe/
+    // OpenAI-platform `sk_` rule (openai-like-key, `api_key`), so the two never
+    // collide on the same span.
+    id: "anthropic-api-key",
+    type: "secret",
+    pattern: "\\bsk-ant-[A-Za-z0-9_-]{16,}\\b",
+    flags: "g",
+    confidence: 0.95
+  },
+  {
+    // OpenAI API key: `sk-` (and project keys `sk-proj-`) + a long base62-ish
+    // body. The HYPHEN is the disambiguator from Stripe/OpenAI-platform `sk_`
+    // (underscore — handled by openai-like-key as `api_key`); this rule never
+    // matches an underscore form, so the two prefixes do not overlap. A >=20-char
+    // body keeps a bare `sk-foo` slug from firing. The Anthropic `sk-ant-` rule
+    // above is a stricter sibling that runs first.
+    id: "openai-api-key",
+    type: "secret",
+    pattern: "\\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\\b",
+    flags: "g",
+    confidence: 0.9
+  },
+  {
+    // Google OAuth client secret: anchored `GOCSPX-` + exactly 28 chars from the
+    // URL-safe alphabet. Fixed prefix + fixed length = high precision (this is the
+    // OAuth client secret, distinct from the `AIza` API key above).
+    id: "google-oauth-client-secret",
+    type: "secret",
+    pattern: "\\bGOCSPX-[A-Za-z0-9_-]{28}\\b",
+    flags: "g",
+    confidence: 0.95
+  },
+  {
+    // SendGrid API key: `SG.` + 22 URL-safe chars + `.` + 43 URL-safe chars. The
+    // two fixed-length dotted segments after the `SG.` prefix are what make this
+    // high-precision — a bare `SG.`-prefixed string of the wrong shape is rejected.
+    id: "sendgrid-api-key",
+    type: "api_key",
+    pattern: "\\bSG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}\\b",
+    flags: "g",
+    confidence: 0.95
+  },
+  {
+    // Twilio Account SID (AC…) / API Key SID (SK…): the fixed `AC`/`SK` prefix +
+    // EXACTLY 32 HEX chars. The hex-only body (not base62) is the precision guard:
+    // a random alphanumeric run of the same length carries non-hex letters and is
+    // rejected, and the `SK` form does not collide with the underscore/hyphen
+    // `sk_`/`sk-` rules. Twilio's bare 32-hex AUTH TOKEN is deliberately NOT a
+    // standalone rule (a prefix-less 32-hex run is indistinguishable from an MD5
+    // hash / id) — it is caught via the `<key> = <value>` assignment vocabulary.
+    id: "twilio-sid",
+    type: "api_key",
+    pattern: "\\b(?:AC|SK)[0-9a-fA-F]{32}\\b",
+    flags: "g",
+    confidence: 0.9
+  },
+  {
+    // npm access token: anchored `npm_` + exactly 36 base62 chars. Fixed prefix +
+    // fixed length = high precision.
+    id: "npm-token",
+    type: "secret",
+    pattern: "\\bnpm_[A-Za-z0-9]{36}\\b",
+    flags: "g",
+    confidence: 0.95
+  },
+  {
     // JWT: three dot-separated base64url segments where the FIRST starts with
     // `eyJ` — the base64 of `{"`, i.e. the opening of the JSON header. Anchoring
     // on `eyJ` + two more base64url groups keeps this from matching arbitrary
@@ -156,7 +226,12 @@ const DEFAULT_RULES = [
     // client secrets, PEM/private keys, access/refresh tokens) so a
     // `<key> = <value>` leak is caught even when the value itself has no
     // self-describing prefix (e.g. an AWS secret access key is bare base64).
-    pattern: "(?<=\\b(?:api[_-]?key|api[_-]?secret|secret[_-]?key|secret|aws[_-]?secret[_-]?access[_-]?key|client[_-]?secret|private[_-]?key|access[_-]?token|refresh[_-]?token|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
+    // `accountkey` catches the Azure Storage connection-string `AccountKey=<88-
+    // char base64>=` segment — an un-anchored 88-char base64 rule would false-fire
+    // on any blob, so the `AccountKey=` assignment context is the precision anchor.
+    // `auth[_-]?token` catches the Twilio auth token (a bare 32-hex run with no
+    // self-describing prefix) when it is leaked as a `<key> = <value>` pair.
+    pattern: "(?<=\\b(?:api[_-]?key|api[_-]?secret|secret[_-]?key|secret|aws[_-]?secret[_-]?access[_-]?key|client[_-]?secret|private[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|accountkey|token|password)\\s*[:=]\\s*['\\\"]?)[A-Za-z0-9._~+/-]{12,}",
     flags: "gi",
     confidence: 0.85
   },

@@ -300,11 +300,17 @@ const runtime = createRuntime(config, { rateLimiter });
 | `fr_nir` | 프랑스 NIR / INSEE 사회보장번호 | 15자 + **`97 - (앞13 mod 97)` 제어키**(코르시카 `2A`→19, `2B`→18) | 제어키 불일치는 거부됩니다. **하드 블록.** |
 | `es_dni` | 스페인 DNI / NIE | 8자리(DNI) 또는 `X/Y/Z`+7자리(NIE) + **mod-23 check letter**(NIE `X/Y/Z`→`0/1/2`) | check letter 불일치는 거부됩니다. **하드 블록.** |
 | `uk_nino` | 영국 국민보험번호 | `[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\d{6}[A-D]` + 문서화된 무효 prefix 제외(`BG`/`GB`/`NK`/`KN`/`TN`/`NT`/`ZZ`, 2번째 글자 `O`) | **format-only — checksum이 없으므로** 하드 블록 타입이 아닙니다(dial 가능: 운영자가 양성 FP를 allowlist 할 수 있음). |
-| `api_key` | OpenAI 형식(`sk_`/`rk_`/`pk_`) | prefix + 24자 이상 | — |
+| `api_key` | OpenAI 형식 / Stripe(`sk_`/`rk_`/`pk_`) | prefix + 24자 이상 | 언더스코어 형식 — Stripe `sk_live_`/`rk_live_`/`sk_test_`/`rk_test_`를 포함합니다. |
 | `api_key` | AWS access key id | `AKIA`/`ASIA` + 정확히 16자 대문자-alnum | — |
 | `api_key` | Google API key | `AIza` + 35자 URL-safe 문자 | — |
+| `api_key` | SendGrid API key | `SG.` + 22자 URL-safe + `.` + 43자 URL-safe | 고정 길이 두 개의 점-구분 세그먼트가 anchor입니다. |
+| `api_key` | Twilio Account/API SID | `AC`/`SK` + 정확히 32자 **hex** | hex 전용 본문이 무작위 base62를 거부합니다; bare 32-hex AUTH TOKEN은 할당식(`auth_token`)으로 포착합니다. |
+| `secret` | OpenAI API key | `sk-`(및 `sk-proj-`) + 20자 이상 base62 유사 문자 | **하이픈** 형식으로 언더스코어 Stripe `sk_`와 구분되며, 두 prefix는 절대 겹치지 않습니다. |
+| `secret` | Anthropic API key | `sk-ant-` + 16자 이상 | OpenAI `sk-` 규칙의 더 엄격한 형제 규칙입니다(attribution을 위해 먼저 실행). |
+| `secret` | Google OAuth client secret | `GOCSPX-` + 정확히 28자 URL-safe 문자 | `AIza` API key와 구분됩니다. |
+| `secret` | npm token | `npm_` + 정확히 36자 base62 문자 | — |
 | `secret` | `Bearer <token>` | `Bearer` + 16자 이상 | — |
-| `secret` | 할당식 `<key> = <value>` | 키 어휘: `api_key`, `api_secret`, `secret`, `secret_key`, `aws_secret_access_key`, `client_secret`, `private_key`, `access_token`, `refresh_token`, `token`, `password` | bare-base64 시크릿(예: AWS secret access key)을 할당식 형태로 포착합니다. |
+| `secret` | 할당식 `<key> = <value>` | 키 어휘: `api_key`, `api_secret`, `secret`, `secret_key`, `aws_secret_access_key`, `client_secret`, `private_key`, `access_token`, `refresh_token`, `auth_token`, `accountkey`, `token`, `password` | bare-base64 시크릿(AWS secret access key, **Azure Storage `AccountKey=`**, **Twilio auth token**)을 할당식 형태로 포착합니다 — 앵커 없는 88자 base64 Azure 규칙은 임의의 blob에 오탐하므로 `AccountKey=` 컨텍스트가 anchor입니다. |
 | `secret` | GitHub token | `gh[pousr]_` + 36자 이상 base64 유사 문자 | pat/oauth/user/server/refresh 변형. |
 | `secret` | Slack token | `xox[baprs]-` + 10자 이상 본문 | bot/user/refresh/legacy 변형. |
 | `secret` | JWT | 점으로 구분된 3개 base64url 세그먼트, 첫 세그먼트가 `eyJ`(즉 `{"`의 base64)로 시작 | `eyJ` anchor가 임의의 점-구분 토큰을 거부합니다. |
