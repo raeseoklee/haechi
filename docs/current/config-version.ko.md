@@ -1,6 +1,6 @@
 # Haechi `configVersion` & 업그레이드 노트
 
-- 상태: Living document (코어 1.2.x 추적)
+- 상태: Living document (코어 1.3.x 추적)
 
 `configVersion`는 `haechi.config.json`(및 `haechi.config.example.json`) 최상위에 찍히는 단일 정수입니다. 향후 호환성을 깨는 설정 스키마 변경이 구체적으로 게이트할 수 있는 **버전 앵커**로서, 다른 Haechi 빌드가 쓴 설정을 조용히 잘못 읽는 일을 막습니다.
 
@@ -21,7 +21,7 @@
 
 | `configVersion` | 코어 라인 | 노트 |
 |---|---|---|
-| `1` | 1.0 – 1.2.x | 최초 스탬프. 모든 키는 1.0 frozen 설정 표면(`api-stability.md` §2.4)에 대해 additive입니다. 1.1.x의 additive 키(`logging`, `metrics`, WS4-B의 `limits.maxInFlight` / `limits.shutdownGraceMs` / `limits.requestTimeoutMs` / `limits.headersTimeoutMs`, 그리고 `configVersion` 자체)와 1.2.0 신뢰성 강화 키(`filters.minConfidence` / `filters.allowlist`, `proxy.tls` / `proxy.trustForwardedProto`)는 모두 이전 동작을 기본값으로 합니다. 마이그레이션 불필요. |
+| `1` | 1.0 – 1.3.x | 최초 스탬프. 모든 키는 1.0 frozen 설정 표면(`api-stability.md` §2.4)에 대해 additive입니다. 1.1.x의 additive 키(`logging`, `metrics`, WS4-B의 `limits.maxInFlight` / `limits.shutdownGraceMs` / `limits.requestTimeoutMs` / `limits.headersTimeoutMs`, 그리고 `configVersion` 자체)와 1.2.0 신뢰성 강화 키(`filters.minConfidence` / `filters.allowlist`, `proxy.tls` / `proxy.trustForwardedProto`)는 모두 이전 동작을 기본값으로 합니다. 1.3.0의 추가는 새 키가 아니라 새 *값*입니다 — `target.type`의 `anthropic`/`gemini`, 추가 탐지 타입, `asia-pdpa`/`jp-appi` `privacy.profile` 값 — 따라서 설정 스키마(및 `configVersion`)는 변경되지 않습니다. 마이그레이션 불필요. |
 
 ## 업그레이드
 
