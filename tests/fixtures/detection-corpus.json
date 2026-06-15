@@ -1,6 +1,6 @@
 {
   "$schema-note": "Labeled detection corpus for WS2a/WS2b (reliability-hardening-track). Each case is { text, direction?, expect: [{ type, present }], note }. `present:true` = the engine SHOULD detect this type in `text`; `present:false` = it must NOT (a hard negative). `direction` defaults to \"request\"; injection rules are response-direction only. Scored per-type by scripts/bench-detection.mjs; regression-gated against scripts/detection-baseline.json.",
-  "$safety": "ALL VALUES ARE SYNTHETIC TEST FIXTURES. No real secret, key, or PII appears here. Card numbers are the public 4242.../4111... test cards; AWS uses the documented AKIAIOSFODNN7EXAMPLE; the SSN is the public misprinted-wallet 078-05-1120; the IBAN is the public ECB example DE89370400440532013000; the JWT/PEM/tokens are fabricated or public RFC/sample values. Storing real secrets/PII is forbidden by CLAUDE.md.",
+  "$safety": "ALL VALUES ARE SYNTHETIC TEST FIXTURES. No real secret, key, or PII appears here. Card numbers are the public 4242.../4111... test cards; AWS uses the documented AKIAIOSFODNN7EXAMPLE; the SSN is the public misprinted-wallet 078-05-1120; the IBAN is the public ECB example DE89370400440532013000; the JWT/PEM/tokens are fabricated or public RFC/sample values. The EU/Asia national-ID vectors are documented public worked examples or values generated from the official check algorithm: the Italian codice fiscale RSSMRA85T10A562S (public Mario Rossi worked example), the Singapore NRIC S1234567D (canonical S-series worked example), the India Aadhaar 234567890124 (generated from the Verhoeff algorithm), the Germany tax ID 02476291358 (public BZSt example), and the Netherlands BSN 111222333 (known synthetic test BSN). Storing real secrets/PII is forbidden by CLAUDE.md.",
   "$baseline-legend": "WS2b closed the credential/PII coverage gaps WS2a measured: the AWS/GitHub/Google/Slack keys, JWT, and PEM headers are now true-positives, and new international-PII types (us_ssn, iban) plus E.164/US phone forms were added — each with a hard-negative case and (for us_ssn/iban) a validator-boundary case. WS2d added Unicode-evasion POSITIVES (full-width card / KR phone / @-email / sk_ key folded by same-length NFKC; a mathematical-bold KR RRN folded by length-divergent NFKC) and HARD-NEGATIVES (a ligature-bearing sentence with no PII that must not over-fire under the length-divergent fail-closed path; an NFKC-stable ASCII control proving the common path is unchanged). The baseline is re-pinned to capture the improved per-type precision/recall (recall held at 1.0). The gate still fails only on a REGRESSION below baseline.",
   "cases": [
     {
@@ -326,6 +326,56 @@
       "text": "the code BG123456C uses a NINO prefix that is never issued",
       "expect": [{ "type": "uk_nino", "present": false }],
       "note": "HARD NEGATIVE (uk_nino invalid-prefix): the BG prefix is on the documented never-issued list (with GB/NK/KN/TN/NT/ZZ and O-as-2nd-letter), so a NINO-shaped value with an excluded prefix must NOT match — the format-only rule still rejects the documented invalid prefixes."
+    },
+    {
+      "text": "Italy codice fiscale RSSMRA85T10A562S on the modulo",
+      "expect": [{ "type": "it_codice_fiscale", "present": true }],
+      "note": "INTL PII positive (it_codice_fiscale): the public worked-example Italian codice fiscale (Mario Rossi, RSSMRA85T10A562S) whose 16th char S is the official mod-26 check character over the first 15 (odd/even position tables). Hard-block (mixed alpha+digit, rare 16-char shape, non-numeric anchor)."
+    },
+    {
+      "text": "the document RSSMRA85T10A562X carries a wrong check character",
+      "expect": [{ "type": "it_codice_fiscale", "present": false }],
+      "note": "HARD NEGATIVE (it_codice_fiscale validator): a structurally valid codice fiscale whose 16th check character is wrong (X instead of S) must NOT match — the mod-26 check character is the precision guard."
+    },
+    {
+      "text": "Singapore NRIC S1234567D on the pass",
+      "expect": [{ "type": "sg_nric", "present": true }],
+      "note": "INTL PII positive (sg_nric): a SYNTHETIC Singapore NRIC whose check letter D is the canonical worked example for body S1234567 (weighted sum mod 11 -> S/T table). Hard-block (letter prefix + check letter, rare shape)."
+    },
+    {
+      "text": "the card S1234567A has the wrong NRIC check letter",
+      "expect": [{ "type": "sg_nric", "present": false }],
+      "note": "HARD NEGATIVE (sg_nric validator): an NRIC-shaped value whose check letter is wrong (A instead of D) must NOT match — the weighted-sum check letter is the precision guard."
+    },
+    {
+      "text": "India Aadhaar 234567890124 on the e-KYC record",
+      "expect": [{ "type": "in_aadhaar", "present": true }],
+      "note": "INTL PII positive (in_aadhaar): a SYNTHETIC 12-digit Aadhaar (prefix 23456789012, Verhoeff check digit 4) starting with a non-0/1 leading digit. Verhoeff is the precision guard. DIAL-ELIGIBLE (NOT hard-block): Verhoeff over a common 12-digit shape passes ~1/10 of random runs (the jp_mynumber footgun), so an operator can allowlist a benign 12-digit-id FP (it still detects + blocks by default)."
+    },
+    {
+      "text": "reference 234567890125 fails the Aadhaar Verhoeff check",
+      "expect": [{ "type": "in_aadhaar", "present": false }],
+      "note": "HARD NEGATIVE (in_aadhaar validator): a 12-digit run with the wrong Verhoeff check digit (…125 instead of …124) must NOT match — the Verhoeff checksum is the precision guard, so a bare 12-digit id is never an Aadhaar."
+    },
+    {
+      "text": "Germany Steuer-Identifikationsnummer 02476291358 on file",
+      "expect": [{ "type": "de_steuer_id", "present": true }],
+      "note": "INTL PII positive (de_steuer_id): the public BZSt example tax ID 02476291358 (first 10 contain exactly one repeated digit; ISO 7064 MOD 11,10 check digit 8). DIAL-ELIGIBLE (NOT hard-block): a bare 11-digit run with no non-numeric anchor over a common length — per the jp_mynumber discipline the operator keeps the escape hatch even though the combined guard is strong (measured ~0.37% collision)."
+    },
+    {
+      "text": "the number 02476291357 breaks the tax-ID check digit",
+      "expect": [{ "type": "de_steuer_id", "present": false }],
+      "note": "HARD NEGATIVE (de_steuer_id validator): the same first-10 (structural-valid) body with the wrong MOD 11,10 check digit (7 instead of 8) must NOT match — the check digit is the precision guard."
+    },
+    {
+      "text": "Netherlands BSN 111222333 on the formulier",
+      "expect": [{ "type": "nl_bsn", "present": true }],
+      "note": "INTL PII positive (nl_bsn): a known synthetic test BSN (111222333) that satisfies the 11-proef weighted mod-11. DIAL-ELIGIBLE (NOT hard-block): 9 bare digits is VERY common and the 11-proef passes ~1/11 of random 9-digit runs, the clearest jp_mynumber-style footgun — the operator can allowlist a benign 9-digit-id FP (it still detects + blocks by default)."
+    },
+    {
+      "text": "the reference 123456789 fails the BSN 11-proef",
+      "expect": [{ "type": "nl_bsn", "present": false }],
+      "note": "HARD NEGATIVE (nl_bsn validator): a clean 9-digit run that fails the 11-proef weighted mod-11 must NOT match — the 11-proef is the precision guard, so an arbitrary 9-digit id is never a BSN."
     },
     {
       "text": "Stripe key sk_live_EXAMPLE-DO-NOT-USE-EXAMPLE0 committed by mistake",

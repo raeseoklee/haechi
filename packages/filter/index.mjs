@@ -14,14 +14,38 @@ import { isUtf8 } from "node:buffer";
 //   - fr_nir (mod-97 over a long structured 15-digit run) and es_dni (mod-23 plus
 //     a required check LETTER suffix) — a random same-shaped value almost never
 //     passes, and the shapes are rare in ordinary payloads.
-// DELIBERATELY DIAL-ELIGIBLE (NOT hard-block):
-//   - jp_mynumber — a bare 12-digit run guarded by a SINGLE mod-11 check digit
-//     (~1/11 of random 12-digit numbers pass), and 12-digit ids/counters are
-//     common, so a benign false positive is plausible and the operator needs the
-//     allowlist escape hatch. It still detects + (per profile) blocks by default.
+//   - it_codice_fiscale — a 16-char MIXED alpha+digit shape with a mod-26 check
+//     CHARACTER. The non-numeric structural anchor (the rigid letter/digit layout)
+//     makes a benign 16-char `[A-Z]{6}\d{2}[A-Z]…` run in an ordinary payload
+//     implausible (measured collision ~3.8% over an already-rare shape), so a match
+//     is effectively a true positive.
+//   - sg_nric — a LETTER prefix ([STFGM]) + 7 digits + a CHECK LETTER. Two
+//     non-numeric anchors (prefix letter + checksum letter) over a rare shape
+//     (measured collision ~3.9% over the prefix+letter shape) make a benign FP
+//     implausible. Both anchored, un-allowlistable.
+// DELIBERATELY DIAL-ELIGIBLE (NOT hard-block) — bare-digit runs whose only guard is
+// a single numeric checksum over a COMMON digit length, so a benign id/counter FP is
+// plausible and the operator needs the allowlist/minConfidence escape hatch (the
+// jp_mynumber precedent). They still detect + (per profile) block by default:
+//   - jp_mynumber — a bare 12-digit run + a SINGLE mod-11 check digit (measured
+//     ~9% of random 12-digit numbers pass), and 12-digit ids/counters are common.
 //   - uk_nino — NO checksum exists (format + invalid-prefix exclusions only), the
-//     largest FP surface, so it too is allowlist-clearable.
-export const HARD_BLOCK_TYPES = new Set(["secret", "api_key", "kr_rrn", "card", "fr_nir", "es_dni"]);
+//     largest FP surface.
+//   - in_aadhaar — a bare 12-digit run + the Verhoeff checksum (measured ~9.9% of
+//     random 12-digit runs pass, the same order as jp_mynumber's mod-11). Aadhaar
+//     is extremely sensitive, but Verhoeff over the COMMON 12-digit shape is exactly
+//     the jp_mynumber footgun (a 12-digit id/counter is common), so it stays
+//     allowlist-clearable rather than un-suppressable.
+//   - de_steuer_id — a bare 11-digit run + ISO 7064 MOD 11,10 plus a structural
+//     "exactly one repeated digit" test. The combined guard is strong (measured
+//     ~0.37% collision), BUT there is NO non-numeric anchor and 11-digit ids are
+//     common in payloads, so per the jp_mynumber discipline (a bare-digit shape over
+//     a common length) it stays DIAL-ELIGIBLE so an operator can clear an 11-digit-id
+//     FP. It still detects + blocks by default.
+//   - nl_bsn — a bare 9-digit run + the "11-proef" weighted mod-11 (measured ~9.1%
+//     of random 9-digit runs pass). 9 bare digits is VERY common, so this is the
+//     clearest dial-eligible case.
+export const HARD_BLOCK_TYPES = new Set(["secret", "api_key", "kr_rrn", "card", "fr_nir", "es_dni", "it_codice_fiscale", "sg_nric"]);
 
 const DEFAULT_RULES = [
   {
@@ -302,6 +326,77 @@ const DEFAULT_RULES = [
     flags: "gi",
     confidence: 0.85,
     validate: esDniValid
+  },
+  {
+    // Italy Codice Fiscale: 16 chars in the rigid layout
+    // [A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z] (surname, name, year, month-letter,
+    // day, place code, check character). The 16th char is the official check
+    // character: sum the odd/even-position table values over the first 15 chars
+    // and map (sum mod 26) to a letter. The mixed alpha+digit structure + the
+    // mod-26 check character are the precision guard. Hard-block (strong
+    // non-numeric anchor over a rare shape).
+    id: "it-codice-fiscale",
+    type: "it_codice_fiscale",
+    pattern: "(?<![A-Z0-9])[A-Z]{6}\\d{2}[A-Z]\\d{2}[A-Z]\\d{3}[A-Z](?![A-Z0-9])",
+    flags: "gi",
+    confidence: 0.9,
+    validate: itCodiceFiscaleValid
+  },
+  {
+    // Singapore NRIC/FIN: a series LETTER ([STFGM]) + 7 digits + a CHECK LETTER.
+    // The check letter is a weighted sum (weights 2,7,6,5,4,3,2) plus a per-prefix
+    // offset (T/G +4, M +3), mod 11, looked up in the per-series letter table. The
+    // prefix letter + check letter are the precision guard. Hard-block (two
+    // non-numeric anchors over a rare shape).
+    id: "sg-nric",
+    type: "sg_nric",
+    pattern: "(?<![A-Z0-9])[STFGMstfgm]\\d{7}[A-Za-z](?![A-Z0-9])",
+    flags: "g",
+    confidence: 0.9,
+    validate: sgNricValid
+  },
+  {
+    // India Aadhaar: 12 digits (never starting 0 or 1) with the Verhoeff checksum
+    // over all 12. A bare 12-digit run is ambiguous (an id/timestamp), so the
+    // Verhoeff check is the precision guard. NOT hard-block: Verhoeff over the
+    // COMMON 12-digit shape passes ~1/10 of random runs (the jp_mynumber footgun),
+    // so it stays dial-eligible (still detects + blocks by default). The leading/
+    // trailing boundaries stop the rule from matching a 12-digit window inside a
+    // longer digit/dashed run.
+    id: "in-aadhaar",
+    type: "in_aadhaar",
+    pattern: "(?<![\\d-])[2-9]\\d{11}(?![\\d-])",
+    flags: "g",
+    confidence: 0.85,
+    validate: inAadhaarValid
+  },
+  {
+    // Germany tax ID (Steuer-Identifikationsnummer): 11 digits with the ISO 7064
+    // MOD 11,10 check digit over the first 10, plus the structural rule that the
+    // first 10 digits contain exactly one repeated digit (one value appears 2 or 3
+    // times, the rest once). The combined guard is strong, but it is a BARE-DIGIT
+    // run with no non-numeric anchor over a common 11-digit length, so per the
+    // jp_mynumber discipline it stays dial-eligible (the operator can clear an
+    // 11-digit-id FP).
+    id: "de-steuer-id",
+    type: "de_steuer_id",
+    pattern: "(?<![\\d-])\\d{11}(?![\\d-])",
+    flags: "g",
+    confidence: 0.85,
+    validate: deSteuerIdValid
+  },
+  {
+    // Netherlands BSN (Burgerservicenummer): 9 digits validated by the "11-proef"
+    // weighted mod-11 (Σ digit_i · weight_i ≡ 0 mod 11, with the last weight -1).
+    // 9 bare digits is VERY common, so the 11-proef passes ~1/11 of random runs —
+    // the clearest dial-eligible case (still detects + blocks by default; the
+    // operator keeps the allowlist escape hatch).
+    id: "nl-bsn",
+    type: "nl_bsn",
+    pattern: "(?<![\\d-])\\d{9}(?![\\d-])",
+    flags: "g",
+    confidence: 0.8,
+    validate: nlBsnValid
   },
   {
     // UK National Insurance Number: two prefix letters + 6 digits + a suffix
@@ -960,6 +1055,180 @@ function esDniValid(value) {
     return false;
   }
   return ES_DNI_TABLE[Number(body) % 23] === letter;
+}
+
+// Italy Codice Fiscale check character. Over the first 15 chars: odd positions
+// (1st, 3rd, … counting from 1) use the ODD table, even positions use the EVEN
+// table; sum the mapped values and the (sum mod 26)-th letter (A=0) must equal the
+// 16th char. The mixed alpha+digit structure + the mod-26 check character are the
+// precision guard — a structurally valid but wrong check char is rejected (corpus
+// hard-negative). Hard-block.
+const IT_CF_ODD = {
+  "0": 1, "1": 0, "2": 5, "3": 7, "4": 9, "5": 13, "6": 15, "7": 17, "8": 19, "9": 21,
+  A: 1, B: 0, C: 5, D: 7, E: 9, F: 13, G: 15, H: 17, I: 19, J: 21, K: 2, L: 4, M: 18, N: 20,
+  O: 11, P: 3, Q: 6, R: 8, S: 12, T: 14, U: 16, V: 10, W: 22, X: 25, Y: 24, Z: 23
+};
+const IT_CF_EVEN = {
+  "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+  A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6, H: 7, I: 8, J: 9, K: 10, L: 11, M: 12, N: 13,
+  O: 14, P: 15, Q: 16, R: 17, S: 18, T: 19, U: 20, V: 21, W: 22, X: 23, Y: 24, Z: 25
+};
+const IT_CF_REMAINDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+function itCodiceFiscaleValid(value) {
+  const cf = value.replace(/\s/g, "").toUpperCase();
+  if (!/^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$/.test(cf)) {
+    return false;
+  }
+  let sum = 0;
+  for (let index = 0; index < 15; index += 1) {
+    const char = cf[index];
+    // Position 1 (index 0) is ODD; alternate from there.
+    sum += index % 2 === 0 ? IT_CF_ODD[char] : IT_CF_EVEN[char];
+  }
+  return IT_CF_REMAINDER[sum % 26] === cf[15];
+}
+
+// Singapore NRIC/FIN check letter. Weighted sum (weights 2,7,6,5,4,3,2) over the
+// 7 digits, plus a per-prefix offset (T/G +4, M +3), mod 11, mapped through the
+// per-series letter table. S/T (citizen/PR), F/G (foreigner FIN), and M (post-2022
+// FIN) each have their own table. The prefix letter + check letter are the
+// precision guard — a wrong letter is rejected (corpus hard-negative). Hard-block.
+const SG_NRIC_WEIGHTS = [2, 7, 6, 5, 4, 3, 2];
+const SG_NRIC_TABLE_ST = ["J", "Z", "I", "H", "G", "F", "E", "D", "C", "B", "A"];
+const SG_NRIC_TABLE_FG = ["X", "W", "U", "T", "R", "Q", "P", "N", "M", "L", "K"];
+const SG_NRIC_TABLE_M = ["K", "L", "J", "N", "P", "Q", "R", "T", "U", "W", "X"];
+function sgNricValid(value) {
+  const v = value.replace(/\s/g, "").toUpperCase();
+  if (!/^[STFGM]\d{7}[A-Z]$/.test(v)) {
+    return false;
+  }
+  const prefix = v[0];
+  let sum = 0;
+  for (let index = 0; index < 7; index += 1) {
+    sum += Number(v[index + 1]) * SG_NRIC_WEIGHTS[index];
+  }
+  if (prefix === "T" || prefix === "G") {
+    sum += 4;
+  } else if (prefix === "M") {
+    sum += 3;
+  }
+  const remainder = sum % 11;
+  let table;
+  if (prefix === "S" || prefix === "T") {
+    table = SG_NRIC_TABLE_ST;
+  } else if (prefix === "F" || prefix === "G") {
+    table = SG_NRIC_TABLE_FG;
+  } else {
+    table = SG_NRIC_TABLE_M;
+  }
+  return table[remainder] === v[8];
+}
+
+// India Aadhaar Verhoeff checksum. The Verhoeff scheme runs the dihedral-group
+// multiplication (VERHOEFF_D) over each digit permuted by position (VERHOEFF_P)
+// from the right; the running value must be 0 for a valid full number. Aadhaar is
+// 12 digits and never starts 0 or 1. The Verhoeff check is the precision guard — a
+// wrong check digit is rejected (corpus hard-negative). Dial-eligible: Verhoeff
+// over a common 12-digit shape passes ~1/10 of random runs (the jp_mynumber
+// footgun), so it stays allowlist-clearable.
+const VERHOEFF_D = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+  [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+  [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+  [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+  [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+  [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+  [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+  [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+  [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+];
+const VERHOEFF_P = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+  [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+  [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+  [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+  [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+  [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+  [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]
+];
+function verhoeffValid(digits) {
+  let check = 0;
+  const reversed = digits.split("").reverse();
+  for (let index = 0; index < reversed.length; index += 1) {
+    check = VERHOEFF_D[check][VERHOEFF_P[index % 8][Number(reversed[index])]];
+  }
+  return check === 0;
+}
+function inAadhaarValid(value) {
+  const digits = value.replace(/[\s-]/g, "");
+  if (!/^[2-9]\d{11}$/.test(digits)) {
+    return false;
+  }
+  return verhoeffValid(digits);
+}
+
+// Germany tax ID (Steuer-Identifikationsnummer). Two guards: (1) the structural
+// rule that the first 10 digits contain exactly one repeated digit (one value
+// appears 2 or 3 times, the rest once), and (2) the ISO 7064 MOD 11,10 check digit
+// over the first 10 must equal the 11th. Dial-eligible: a bare 11-digit run with no
+// non-numeric anchor over a common length (the jp_mynumber discipline), even though
+// the combined guard is strong.
+function deSteuerIdStructural(first10) {
+  const counts = new Map();
+  for (const char of first10) {
+    counts.set(char, (counts.get(char) ?? 0) + 1);
+  }
+  const repeats = [...counts.values()].filter((count) => count >= 2);
+  // Exactly one digit repeats, and it repeats 2 or 3 times (never more).
+  return repeats.length === 1 && repeats[0] <= 3;
+}
+function deSteuerIdCheckDigit(first10) {
+  let product = 10;
+  for (let index = 0; index < 10; index += 1) {
+    let sum = (Number(first10[index]) + product) % 10;
+    if (sum === 0) {
+      sum = 10;
+    }
+    product = (sum * 2) % 11;
+  }
+  let check = 11 - product;
+  if (check === 10) {
+    check = 0;
+  }
+  return check;
+}
+function deSteuerIdValid(value) {
+  const digits = value.replace(/[\s/]/g, "");
+  if (!/^\d{11}$/.test(digits)) {
+    return false;
+  }
+  const first10 = digits.slice(0, 10);
+  if (!deSteuerIdStructural(first10)) {
+    return false;
+  }
+  return deSteuerIdCheckDigit(first10) === Number(digits[10]);
+}
+
+// Netherlands BSN "11-proef": Σ (digit_i · weight_i) ≡ 0 mod 11 over the 9 digits,
+// where the weights run 9,8,…,2 for the first eight and -1 for the last. The
+// all-zero number is rejected. Dial-eligible: 9 bare digits is very common, so the
+// 11-proef passes ~1/11 of random runs (the clearest jp_mynumber-style footgun).
+function nlBsnValid(value) {
+  const digits = value.replace(/[\s.]/g, "");
+  if (!/^\d{9}$/.test(digits)) {
+    return false;
+  }
+  if (/^0{9}$/.test(digits)) {
+    return false;
+  }
+  let sum = 0;
+  for (let index = 0; index < 8; index += 1) {
+    sum += Number(digits[index]) * (9 - index);
+  }
+  sum += Number(digits[8]) * -1;
+  return sum % 11 === 0;
 }
 
 // UK National Insurance Number — FORMAT-ONLY (no checksum exists), which is why
