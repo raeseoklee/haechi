@@ -76,6 +76,7 @@
     "checksums": "node scripts/release-checksums.mjs",
     "bench:payload": "node scripts/bench-payload.mjs",
     "bench:detection": "node scripts/bench-detection.mjs",
+    "bench:throughput": "node scripts/bench-throughput.mjs",
     "scan:detection": "node scripts/bench-detection.mjs --gate",
     "check:peer-ranges": "node scripts/check-satellite-peer-ranges.mjs",
     "release:preflight": "node scripts/release-preflight.mjs && node scripts/check-satellite-peer-ranges.mjs",

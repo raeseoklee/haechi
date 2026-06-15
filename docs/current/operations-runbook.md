@@ -189,7 +189,43 @@ rotation does not purge tokens.
 re-verification unless you keep the verification step in your archival pipeline. A
 rotated segment is only useful as evidence if it still verifies.
 
-## 7. Quick reference
+## 7. Benchmarking proxy throughput
+
+`npm run bench:throughput` (`scripts/bench-throughput.mjs`) measures the proxy's
+added per-request overhead under concurrency. It stands up a deterministic local
+**stub** OpenAI-compatible upstream (an instant canned reply — no real model) and
+the **real** Haechi proxy in front of it, drives a configurable load with a
+fixed-size worker pool of in-flight `fetch`es, and reports **req/s** plus
+**p50/p95/p99/max** latency (percentiles by nearest-rank over a sorted sample). It
+runs three scenarios:
+
+1. **throughput + latency** at a fixed concurrency (a warmup batch is excluded
+   from the reported stats — JIT/connection warmup skews the first requests),
+2. **enforce vs dry-run overhead** — the same load run in both modes, reporting
+   the latency/throughput **delta** so the cost of protection is a measured number,
+3. **backpressure** — a low `limits.maxInFlight` saturated by a burst, reporting
+   how many requests got `503 + Retry-After` vs `200` (observed live, proving the
+   ceiling sheds load).
+
+```bash
+npm run bench:throughput
+HAECHI_BENCH_REQUESTS=5000 HAECHI_BENCH_CONCURRENCY=64 npm run bench:throughput
+```
+
+Knobs (env, printed at the top of every run): `HAECHI_BENCH_REQUESTS` (total,
+default 2000), `HAECHI_BENCH_CONCURRENCY` (default 32), `HAECHI_BENCH_WARMUP`
+(excluded warmup count, default 100), `HAECHI_BENCH_PAYLOAD_KB` (default 1),
+`HAECHI_BENCH_MAXINFLIGHT` (the backpressure scenario's ceiling, default 4).
+
+> **The numbers are machine-relative.** This is a **loopback, single-process,
+> stub-upstream micro-benchmark**: the stub, the proxy, and the load generator all
+> run in one Node process on `127.0.0.1`, so there is no real network and no real
+> model. The numbers measure Haechi's added overhead only, and vary by machine,
+> Node version, and load. They are **not** a network/hardware throughput benchmark
+> and must **not** be quoted as guarantees. The bench is not run by
+> `release:preflight`.
+
+## 8. Quick reference
 
 | Task | Command |
 |---|---|
@@ -197,6 +233,7 @@ rotated segment is only useful as evidence if it still verifies.
 | Liveness | `curl localhost:11016/__haechi/live` |
 | Readiness | `curl localhost:11016/__haechi/ready` |
 | Metrics | `curl localhost:11016/__haechi/metrics` |
+| Throughput bench | `npm run bench:throughput` |
 | Verify a segment | `haechi audit-verify --audit <seg>.jsonl --anchor <seg>.anchor.jsonl` |
 | Graceful stop | `docker compose stop` (SIGTERM → drain) |
 
