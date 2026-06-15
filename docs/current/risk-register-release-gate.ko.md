@@ -1,8 +1,8 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Living document(core 1.2.x 추적)
+- 문서 상태: Living document(core 1.3.x 추적)
 - 작성일: 2026-06-11
-- 기준 버전: 1.2.x
+- 기준 버전: 1.3.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -28,6 +28,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G5 | 1.0.0 stable API contract + signed-plugin sandbox | P1-SEC-024 / P1-SEC-025 mitigated, P2-API-001 / P2-OPS-006 resolved; API freeze + deprecation policy + `tests/api-contract.test.mjs` 통과; Ed25519 signed-plugin contract + `assertAuthProviderConformance` + worker-isolated `authProvider` sandbox 테스트 통과; PR0 위성 peer-range를 `>=0.8.0 <2.0.0`로 확대 및 `check-satellite-peer-ranges.mjs` preflight 게이트 통과; core는 zero runtime dependency 유지; core 1.0.0 bump | Pass |
 | G6 | 1.1.0 plugin capability 강제 (`process-isolated`) | P1-SEC-027 / P1-SEC-028 mitigated; `process-isolated` 런타임(`--permission` 하 자식, 부여 0, `data:` URL 로드, stdio 무시, JSON-string IPC) + fail-closed `--allow-net` 기능 탐지(`netEnforcement:"require-permission"`) + 코어 `haechi/ssrf` 가드 + 호스트 중개 키 자료 + spawn-storm 서킷 브레이커; fs/net/stdio 레드팀 + SSRF + config 테스트 통과(행동 스위트는 `--allow-net` Node에서 실행, 아니면 fail-closed로 skip); API freeze 통과 유지(additive `./ssrf` export + additive config 키); core는 zero runtime dependency 유지; core 1.1.0 bump(additive + opt-in 마이너) | Pass |
 | G7 | 1.2.0 신뢰성 강화 트랙 (WS1–WS6) | 탐지 품질 측정+강화(WS2: 라벨 코퍼스 precision/recall `bench:detection` 게이트, 자격증명+국제 PII 커버리지, 하드블록 타입 불변식이 적용된 `filters.minConfidence` / `filters.allowlist`, offset 무결성을 갖춘 NFKC 유니코드 회피 폴딩); WS3 주입 가능한 `rateLimiter` 시임 + bounded fixed-window map; WS4 운영성(`/__haechi/live`+`/ready` 분리, 주입 가능한 `/metrics`, 구조적 로그 + 요청별 `correlationId`, graceful drain, max-in-flight backpressure, env overlay, 하드닝 Dockerfile/compose/runbook, `configVersion`); WS6 proxy TLS / remote-bind 하드닝(`proxy.tls` / `proxy.trustForwardedProto`, fail-closed `assertSafeProxyTransport`) + OWASP-LLM/NIST 컨트롤 매핑 백서 + RFC 9116 `security.txt` + 취약점 공개 경로. 모든 변경은 1.1 동작을 보존하는 기본값 뒤의 additive(`tests/api-contract.test.mjs` 통과); no-plaintext-in-audit 불변식이 텔레메트리까지 확장; core는 zero runtime dependency 유지; core 1.2.0 bump(additive 마이너) | Pass |
+| G8 | 1.3.0 백엔드 + 탐지 커버리지 확장 | **Anthropic Messages API**(`/v1/messages`, content-block + SSE `delta.text`, `event:` 라인 보존 재직렬화)와 **Google Gemini API**(model-in-path `:generateContent`/`:streamGenerateContent`, 기존 정확-매칭 어댑터를 바이트 동일하게 두는 additive `:method`-suffix 라우트 매처) 프로토콜 어댑터 추가; 탐지 커버리지 확장 — 클라우드/SaaS provider 키(OpenAI/Anthropic/Google-OAuth/SendGrid/Twilio/npm/Azure, anchored)와 국제 PII(FR/ES/JP + IT/SG/IN/DE/NL 국가 ID, 체크섬 validator), 각 하드블록-대-dial-eligible 결정은 측정된 충돌률 기반(하드블록은 비숫자 앵커 또는 비현실적으로 드문 형태가 필요; 흔한 길이의 bare-digit run은 allowlist로 정리 가능 유지); `bench:throughput` proxy 부하 벤치; `haechi-ratelimit-redis` 공유 저장소 rate-limiter 위성(WS3 시임의 운영 소비자; proxy가 이제 `rateLimiter.allow`를 `await`); `haechi-dashboard`가 요청별 `correlationId` 노출. 모든 변경은 additive — 새 `target.type`/탐지타입/`privacy.profile` *값*이며 새 config 키가 아님(`configVersion`은 `1` 유지); `tests/api-contract.test.mjs` 통과; core는 zero runtime dependency 유지; core 1.3.0 bump(additive 마이너) | Pass |
 
 ## 3. P0 배포 차단 리스크 상태
 

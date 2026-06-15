@@ -1,6 +1,6 @@
 # Haechi 설정 레퍼런스
 
-- 문서 상태: Living document(core 1.2.x 추적)
+- 문서 상태: Living document(core 1.3.x 추적)
 
 `haechi init`은 `haechi.config.json`을 생성하며, 비밀 정보를 포함하지 않는 템플릿은 `haechi.config.example.json`에 있습니다. 모든 커맨드는 `--config <path>`로 설정 파일을 읽습니다(기본값: `haechi.config.json`). 설정은 **fail-closed 방식으로 검증**됩니다. 알 수 없는 provider, 범위를 벗어난 숫자, 잘못된 형식의 값은 자동으로 무시되지 않고 로드 시점에 오류를 발생시킵니다. `haechi config`는 이 레퍼런스를 출력하며, `haechi status`는 특정 설정 파일의 *실제 적용* 상태를 출력합니다.
 

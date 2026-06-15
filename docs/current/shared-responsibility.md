@@ -1,6 +1,6 @@
 # Haechi Shared Responsibility
 
-- Status: Living document (tracks core 1.2.x)
+- Status: Living document (tracks core 1.3.x)
 - Date: 2026-06-10
 
 ## 1. Responsibility Matrix

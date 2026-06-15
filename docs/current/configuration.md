@@ -1,6 +1,6 @@
 # Haechi Configuration Reference
 
-- Status: Living document (tracks core 1.2.x)
+- Status: Living document (tracks core 1.3.x)
 
 `haechi init` writes `haechi.config.json`; a non-secret template is at `haechi.config.example.json`. Every command reads it with `--config <path>` (default `haechi.config.json`). Configuration is **validated fail-closed**: unknown providers, out-of-range numbers, and malformed values throw at load time rather than degrading silently. `haechi config` prints this reference; `haechi status` prints the *effective* state of a given config.
 
