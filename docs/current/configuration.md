@@ -103,8 +103,8 @@ The detect→decide core. See [Detection types & actions](#detection-types--acti
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
 | `filters.customRules` | array of rule objects | `[]` | Extra detection rules: `{ id, type, pattern, flags?, confidence? }`. Patterns are ReDoS-screened (≤500 chars, no nested quantifiers, no backreferences) and rejected at load if unsafe. |
-| `filters.minConfidence` | number in `[0, 1]` | `0` | Precision dial. Each rule carries a `confidence` (0.6–0.95); a detection whose confidence is **below** this threshold is dropped before the policy decides. `0` (the default) gates nothing, preserving prior behavior. **Hard-block exemption:** a hard-block type (`secret`, `api_key`, `kr_rrn`, `card`) is **never** dropped on confidence — `minConfidence` trims only the precision-risky soft types (e.g. `phone`, `email`, `injection`), so a low-confidence credential/PII leak is still acted on (fail-closed). |
-| `filters.allowlist` | array of strings and/or `{ value?, path? }` | `[]` | Operator false-positive exceptions. A detection whose matched **value** equals a string/`value` entry, or whose PII-safe JSON **path** (the hashed `pathText`, as shown in the audit) equals a `path` entry, is suppressed before the policy decides (when an entry sets both `value` and `path`, **both** must match). **Hard-block exemption:** an entry that would suppress a hard-block type (`secret`/`api_key`/`kr_rrn`/`card`) is **ignored** and the detection still fires — the allowlist can only clear a benign **soft-type** FP, never silence a credential/PII leak. Every suppression and every `minConfidence` drop is **audited** by count and type (`summary.suppressedByType` / `summary.droppedByType` / `suppressedCount` / `droppedCount`) — never the raw value. Use this to clear one benign FP without deleting a whole rule. |
+| `filters.minConfidence` | number in `[0, 1]` | `0` | Precision dial. Each rule carries a `confidence` (0.6–0.95); a detection whose confidence is **below** this threshold is dropped before the policy decides. `0` (the default) gates nothing, preserving prior behavior. **Hard-block exemption:** a hard-block type (`secret`, `api_key`, `kr_rrn`, `card`, and the strong-anchored national IDs `fr_nir`, `es_dni`) is **never** dropped on confidence — `minConfidence` trims only the precision-risky soft/dial-eligible types (e.g. `phone`, `email`, `jp_mynumber`, `uk_nino`, `injection`), so a low-confidence credential/PII leak is still acted on (fail-closed). |
+| `filters.allowlist` | array of strings and/or `{ value?, path? }` | `[]` | Operator false-positive exceptions. A detection whose matched **value** equals a string/`value` entry, or whose PII-safe JSON **path** (the hashed `pathText`, as shown in the audit) equals a `path` entry, is suppressed before the policy decides (when an entry sets both `value` and `path`, **both** must match). **Hard-block exemption:** an entry that would suppress a hard-block type (`secret`/`api_key`/`kr_rrn`/`card`/`fr_nir`/`es_dni`) is **ignored** and the detection still fires — the allowlist can only clear a benign **soft / dial-eligible** FP (e.g. a `jp_mynumber` 12-digit-id FP or a format-only `uk_nino`), never silence a credential/strong-anchored-PII leak. Every suppression and every `minConfidence` drop is **audited** by count and type (`summary.suppressedByType` / `summary.droppedByType` / `suppressedCount` / `droppedCount`) — never the raw value. Use this to clear one benign FP without deleting a whole rule. |
 | `filters.decodeAndRescan` | boolean | `false` | Opt-in base64/percent **decode-and-rescan** (the WS2d residual). With the default `false`, detection is byte-identical to before — a base64- or percent-encoded value is **not** decoded. When `true`, after the normal NFKC scan a string leaf that **looks** base64/base64url (anchored alphabet, valid length, `16…8192` bytes, round-trips to the same leaf, decodes to **valid UTF-8**) or contains a `%XX` escape (`decodeURIComponent`) is decoded and rescanned with the same rules + validators. A decoded hit has no offset in the encoded leaf, so it fails closed to a **whole-leaf** detection (`start:0,end:leaf.length`, value = the whole encoded leaf) — the transform redacts/blocks the entire leaf. **Precision guard:** a decoded hit fires **only** when it is validator-backed or a hard-block type (a Luhn-passing `card`, a checksum `kr_rrn`/`us_ssn`, an IBAN mod-97, or a `secret`/`api_key` on its anchored rule); a decoded soft-type-without-validator match (a bare phone-shaped run) does not fire, so random base64 does not false-positive. No new runtime dependency (`node:buffer` Buffer + the `decodeURIComponent` builtin). Other encodings (gzip/hex/nested/custom-alphabet) stay out of scope. |
 
 ### Detection benchmark
@@ -148,7 +148,7 @@ npm run scan:detection    # CI regression gate: fail if any type regresses below
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
-| `privacy.profile` | `null` \| `kr-pipa` \| `eu-gdpr` \| `us-general` | `null` | Applies a regional baseline action set before enforcement. Profiles may **strengthen** but never weaken your explicit actions. Engineering defaults, not legal advice. |
+| `privacy.profile` | `null` \| `kr-pipa` \| `eu-gdpr` \| `us-general` \| `jp-appi` | `null` | Applies a regional baseline action set before enforcement. Profiles may **strengthen** but never weaken your explicit actions. `eu-gdpr` blocks the EU national IDs (`fr_nir`/`es_dni`/`uk_nino`); `jp-appi` blocks `jp_mynumber`; every profile blocks `jp_mynumber` (a checksummed national-ID leak). Engineering defaults, not legal advice. |
 
 ## `logging`
 
@@ -280,7 +280,7 @@ The **default** is a per-process, in-memory fixed-window counter: it resets on r
 
 ## Detection types & actions
 
-Built-in detection `type` values: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, `us_ssn`, `iban`, and `injection` (response-direction heuristic, report-only by default). Custom rules may introduce new types.
+Built-in detection `type` values: `email`, `phone`, `kr_rrn`, `card`, `api_key`, `secret`, `us_ssn`, `iban`, `jp_mynumber`, `fr_nir`, `es_dni`, `uk_nino`, and `injection` (response-direction heuristic, report-only by default). Custom rules may introduce new types.
 
 ### Supported credential & PII matrix
 
@@ -296,6 +296,10 @@ Detection is regex + optional validator (no ML). Every rule is **anchored tightl
 | `card` | Payment card (PAN) | Luhn validator, 13–19 digits | — |
 | `us_ssn` | US Social Security Number | `AAA-GG-SSSS` + SSA-range validator (rejects area `000`/`666`/`900-999`, group `00`, serial `0000`) | Separators required; a bare 9-digit id is not an SSN. |
 | `iban` | International Bank Account Number | **mod-97 checksum** validator | The checksum is the precision guard — IBAN-shaped non-97-valid strings are rejected. |
+| `jp_mynumber` | Japan My Number (個人番号) | 12 digits + **mod-11 weighted check digit** | The check digit is the precision guard; a wrong-check 12-digit run is rejected. **Hard-block.** |
+| `fr_nir` | France NIR / INSEE social-security | 15 chars + **`97 - (first13 mod 97)` control key** (Corsica `2A`→19, `2B`→18) | A wrong control key is rejected. **Hard-block.** |
+| `es_dni` | Spain DNI / NIE | 8 digits (DNI) or `X/Y/Z`+7 digits (NIE) + **mod-23 check letter** (NIE `X/Y/Z`→`0/1/2`) | A wrong check letter is rejected. **Hard-block.** |
+| `uk_nino` | UK National Insurance Number | `[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\d{6}[A-D]` + documented invalid-prefix exclusions (`BG`/`GB`/`NK`/`KN`/`TN`/`NT`/`ZZ`, `O`-as-2nd-letter) | **Format-only — no checksum exists**, so it is NOT a hard-block type (dial-eligible: an operator can allowlist a benign FP). |
 | `api_key` | OpenAI-style (`sk_`/`rk_`/`pk_`) | prefix + ≥24 chars | — |
 | `api_key` | AWS access key id | `AKIA`/`ASIA` + exactly 16 uppercase-alnum | — |
 | `api_key` | Google API key | `AIza` + 35 URL-safe chars | — |

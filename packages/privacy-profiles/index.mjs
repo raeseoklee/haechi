@@ -12,7 +12,11 @@ const PROFILES = {
         email: "redact",
         card: "block",
         api_key: "block",
-        secret: "block"
+        secret: "block",
+        // A Japan My Number leak is as sensitive as a national ID and is a
+        // checksummed true-positive — block it in every profile so a non-JP
+        // deployment that happens to process JP data is still covered.
+        jp_mynumber: "block"
       }
     },
     transfer: {
@@ -31,7 +35,13 @@ const PROFILES = {
         card: "block",
         api_key: "block",
         secret: "block",
-        kr_rrn: "block"
+        kr_rrn: "block",
+        // EU national IDs — France NIR, Spain DNI/NIE, UK National Insurance
+        // Number — are GDPR special-category-adjacent identifiers; block them.
+        fr_nir: "block",
+        es_dni: "block",
+        uk_nino: "block",
+        jp_mynumber: "block"
       }
     },
     transfer: {
@@ -49,12 +59,36 @@ const PROFILES = {
         phone: "mask",
         card: "block",
         api_key: "block",
-        secret: "block"
+        secret: "block",
+        jp_mynumber: "block"
       }
     },
     transfer: {
       requiresAssessment: false,
       note: "Classify sector rules separately before using protected health, payment, or children's data."
+    }
+  },
+  "jp-appi": {
+    id: "jp-appi",
+    region: "JP",
+    regulations: ["APPI"],
+    policy: {
+      actions: {
+        // My Number (個人番号) is a special-care personal-information identifier
+        // under the My Number Act; block it. The EU/KR IDs are also blocked so a
+        // mixed-region payload is covered, matching the cross-profile convention.
+        jp_mynumber: "block",
+        phone: "mask",
+        email: "redact",
+        card: "block",
+        api_key: "block",
+        secret: "block",
+        kr_rrn: "block"
+      }
+    },
+    transfer: {
+      requiresAssessment: true,
+      note: "Document the My Number Act handling basis, purpose limitation, and cross-border transfer notice before production use."
     }
   }
 };

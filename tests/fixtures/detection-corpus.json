@@ -286,6 +286,46 @@
       "text": "WS2d control: ascii email plain.user@example.org and card 4111 1111 1111 1111 unchanged",
       "expect": [{ "type": "email", "present": true }, { "type": "card", "present": true }],
       "note": "WS2d CONTROL / no-regression (Case 1, NFKC-stable): a pure-ASCII string where normalize() is a no-op, so detection runs byte-identical to pre-WS2d. Proves the ~99% common path is unchanged. SYNTHETIC (4111 public test card)."
+    },
+    {
+      "text": "Japan My Number 123456789018 on the residence form",
+      "expect": [{ "type": "jp_mynumber", "present": true }],
+      "note": "INTL PII positive (jp_mynumber): a SYNTHETIC 12-digit My Number whose 12th digit is the official mod-11 weighted check digit over the first 11 (computed for the prefix 12345678901 -> 8, the canonical worked example). Hard-block (checksummed)."
+    },
+    {
+      "text": "the placeholder 123456789010 fails the My Number check digit",
+      "expect": [{ "type": "jp_mynumber", "present": false }],
+      "note": "HARD NEGATIVE (jp_mynumber validator): a 12-digit run with the WRONG check digit (…010 instead of …018) must NOT match — the mod-11 weighted check digit is the precision guard, so a bare 12-digit id is never a My Number."
+    },
+    {
+      "text": "France NIR 185057800604830 on the carte vitale",
+      "expect": [{ "type": "fr_nir", "present": true }],
+      "note": "INTL PII positive (fr_nir): a SYNTHETIC 15-digit French social-security number whose last 2 digits are the control key 97-(first13 mod 97)=30. Hard-block (checksummed)."
+    },
+    {
+      "text": "reference 185057800604831 looks NIR-shaped but breaks the control key",
+      "expect": [{ "type": "fr_nir", "present": false }],
+      "note": "HARD NEGATIVE (fr_nir validator): a 15-digit NIR-shaped run whose control key is off by one (…31 instead of …30) must NOT match — the 97-(first13 mod 97)==last2 control key is the precision guard."
+    },
+    {
+      "text": "Spain DNI 12345678Z issued in Madrid",
+      "expect": [{ "type": "es_dni", "present": true }],
+      "note": "INTL PII positive (es_dni): a SYNTHETIC Spanish DNI whose check letter Z is table[12345678 mod 23] from the mod-23 table TRWAGMYFPDXBNJZSQVHLCKE. Hard-block (checksummed)."
+    },
+    {
+      "text": "the document 12345678A carries the wrong DNI check letter",
+      "expect": [{ "type": "es_dni", "present": false }],
+      "note": "HARD NEGATIVE (es_dni validator): an 8-digit + letter token whose check letter is wrong (A instead of Z) must NOT match — the mod-23 check letter is the precision guard."
+    },
+    {
+      "text": "UK National Insurance Number AB123456C on the P60",
+      "expect": [{ "type": "uk_nino", "present": true }],
+      "note": "INTL PII positive (uk_nino): a SYNTHETIC NINO with a valid prefix AB, 6 digits, and an A-D suffix. FORMAT-ONLY (no checksum exists) — uk_nino is NOT a hard-block type, so an operator can allowlist a benign NINO-shaped FP."
+    },
+    {
+      "text": "the code BG123456C uses a NINO prefix that is never issued",
+      "expect": [{ "type": "uk_nino", "present": false }],
+      "note": "HARD NEGATIVE (uk_nino invalid-prefix): the BG prefix is on the documented never-issued list (with GB/NK/KN/TN/NT/ZZ and O-as-2nd-letter), so a NINO-shaped value with an excluded prefix must NOT match — the format-only rule still rejects the documented invalid prefixes."
     }
   ]
 }

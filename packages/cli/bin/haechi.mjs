@@ -777,7 +777,7 @@ Audit integrity
   audit.anchor.everyRecords anchor cadence                      (default 1)
 
 Privacy + MCP
-  privacy.profile           kr-pipa | eu-gdpr | us-general | null
+  privacy.profile           kr-pipa | eu-gdpr | us-general | jp-appi | null
   mcp.allowedMethods        client-callable method allowlist
 
 Binding beyond loopback (0.0.0.0):

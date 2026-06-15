@@ -68,7 +68,7 @@ Everything funnels through `createHaechi(...).protectJson(payload, context)` in 
 
 - `core` — `protectJson` orchestrator + payload tree walk/transform.
 - `cli` — `bin/haechi.mjs` (command dispatch) and `runtime.mjs` (composition root, config schema).
-- `filter` — default detection rules (email, KR phone, KR RRN, card/Luhn, API keys, bearer tokens) + custom rule support.
+- `filter` — default detection rules (email, KR phone, KR RRN, card/Luhn, US SSN, IBAN, JP My Number, FR NIR, ES DNI/NIE, UK NINO, API keys, bearer tokens) + custom rule support. `HARD_BLOCK_TYPES` (the precision dials `filters.minConfidence`/`filters.allowlist` can never suppress these) = `secret`, `api_key`, `kr_rrn`, `card`, plus the **strong-anchored national IDs** `fr_nir` (97-control key over a 15-digit structured run, Corsica 2A/2B→19/18) and `es_dni` (mod-23 check letter + required letter suffix, NIE X/Y/Z→0/1/2) — strong anchors and rare shapes, so a match is effectively a true positive. `jp_mynumber` (mod-11 check digit) and `uk_nino` are deliberately **NOT** hard-block / dial-eligible: a lone mod-11 check passes ~1/11 of common 12-digit runs and a NINO has no checksum at all, so both carry enough FP surface that an operator needs the allowlist escape hatch (they still detect + block by default).
 - `policy` — `PRESETS`, action validation, and `ACTION_STRENGTH` ordering (the strongest action wins when multiple apply).
 - `crypto` — local AES-256-GCM provider over a software key file. No production key provider exists.
 - `audit` — JSONL sink with **sha256 hash chaining** for tamper evidence. `FORBIDDEN_KEYS` enforces that raw plaintext/prompt/secret values never get written. `audit.anchor` writes the chain head to a separate append-only stream so `verifyAuditChain(path,{anchorPath})` detects tail truncation (real defense needs separate/append-only media).
@@ -80,7 +80,7 @@ Everything funnels through `createHaechi(...).protectJson(payload, context)` in 
 - `mcp-stdio` — JSON-RPC 2.0 line filter for MCP stdio traffic (method allowlist + param/result protection).
 - `policy-bundle` — sign/verify signed policy bundles.
 - `plugin` — plugin manifest validation.
-- `privacy-profiles` — regional default-action profiles (`kr-pipa`, `eu-gdpr`, `us-general`) applied before enforcement.
+- `privacy-profiles` — regional default-action profiles (`kr-pipa`, `eu-gdpr`, `us-general`, `jp-appi`) applied before enforcement (strengthen-only). `eu-gdpr` blocks the EU national IDs (`fr_nir`/`es_dni`/`uk_nino`); `jp-appi` is the JP home for `jp_mynumber`, which every profile blocks.
 
 ### CLI surface
 

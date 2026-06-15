@@ -6,7 +6,22 @@ import { isUtf8 } from "node:buffer";
 // trims only the precision-risky SOFT types; the allowlist's per-value/per-path
 // exceptions are ignored for these types (the detection still fires). Exported
 // so the core detect→decide path enforces the same exemption set the docs pin.
-export const HARD_BLOCK_TYPES = new Set(["secret", "api_key", "kr_rrn", "card"]);
+//
+// Hard-block types are sensitive AND have a STRONG enough anchor that a match is
+// effectively a true positive by construction, so the precision dials
+// (filters.minConfidence / filters.allowlist) can never suppress them:
+//   - kr_rrn / card        — checksum + constrained format
+//   - fr_nir (mod-97 over a long structured 15-digit run) and es_dni (mod-23 plus
+//     a required check LETTER suffix) — a random same-shaped value almost never
+//     passes, and the shapes are rare in ordinary payloads.
+// DELIBERATELY DIAL-ELIGIBLE (NOT hard-block):
+//   - jp_mynumber — a bare 12-digit run guarded by a SINGLE mod-11 check digit
+//     (~1/11 of random 12-digit numbers pass), and 12-digit ids/counters are
+//     common, so a benign false positive is plausible and the operator needs the
+//     allowlist escape hatch. It still detects + (per profile) blocks by default.
+//   - uk_nino — NO checksum exists (format + invalid-prefix exclusions only), the
+//     largest FP surface, so it too is allowlist-clearable.
+export const HARD_BLOCK_TYPES = new Set(["secret", "api_key", "kr_rrn", "card", "fr_nir", "es_dni"]);
 
 const DEFAULT_RULES = [
   {
@@ -167,6 +182,65 @@ const DEFAULT_RULES = [
     flags: "g",
     confidence: 0.9,
     validate: ibanValid
+  },
+  {
+    // Japan My Number (個人番号): EXACTLY 12 digits with the official mod-11
+    // weighted check digit over the first 11. A bare 12-digit run is ambiguous
+    // (an id/timestamp), so jpMyNumberValid is the precision guard — only a run
+    // whose 12th digit equals the prescribed check digit fires. The leading/
+    // trailing boundaries (`(?<![\d-])`/`(?![\d-])`) stop the rule from matching
+    // a 12-digit window inside a longer digit/dashed run. NOT hard-block: a single
+    // mod-11 check digit only rejects ~10/11 of random 12-digit runs, and such
+    // runs are common (ids/counters), so a benign FP is plausible and the operator
+    // keeps the allowlist escape hatch (it still detects + blocks by default).
+    id: "jp-mynumber",
+    type: "jp_mynumber",
+    pattern: "(?<![\\d-])\\d{12}(?![\\d-])",
+    flags: "g",
+    confidence: 0.9,
+    validate: jpMyNumberValid
+  },
+  {
+    // France NIR / INSEE social-security: 15 chars where the department field may
+    // carry the Corsica `2A`/`2B` letters, validated by the control key
+    // `97 - (first13 mod 97) == last2` (Corsica 2A→19, 2B→18 before the mod).
+    // The control key is the precision guard — a wrong key is rejected. The
+    // department alpha is optional so the pure-numeric form also matches. Anchored
+    // on word boundaries; hard-block (checksummed).
+    id: "fr-nir",
+    type: "fr_nir",
+    pattern: "(?<![\\w-])[12]\\d{2}(?:0[1-9]|1[0-2]|20)(?:\\d{2}|2[AB])\\d{6}\\d{2}(?![\\w-])",
+    flags: "g",
+    confidence: 0.9,
+    validate: frNirValid
+  },
+  {
+    // Spain DNI/NIE: 8 digits (DNI) or a leading X/Y/Z + 7 digits (NIE) + a check
+    // letter from the mod-23 table (NIE maps X/Y/Z→0/1/2 before the mod). The
+    // check letter is the precision guard — a wrong letter is rejected. The
+    // letters that can never appear (I/O/U) are excluded from the suffix class so
+    // an ordinary `<8-digit><letter>` token rarely even reaches the validator.
+    // Hard-block (checksummed).
+    id: "es-dni-nie",
+    type: "es_dni",
+    pattern: "(?<![\\w-])[XYZ]?\\d{7,8}[A-HJ-NP-TV-Z](?![\\w-])",
+    flags: "gi",
+    confidence: 0.85,
+    validate: esDniValid
+  },
+  {
+    // UK National Insurance Number: two prefix letters + 6 digits + a suffix
+    // A-D. There is NO checksum, so this is FORMAT-ONLY and stays OUT of
+    // HARD_BLOCK_TYPES (dial-eligible). The pattern bakes in the documented
+    // invalid-prefix exclusions: 1st letter never D/F/I/Q/U/V, 2nd letter never
+    // D/F/I/O/Q/U/V, and the disallowed pairs BG/GB/NK/KN/TN/NT/ZZ are rejected
+    // by ukNinoValid (a negative-set the regex can't express cleanly).
+    id: "uk-nino",
+    type: "uk_nino",
+    pattern: "(?<![\\w-])[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\\d{6}[A-D](?![\\w-])",
+    flags: "g",
+    confidence: 0.7,
+    validate: ukNinoValid
   },
   {
     // E.164 international phone: ONLY with a leading `+` (a bare digit run is an
@@ -739,4 +813,100 @@ function ibanValid(value) {
     }
   }
   return remainder === 1;
+}
+
+// Japan My Number (個人番号) check digit. The official scheme: over the first 11
+// digits, P = 11 - (Σ n_i · Q_i mod 11), where n_i is the i-th digit FROM THE
+// RIGHT of the 11-digit prefix and Q_i = i+1 for 1≤i≤6, i-5 for 7≤i≤11. When the
+// remainder is 0 or 1 the check digit is 0. The 12th digit must equal P. This
+// check digit is the precision guarantee — a random 12-digit id passes only 1
+// time in 10, and the corpus hard-negative (a valid-shape, wrong-check value)
+// proves the rejection.
+function jpMyNumberValid(value) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 12) {
+    return false;
+  }
+  let sum = 0;
+  for (let n = 1; n <= 11; n += 1) {
+    const digit = Number(digits[11 - n]);
+    const weight = n <= 6 ? n + 1 : n - 5;
+    sum += digit * weight;
+  }
+  const remainder = sum % 11;
+  const check = remainder <= 1 ? 0 : 11 - remainder;
+  return check === Number(digits[11]);
+}
+
+// France NIR / INSEE social-security control key. The first 13 chars are the
+// body (sex, birth year/month, department, commune, order); the last 2 are the
+// control key, which must equal `97 - (body mod 97)`. The Corsica department is
+// written 2A/2B; the official rule substitutes 2A→19 and 2B→18 in the body
+// BEFORE the mod (the rest of the body is numeric). The control key is the
+// precision guarantee — a wrong key is rejected (corpus hard-negative).
+function frNirValid(value) {
+  const compact = value.replace(/[\s.-]/g, "").toUpperCase();
+  if (!/^[12]\d{2}(?:\d{2}|0[1-9]|1[0-2]|20)(?:\d{2}|2[AB])\d{6}\d{2}$/.test(compact)) {
+    return false;
+  }
+  const bodyRaw = compact.slice(0, 13);
+  const control = Number(compact.slice(13));
+  // Corsica substitution: 2A→19, 2B→18 (only the department field can be alpha).
+  const body = bodyRaw.replace("2A", "19").replace("2B", "18");
+  if (!/^\d{13}$/.test(body)) {
+    return false;
+  }
+  let remainder = 0;
+  for (const char of body) {
+    remainder = (remainder * 10 + Number(char)) % 97;
+  }
+  const key = 97 - remainder;
+  return key === control;
+}
+
+// Spain DNI/NIE check letter (mod-23 table). DNI is 8 digits + a letter; NIE is
+// a leading X/Y/Z (mapped to 0/1/2) + 7 digits + a letter. The letter is
+// `table[number mod 23]` where table = "TRWAGMYFPDXBNJZSQVHLCKE". The letter is
+// the precision guarantee — a structurally valid but wrong letter is rejected
+// (corpus hard-negative).
+const ES_DNI_TABLE = "TRWAGMYFPDXBNJZSQVHLCKE";
+const ES_NIE_PREFIX = { X: "0", Y: "1", Z: "2" };
+function esDniValid(value) {
+  const compact = value.replace(/[\s-]/g, "").toUpperCase();
+  let body;
+  let letter;
+  if (/^\d{8}[A-Z]$/.test(compact)) {
+    body = compact.slice(0, 8);
+    letter = compact[8];
+  } else if (/^[XYZ]\d{7}[A-Z]$/.test(compact)) {
+    body = ES_NIE_PREFIX[compact[0]] + compact.slice(1, 8);
+    letter = compact[8];
+  } else {
+    return false;
+  }
+  return ES_DNI_TABLE[Number(body) % 23] === letter;
+}
+
+// UK National Insurance Number — FORMAT-ONLY (no checksum exists), which is why
+// uk_nino stays OUT of HARD_BLOCK_TYPES (dial-eligible). The regex already
+// excludes the disallowed individual letters; this validator rejects the
+// documented invalid PREFIX PAIRS (BG, GB, NK, KN, TN, NT, ZZ) that the regex
+// cannot express as a negative set, plus the `O`-as-second-letter case (belt-and-
+// braces with the regex class). The administrative `TN`/`NT` and the temporary
+// `OO`/the suspended `BG` etc. are never issued, so excluding them lifts precision.
+const UK_NINO_INVALID_PREFIXES = new Set(["BG", "GB", "NK", "KN", "TN", "NT", "ZZ"]);
+function ukNinoValid(value) {
+  const compact = value.replace(/\s/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{6}[A-D]$/.test(compact)) {
+    return false;
+  }
+  const prefix = compact.slice(0, 2);
+  if (UK_NINO_INVALID_PREFIXES.has(prefix)) {
+    return false;
+  }
+  // First letter never D/F/I/Q/U/V; second letter never D/F/I/O/Q/U/V.
+  if (/[DFIQUV]/.test(prefix[0]) || /[DFIOQUV]/.test(prefix[1])) {
+    return false;
+  }
+  return true;
 }
