@@ -28,13 +28,18 @@ test("minConfidence drops a low-confidence SOFT detection but never a hard-block
     detection({ type: "kr_rrn", confidence: 0.1 }),       // HARD-BLOCK -> KEPT
     detection({ type: "jp_mynumber", confidence: 0.1 }),  // SOFT (dial-eligible, weak mod-11) -> dropped
     detection({ type: "fr_nir", confidence: 0.1 }),       // HARD-BLOCK (checksummed) -> KEPT
-    detection({ type: "es_dni", confidence: 0.1 })        // HARD-BLOCK (checksummed) -> KEPT
+    detection({ type: "es_dni", confidence: 0.1 }),       // HARD-BLOCK (checksummed) -> KEPT
+    detection({ type: "it_codice_fiscale", confidence: 0.1 }), // HARD-BLOCK (mod-26 check char) -> KEPT
+    detection({ type: "sg_nric", confidence: 0.1 }),      // HARD-BLOCK (check letter) -> KEPT
+    detection({ type: "in_aadhaar", confidence: 0.1 }),   // SOFT (dial-eligible, Verhoeff over 12 digits) -> dropped
+    detection({ type: "de_steuer_id", confidence: 0.1 }), // SOFT (dial-eligible, bare 11-digit run) -> dropped
+    detection({ type: "nl_bsn", confidence: 0.1 })        // SOFT (dial-eligible, 11-proef over 9 digits) -> dropped
   ];
   const { detections: kept, precisionAudit } = applyPrecisionControls(detections, { minConfidence: 0.8 });
   const keptTypes = kept.map((d) => d.type).sort();
-  assert.deepEqual(keptTypes, ["api_key", "card", "email", "es_dni", "fr_nir", "kr_rrn", "secret"], "the low-confidence SOFT phone + dial-eligible jp_mynumber are dropped");
-  assert.equal(precisionAudit.droppedCount, 2);
-  assert.deepEqual(precisionAudit.droppedByType, { phone: 1, jp_mynumber: 1 });
+  assert.deepEqual(keptTypes, ["api_key", "card", "email", "es_dni", "fr_nir", "it_codice_fiscale", "kr_rrn", "secret", "sg_nric"], "the low-confidence SOFT phone + dial-eligible jp_mynumber/in_aadhaar/de_steuer_id/nl_bsn are dropped");
+  assert.equal(precisionAudit.droppedCount, 5);
+  assert.deepEqual(precisionAudit.droppedByType, { phone: 1, jp_mynumber: 1, in_aadhaar: 1, de_steuer_id: 1, nl_bsn: 1 });
   // Every hard-block type survived the dial regardless of confidence.
   for (const type of HARD_BLOCK_TYPES) {
     assert.ok(kept.some((d) => d.type === type), `hard-block type ${type} must never be dropped by minConfidence`);
@@ -114,6 +119,37 @@ test("jp_mynumber and uk_nino are dial-eligible: minConfidence drops and the all
   const allowed = applyPrecisionControls([jp, nino], { allowlist });
   assert.deepEqual(allowed.detections.map((d) => d.type), [], "the allowlist clears dial-eligible types");
   assert.equal(allowed.precisionAudit.suppressedCount, 2);
+});
+
+test("the EU/Asia strong-anchored national IDs are hard-block: neither minConfidence nor allowlist can suppress it_codice_fiscale / sg_nric", () => {
+  const it = detection({ type: "it_codice_fiscale", value: "RSSMRA85T10A562S", pathText: "id", confidence: 0.9 });
+  const sg = detection({ type: "sg_nric", value: "S1234567D", pathText: "id", confidence: 0.9 });
+  // A high minConfidence cannot drop them (non-numeric structural anchors).
+  const dialed = applyPrecisionControls([it, sg], { minConfidence: 0.99 });
+  assert.deepEqual(dialed.detections.map((d) => d.type).sort(), ["it_codice_fiscale", "sg_nric"]);
+  assert.equal(dialed.precisionAudit.droppedCount, 0, "no hard-block national ID may be dropped on confidence");
+  // ...and an exact value+path allowlist entry cannot suppress them.
+  const allowlist = { values: new Set(["RSSMRA85T10A562S", "S1234567D"]), paths: new Set(["id"]), pairs: [] };
+  const allowed = applyPrecisionControls([it, sg], { allowlist });
+  assert.deepEqual(allowed.detections.map((d) => d.type).sort(), ["it_codice_fiscale", "sg_nric"]);
+  assert.equal(allowed.precisionAudit.suppressedCount, 0, "no hard-block national ID may be suppressed");
+});
+
+test("in_aadhaar, de_steuer_id and nl_bsn are dial-eligible: minConfidence drops and the allowlist clears a benign bare-digit-id FP", () => {
+  // All three are bare-digit runs over a common length whose only guard is a numeric
+  // checksum (the jp_mynumber footgun), so the operator keeps the escape hatch.
+  const aadhaar = detection({ type: "in_aadhaar", value: "234567890124", pathText: "id", confidence: 0.7 });
+  const steuer = detection({ type: "de_steuer_id", value: "02476291358", pathText: "tax", confidence: 0.7 });
+  const bsn = detection({ type: "nl_bsn", value: "111222333", pathText: "bsn", confidence: 0.7 });
+  // minConfidence drops all three (0.7 < 0.8).
+  const dialed = applyPrecisionControls([aadhaar, steuer, bsn], { minConfidence: 0.8 });
+  assert.deepEqual(dialed.detections.map((d) => d.type), [], "dial-eligible bare-digit IDs drop below minConfidence");
+  assert.deepEqual(dialed.precisionAudit.droppedByType, { in_aadhaar: 1, de_steuer_id: 1, nl_bsn: 1 });
+  // An exact-value allowlist clears them too.
+  const allowlist = { values: new Set(["234567890124", "02476291358", "111222333"]), paths: new Set(), pairs: [] };
+  const allowed = applyPrecisionControls([aadhaar, steuer, bsn], { allowlist });
+  assert.deepEqual(allowed.detections.map((d) => d.type), [], "the allowlist clears the dial-eligible bare-digit IDs");
+  assert.equal(allowed.precisionAudit.suppressedCount, 3);
 });
 
 // ---------------------------------------------------------------------------

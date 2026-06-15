@@ -348,17 +348,69 @@ test("uk_nino rule + invalid-prefix exclusions (format-only, no checksum)", asyn
 });
 
 test("the strong-anchored national IDs are hard-block; weak/format-only ones are dial-eligible", async () => {
-  // fr_nir (mod-97 over a long structured run) and es_dni (mod-23 + a required
-  // check letter) have strong anchors and rare shapes -> hard-block (kr_rrn-grade).
-  for (const type of ["fr_nir", "es_dni"]) {
+  // fr_nir (mod-97 over a long structured run), es_dni (mod-23 + a required check
+  // letter), it_codice_fiscale (16-char mixed alpha+digit + mod-26 check char) and
+  // sg_nric (letter prefix + check letter) have strong NON-numeric anchors and rare
+  // shapes -> hard-block (kr_rrn-grade).
+  for (const type of ["fr_nir", "es_dni", "it_codice_fiscale", "sg_nric"]) {
     assert.ok(HARD_BLOCK_TYPES.has(type), `${type} must be a hard-block type`);
   }
-  // jp_mynumber (a lone mod-11 check over a common 12-digit shape, ~1/11 FP) and
-  // uk_nino (no checksum) carry too much FP surface to be un-allowlistable ->
+  // jp_mynumber (a lone mod-11 check over a common 12-digit shape, ~9% FP),
+  // uk_nino (no checksum), in_aadhaar (Verhoeff over a common 12-digit shape, ~9.9%
+  // FP — the jp_mynumber footgun), de_steuer_id (a bare 11-digit run with NO
+  // non-numeric anchor over a common length) and nl_bsn (11-proef over 9 very-common
+  // digits, ~9.1% FP) carry too much FP surface to be un-allowlistable ->
   // dial-eligible (still detect + block by default; operator can clear an FP).
-  for (const type of ["jp_mynumber", "uk_nino"]) {
+  for (const type of ["jp_mynumber", "uk_nino", "in_aadhaar", "de_steuer_id", "nl_bsn"]) {
     assert.ok(!HARD_BLOCK_TYPES.has(type), `${type} must stay dial-eligible (not hard-block)`);
   }
+});
+
+// EU/Asia national-ID expansion — each new type detects its SYNTHETIC/public-vector
+// valid value and REJECTS its checksum/check-char near-miss. All values are
+// synthetic or documented public worked examples (per CLAUDE.md).
+test("it_codice_fiscale rule + mod-26 check-character validator", async () => {
+  // RSSMRA85T10A562S: the public Mario Rossi worked example (16th char S is the
+  // mod-26 check character over the first 15).
+  assert.ok((await typesFor("codice fiscale RSSMRA85T10A562S on file")).has("it_codice_fiscale"));
+  // A wrong check character (X instead of S) is rejected.
+  assert.ok(!(await typesFor("doc RSSMRA85T10A562X wrong check")).has("it_codice_fiscale"));
+});
+
+test("sg_nric rule + weighted-sum check-letter validator (NRIC and FIN)", async () => {
+  // S1234567D: the canonical S-series worked example (check letter D).
+  assert.ok((await typesFor("NRIC S1234567D on the pass")).has("sg_nric"));
+  // A FIN (F-series) computed from the same algorithm.
+  assert.ok((await typesFor("FIN F1234567N registered")).has("sg_nric"));
+  // A wrong check letter (A instead of D) is rejected.
+  assert.ok(!(await typesFor("card S1234567A wrong letter")).has("sg_nric"));
+});
+
+test("in_aadhaar rule + Verhoeff checksum validator", async () => {
+  // 234567890124: prefix 23456789012 with Verhoeff check digit 4 (leading digit
+  // is non-0/1, as Aadhaar requires).
+  assert.ok((await typesFor("Aadhaar 234567890124 on the e-KYC")).has("in_aadhaar"));
+  // A wrong Verhoeff check digit (…125) is rejected.
+  assert.ok(!(await typesFor("ref 234567890125 fails Verhoeff")).has("in_aadhaar"));
+  // A 12-digit run starting 0/1 is not an Aadhaar (the leading-digit anchor).
+  assert.ok(!(await typesFor("id 123456789018 here")).has("in_aadhaar"));
+});
+
+test("de_steuer_id rule + MOD 11,10 + one-repeated-digit structural validator", async () => {
+  // 02476291358: the public BZSt example (first 10 have exactly one repeated digit;
+  // MOD 11,10 check digit 8).
+  assert.ok((await typesFor("Steuer-ID 02476291358 on file")).has("de_steuer_id"));
+  // The same structural body with the wrong check digit (…357) is rejected.
+  assert.ok(!(await typesFor("number 02476291357 breaks the check")).has("de_steuer_id"));
+});
+
+test("nl_bsn rule + 11-proef weighted mod-11 validator", async () => {
+  // 111222333: a known synthetic test BSN that satisfies the 11-proef.
+  assert.ok((await typesFor("BSN 111222333 on the formulier")).has("nl_bsn"));
+  // 123456782: another 11-proef-valid synthetic BSN.
+  assert.ok((await typesFor("BSN 123456782 registered")).has("nl_bsn"));
+  // A clean 9-digit run that fails the 11-proef is rejected.
+  assert.ok(!(await typesFor("reference 123456789 fails 11-proef")).has("nl_bsn"));
 });
 
 test("WS2b phone rules: E.164 needs a leading +, US national needs separators, bare runs rejected", async () => {

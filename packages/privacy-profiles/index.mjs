@@ -37,16 +37,51 @@ const PROFILES = {
         secret: "block",
         kr_rrn: "block",
         // EU national IDs — France NIR, Spain DNI/NIE, UK National Insurance
-        // Number — are GDPR special-category-adjacent identifiers; block them.
+        // Number, Italy codice fiscale, Germany tax ID, Netherlands BSN — are
+        // GDPR special-category-adjacent identifiers; block them.
         fr_nir: "block",
         es_dni: "block",
         uk_nino: "block",
+        it_codice_fiscale: "block",
+        de_steuer_id: "block",
+        nl_bsn: "block",
         jp_mynumber: "block"
       }
     },
     transfer: {
       requiresAssessment: true,
       note: "Treat model/tool transfer as processor/subprocessor transfer and document SCC/TIA evidence outside Haechi."
+    }
+  },
+  "asia-pdpa": {
+    id: "asia-pdpa",
+    region: "ASIA",
+    regulations: ["Singapore PDPA", "India DPDP Act"],
+    policy: {
+      actions: {
+        // Asia national IDs — Singapore NRIC/FIN and India Aadhaar — are sensitive
+        // identifiers under the Singapore PDPA / India DPDP Act; block them. The
+        // other checksummed national IDs are also blocked so a mixed-region payload
+        // is covered, matching the cross-profile convention.
+        sg_nric: "block",
+        in_aadhaar: "block",
+        jp_mynumber: "block",
+        kr_rrn: "block",
+        fr_nir: "block",
+        es_dni: "block",
+        it_codice_fiscale: "block",
+        de_steuer_id: "block",
+        nl_bsn: "block",
+        phone: "mask",
+        email: "redact",
+        card: "block",
+        api_key: "block",
+        secret: "block"
+      }
+    },
+    transfer: {
+      requiresAssessment: true,
+      note: "Document the PDPA/DPDP handling basis, purpose limitation, and cross-border transfer notice before production use."
     }
   },
   "us-general": {
