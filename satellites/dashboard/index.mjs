@@ -38,6 +38,31 @@ const RATE_LIMIT_MAX = 120; // requests per window per source key.
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_KEYS = 4096; // hard cap on distinct source keys (DoS bound).
 
+// A correlationId is a server-generated RFC-4122 UUID (core uses node:crypto
+// randomUUID, which emits a v4). The /api/events correlationId filter validates a
+// caller-supplied value against this shape and rejects anything else FAIL-CLOSED
+// (400) — so a malformed value never reaches the tail read as an unbounded scan
+// or an injection vector. The match itself is then a plain string equality on the
+// already-projected event, never a regex over untrusted input.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The fixed set of decision/action labels an operator may filter by. A value
+// outside this set is rejected FAIL-CLOSED (400) — never a free-text scan. These
+// are the policy actions (transform outcomes) plus the proxy-decision verbs that
+// land in an event's projected summary.byAction. The filter matches an event iff
+// its projected summary.byAction contains the requested key (already-projected
+// data only — no raw field is read).
+const KNOWN_DECISIONS = new Set([
+  "redact",
+  "mask",
+  "tokenize",
+  "encrypt",
+  "block",
+  "allow",
+  "pass",
+  "deny"
+]);
+
 // The ONLY handler paths a sessionGuard may declare and the ONLY paths exempt
 // from the auth gate. A FIXED allowlist — never raw Object.keys(handlers) — so a
 // guard cannot exempt "/api/chain" (or "/", "/healthz") and serve audit data
@@ -430,6 +455,14 @@ function projectEvent(event) {
   const out = pick(event, [
     "schemaVersion",
     "id",
+    // Per-request correlation id (core WS4-A): a server-generated UUID shared by
+    // the request- and response-direction events of ONE proxied request (null for
+    // a non-proxy protectJson). It is a UUID — NOT a payload/identity/PII value —
+    // so adding it to the allowlist keeps the no-plaintext-in-audit invariant; it
+    // lets an operator trace one request's events together. `pick()` only copies it
+    // when present, so a non-proxy event (correlationId null/absent) still projects
+    // cleanly (the key is simply omitted when undefined).
+    "correlationId",
     "timestamp",
     "protocol",
     "operation",
@@ -873,6 +906,33 @@ export function createDashboardServer(options = {}) {
       cursor = parsedCursor;
     }
 
+    // Optional correlationId filter: exact UUID match, validated FAIL-CLOSED. A
+    // value that is not a UUID shape is a 400 (never an unbounded scan / injection
+    // vector). The filter is applied AFTER the bounded tail read + allowlist
+    // projection below, so it can only NARROW the page — it never widens the window.
+    let correlationFilter = null;
+    if (params.has("correlationId")) {
+      const rawCorrelation = params.get("correlationId");
+      if (!UUID_RE.test(rawCorrelation)) {
+        sendJson(res, 400, { error: "bad_request" }, { hsts: servesHttps });
+        return;
+      }
+      correlationFilter = rawCorrelation.toLowerCase();
+    }
+
+    // Optional decision/action filter: only a value from the fixed KNOWN_DECISIONS
+    // set is accepted; an unknown decision is a 400 (fail closed). The match runs
+    // against already-projected summary.byAction keys — never a raw field.
+    let decisionFilter = null;
+    if (params.has("decision")) {
+      const rawDecision = params.get("decision");
+      if (!KNOWN_DECISIONS.has(rawDecision)) {
+        sendJson(res, 400, { error: "bad_request" }, { hsts: servesHttps });
+        return;
+      }
+      decisionFilter = rawDecision;
+    }
+
     const { events: rawEvents, coveredFromStart } = await readTailEvents(auditPath, windowBytes);
 
     // Newest-first.
@@ -903,8 +963,25 @@ export function createDashboardServer(options = {}) {
       }
     }
 
-    const limited = page.slice(0, limit);
-    const projected = limited.map(projectEvent);
+    // Project the cursor-narrowed page through the recursive allowlist FIRST, then
+    // apply the correlationId/decision filters on the PROJECTED representation only.
+    // Filtering after projection guarantees a filter can never read a non-allowlisted
+    // raw field, and (since the source is the already bounded tail page) it can only
+    // narrow the result — never widen the window.
+    let projectedPage = page.map(projectEvent);
+    if (correlationFilter !== null) {
+      projectedPage = projectedPage.filter(
+        (ev) => typeof ev.correlationId === "string" && ev.correlationId.toLowerCase() === correlationFilter
+      );
+    }
+    if (decisionFilter !== null) {
+      projectedPage = projectedPage.filter((ev) => {
+        const byAction = ev.summary && ev.summary.byAction;
+        return Boolean(byAction) && Object.prototype.hasOwnProperty.call(byAction, decisionFilter);
+      });
+    }
+
+    const projected = projectedPage.slice(0, limit);
 
     // Next cursor = the lowest sequence in this page (client pages older).
     let nextCursor = null;

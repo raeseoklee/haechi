@@ -40,17 +40,33 @@ are injected programmatically (not from the CLI).
 ## API (all `GET`/`HEAD`, read-only)
 
 - `GET /` — the static HTML shell (references same-origin `/assets/app.js` + `/assets/app.css`).
-- `GET /api/events?cursor=&limit=` — newest-first, bounded-window page of audit
-  events. `limit` is an integer in `[1,200]`; `cursor` is the opaque
-  `auditIntegrity.sequence` (never an fs offset). Pages older than the retained
-  tail window return `{ windowExceeded: true }`. Each event is projected through a
-  recursive key-by-key allowlist — never the raw record.
+- `GET /api/events?cursor=&limit=&correlationId=&decision=` — newest-first,
+  bounded-window page of audit events. `limit` is an integer in `[1,200]`; `cursor`
+  is the opaque `auditIntegrity.sequence` (never an fs offset). Pages older than the
+  retained tail window return `{ windowExceeded: true }`. Each event is projected
+  through a recursive key-by-key allowlist — never the raw record — and now carries
+  its **`correlationId`**: the per-request UUID (core WS4-A) shared by the request-
+  and response-direction events of one proxied request (`null` for a non-proxy
+  `protectJson`). It is a server-generated UUID, **not** PII.
+  - `correlationId` — optional exact filter (a UUID). A value that is not a UUID
+    shape is rejected **`400` fail-closed** (never an unbounded scan or an injection
+    vector).
+  - `decision` — optional filter by policy action / proxy decision (one of
+    `redact`, `mask`, `tokenize`, `encrypt`, `block`, `allow`, `pass`, `deny`); any
+    other value is rejected **`400` fail-closed**. It matches an event whose
+    projected `summary.byAction` carries that key.
+  - Both filters apply **after** the bounded tail read **and** the allowlist
+    projection — they can only narrow the page, never widen the read window or read
+    a non-allowlisted field. They combine (AND) and may be used with `cursor`/`limit`.
 - `GET /api/chain` — derived from `verifyAuditChain`: `{ valid:true, records,
   headHash, anchored? }` on success, or `{ valid:false, records, truncationDetected }`
   on failure. The raw `reason` is never surfaced. Bounded compute (single
   serialized job, `mtime+size`-cached); above a hard size cap returns `413` /
   `{ valid:null }`. `HEAD` forces no fresh walk.
-- `GET /api/summary` — aggregates the window's `byType` / `byAction` / `detectionCount`.
+- `GET /api/summary` — aggregates the window's `byType` / `byAction` /
+  `detectionCount`. `byAction` is already the per-decision rollup (a count per
+  action/decision), built only from each event's already-projected `summary` — it
+  exposes no raw field.
 - `GET /healthz` — liveness only (no audit data/paths); reachable without a session.
 
 ## Security (these are guarantees, not options)
@@ -71,7 +87,9 @@ are injected programmatically (not from the CLI).
 - **No XSS.** The client builds the DOM with `createElement` + `textContent` only
   (never `innerHTML` with interpolation); a strict CSP with
   `require-trusted-types-for 'script'` makes any stray sink throw in-browser. The
-  attacker-influenced `detections[].path` is rendered inert as text.
+  attacker-influenced `detections[].path` is rendered inert as text. The
+  **correlationId** column is rendered the same way: a click-to-filter `<button>`
+  wired with `addEventListener` (no inline handler), so the CSP/Trusted Types hold.
 - **No plaintext / no field leak.** Events pass through a recursive key-by-key
   allowlist projection (defense in depth over core's `FORBIDDEN_KEYS`); identity is
   shown as `subjectHash`/`issuerHash`/`id` only — never `scopes`/`labels`/a raw subject.
@@ -101,8 +119,17 @@ reachable. On loopback with no guard, the dashboard serves unauthenticated (the
 only unauthenticated mode). `haechi-auth-oidc`'s `createOidcSessionBroker` satisfies
 this contract.
 
-## Scope (0.9)
+## Request tracing (0.2.0)
 
-Audit viewer only — the event stream, the `verifyAuditChain` chain status, and
-decision/action aggregates. Token-vault and policy visualization, and any write
-action, are out of scope.
+The viewer surfaces the per-request `correlationId` so an operator can trace all
+events of one proxied request together: a **correlationId column** in the events
+table, consecutive same-correlationId rows are **visually grouped** (a left border),
+and each correlationId cell is a **click-to-filter** control that re-queries
+`/api/events?correlationId=<uuid>` (a "Clear filter" button resets it). Everything
+stays **read-only** — the filter only narrows what is already shown.
+
+## Scope
+
+Audit viewer only — the event stream, the `verifyAuditChain` chain status,
+decision/action aggregates, and per-request correlationId tracing. Token-vault and
+policy visualization, and any write action, are out of scope.
