@@ -7,7 +7,8 @@ test("protocol adapters classify local inference routes", () => {
     "openai-compatible",
     "vllm-openai",
     "llama-cpp",
-    "ollama"
+    "ollama",
+    "anthropic"
   ]);
 
   const vllm = createProtocolAdapter({ adapter: "vllm-openai" });

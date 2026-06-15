@@ -10,10 +10,40 @@ const SSE_DONE = "[DONE]";
 export async function inspectResponseStream({ source, sink, streaming, protector, format }) {
   const wireFormat = format ?? streaming?.format ?? "ndjson";
   const deltaPath = streaming?.deltaPath ?? null;
+  // Frame types that TERMINATE a delta sequence (declared per-adapter, e.g.
+  // Anthropic's content_block_stop/message_delta/message_stop). Before such a
+  // frame the held cross-frame buffer tail is flushed as a valid delta frame, so
+  // the residual lands in-order BEFORE the terminator — never after message_stop.
+  // Keepalives (ping) are deliberately NOT listed, so a match split across a ping
+  // is still caught by the sliding buffer.
+  const flushOnType = streaming?.flushOnType ?? null;
   const decoder = new TextDecoder("utf-8");
   const frames = createFrameSplitter(wireFormat);
 
   let blocked = false;
+  // A structural template of the last frame that carried delta text, used to
+  // re-emit a held buffer tail as a VALID delta frame (preserving its wire
+  // wrapper — Anthropic's `event:` line — plus sibling fields like type/index).
+  let lastDeltaTemplate = null;
+
+  async function flushHeldTail() {
+    const flushed = await protector.flush();
+    if (flushed.blocked) {
+      blocked = true;
+      return;
+    }
+    if (!flushed.text || !deltaPath) {
+      return;
+    }
+    if (lastDeltaTemplate) {
+      const object = structuredClone(lastDeltaTemplate.object);
+      setByPath(object, deltaPath, flushed.text);
+      sink.write(serializeFrame(object, wireFormat, lastDeltaTemplate.original));
+    } else {
+      // No prior delta frame to model — fall back to a minimal synthesized frame.
+      sink.write(serializeFrame(buildPathObject(deltaPath, flushed.text), wireFormat, null));
+    }
+  }
 
   async function handleFrame(raw) {
     const frame = { raw, body: raw.trim() };
@@ -26,6 +56,16 @@ export async function inspectResponseStream({ source, sink, streaming, protector
     }
 
     const json = parsed.json;
+
+    // A delta-terminating frame: flush the held tail (as a valid delta frame)
+    // before emitting it, so the residual is correctly ordered.
+    if (flushOnType && flushOnType.values.includes(getByPath(json, flushOnType.path))) {
+      await flushHeldTail();
+      if (blocked) {
+        return;
+      }
+    }
+
     let deltaText = null;
     if (deltaPath) {
       const found = getByPath(json, deltaPath);
@@ -50,6 +90,8 @@ export async function inspectResponseStream({ source, sink, streaming, protector
         return;
       }
       setByPath(frameObject, deltaPath, pushed.text);
+      // Snapshot this frame's structure + wire wrapper as the flush template.
+      lastDeltaTemplate = { object: structuredClone(frameObject), original: frame };
     }
 
     sink.write(serializeFrame(frameObject, wireFormat, frame));
@@ -77,13 +119,8 @@ export async function inspectResponseStream({ source, sink, streaming, protector
   }
 
   if (!blocked) {
-    // Flush the held tail of the delta buffer as a synthesized final frame.
-    const flushed = await protector.flush();
-    if (flushed.blocked) {
-      blocked = true;
-    } else if (flushed.text && deltaPath) {
-      sink.write(serializeFrame(buildPathObject(deltaPath, flushed.text), wireFormat, null));
-    }
+    // Flush any remaining held tail (a stream that ended on a delta frame).
+    await flushHeldTail();
   }
 
   // The caller closes the sink AFTER recording the stream decision, so the
@@ -148,6 +185,31 @@ function parseFrame(frame, format) {
 function serializeFrame(json, format, original) {
   const body = JSON.stringify(json);
   if (format === "sse") {
+    // Preserve the original SSE field lines (`event:`, `id:`, `retry:`, `:`
+    // comments) and substitute only the data payload. Event-typed streams
+    // (Anthropic Messages) dispatch on the `event:` line, so dropping it would
+    // make the stream unconsumable. OpenAI-style frames carry only a `data:`
+    // line, so the output is byte-identical to `data: ${body}\n\n`.
+    if (original && typeof original.raw === "string") {
+      const lines = original.raw.replace(/\n+$/, "").split("\n");
+      const out = [];
+      let dataWritten = false;
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          // Collapse any (multi-line) data payload into the single new body.
+          if (!dataWritten) {
+            out.push(`data: ${body}`);
+            dataWritten = true;
+          }
+        } else {
+          out.push(line);
+        }
+      }
+      if (!dataWritten) {
+        out.push(`data: ${body}`);
+      }
+      return `${out.join("\n")}\n\n`;
+    }
     return `data: ${body}\n\n`;
   }
   // NDJSON: preserve the original trailing newline style when available.

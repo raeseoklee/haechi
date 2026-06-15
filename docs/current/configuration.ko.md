@@ -38,7 +38,7 @@
 
 | 키 | 타입 / 값 | 기본값 | 설명 |
 |---|---|---|---|
-| `target.type` | `llm-http` \| `openai-compatible` \| `vllm-openai` \| `ollama` \| `llama-cpp` | `llm-http` | 프로토콜 adapter를 선택합니다. `llm-http`는 `openai-compatible`의 별칭입니다. 알 수 없는 값은 로드 시 **fail-closed**로 처리됩니다. |
+| `target.type` | `llm-http` \| `openai-compatible` \| `vllm-openai` \| `ollama` \| `llama-cpp` \| `anthropic` | `llm-http` | 프로토콜 adapter를 선택합니다. `llm-http`는 `openai-compatible`의 별칭입니다. `anthropic`은 Anthropic Messages API(`/v1/messages`, `/v1/messages/count_tokens`, `/v1/complete`)를 대상으로 합니다. 클라이언트가 Anthropic의 `x-api-key`/`anthropic-version` 헤더를 제공하면 프록시가 이를 그대로 전달합니다. 알 수 없는 값은 로드 시 **fail-closed**로 처리됩니다. |
 | `target.adapter` | 동일한 값 집합 | `openai-compatible` | adapter를 명시적으로 지정합니다. 보통은 설정하지 않고 `type`이 결정하도록 두면 됩니다. |
 | `target.upstream` | URL 문자열 | `http://127.0.0.1:9999` | proxy가 요청을 전달하는 유일한 upstream입니다. 요청 대상은 origin-form 경로여야 하며, 절대 URL 대상은 거부됩니다(SSRF 방어). |
 
