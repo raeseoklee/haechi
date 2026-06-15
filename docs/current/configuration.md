@@ -300,11 +300,17 @@ Detection is regex + optional validator (no ML). Every rule is **anchored tightl
 | `fr_nir` | France NIR / INSEE social-security | 15 chars + **`97 - (first13 mod 97)` control key** (Corsica `2A`→19, `2B`→18) | A wrong control key is rejected. **Hard-block.** |
 | `es_dni` | Spain DNI / NIE | 8 digits (DNI) or `X/Y/Z`+7 digits (NIE) + **mod-23 check letter** (NIE `X/Y/Z`→`0/1/2`) | A wrong check letter is rejected. **Hard-block.** |
 | `uk_nino` | UK National Insurance Number | `[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\d{6}[A-D]` + documented invalid-prefix exclusions (`BG`/`GB`/`NK`/`KN`/`TN`/`NT`/`ZZ`, `O`-as-2nd-letter) | **Format-only — no checksum exists**, so it is NOT a hard-block type (dial-eligible: an operator can allowlist a benign FP). |
-| `api_key` | OpenAI-style (`sk_`/`rk_`/`pk_`) | prefix + ≥24 chars | — |
+| `api_key` | OpenAI-style / Stripe (`sk_`/`rk_`/`pk_`) | prefix + ≥24 chars | Underscore form — covers Stripe `sk_live_`/`rk_live_`/`sk_test_`/`rk_test_`. |
 | `api_key` | AWS access key id | `AKIA`/`ASIA` + exactly 16 uppercase-alnum | — |
 | `api_key` | Google API key | `AIza` + 35 URL-safe chars | — |
+| `api_key` | SendGrid API key | `SG.` + 22 URL-safe + `.` + 43 URL-safe | The two fixed-length dotted segments are the anchor. |
+| `api_key` | Twilio Account/API SID | `AC`/`SK` + exactly 32 **hex** | Hex-only body rejects random base62; the bare 32-hex AUTH TOKEN is caught via the assignment form (`auth_token`). |
+| `secret` | OpenAI API key | `sk-` (and `sk-proj-`) + ≥20 base62-ish chars | **Hyphen** form, distinct from the underscore Stripe `sk_`; the two prefixes never overlap. |
+| `secret` | Anthropic API key | `sk-ant-` + ≥16 chars | Stricter sibling of the OpenAI `sk-` rule (runs first for attribution). |
+| `secret` | Google OAuth client secret | `GOCSPX-` + exactly 28 URL-safe chars | Distinct from the `AIza` API key. |
+| `secret` | npm token | `npm_` + exactly 36 base62 chars | — |
 | `secret` | `Bearer <token>` | `Bearer` + ≥16 chars | — |
-| `secret` | Assignment `<key> = <value>` | key vocabulary: `api_key`, `api_secret`, `secret`, `secret_key`, `aws_secret_access_key`, `client_secret`, `private_key`, `access_token`, `refresh_token`, `token`, `password` | Catches bare-base64 secrets (e.g. AWS secret access key) via the assignment form. |
+| `secret` | Assignment `<key> = <value>` | key vocabulary: `api_key`, `api_secret`, `secret`, `secret_key`, `aws_secret_access_key`, `client_secret`, `private_key`, `access_token`, `refresh_token`, `auth_token`, `accountkey`, `token`, `password` | Catches bare-base64 secrets (AWS secret access key, **Azure Storage `AccountKey=`**, **Twilio auth token**) via the assignment form — an un-anchored 88-char-base64 Azure rule would false-fire on any blob, so `AccountKey=` context is the anchor. |
 | `secret` | GitHub token | `gh[pousr]_` + ≥36 base64-ish chars | pat/oauth/user/server/refresh variants. |
 | `secret` | Slack token | `xox[baprs]-` + ≥10-char body | bot/user/refresh/legacy variants. |
 | `secret` | JWT | three base64url segments, first starts `eyJ` (the base64 of `{"`) | The `eyJ` anchor rejects arbitrary dotted tokens. |

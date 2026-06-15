@@ -326,6 +326,89 @@
       "text": "the code BG123456C uses a NINO prefix that is never issued",
       "expect": [{ "type": "uk_nino", "present": false }],
       "note": "HARD NEGATIVE (uk_nino invalid-prefix): the BG prefix is on the documented never-issued list (with GB/NK/KN/TN/NT/ZZ and O-as-2nd-letter), so a NINO-shaped value with an excluded prefix must NOT match — the format-only rule still rejects the documented invalid prefixes."
+    },
+    {
+      "text": "Stripe key sk_live_EXAMPLE-DO-NOT-USE-EXAMPLE0 committed by mistake",
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "CLOUD-CRED positive (Stripe): the live secret key `sk_live_…` is already covered by the existing underscore-based openai-like-key rule as `api_key` (a dedicated `secret`-typed Stripe rule would collide with that rule on the SAME span and removeOverlaps would drop one, flipping the existing sk_/pk_ corpus cases — so Stripe stays `api_key`). PUSH-SAFE synthetic body: the embedded HYPHENS keep it inside our permissive `[A-Za-z0-9_-]{24,}` rule but OUTSIDE GitHub's base62-only Stripe partner pattern, so it exercises the detector without tripping push protection (a low-entropy all-alnum `sk_live_…` body DID trip it)."
+    },
+    {
+      "text": "the product code sk_live_short is not a key",
+      "expect": [{ "type": "api_key", "present": false }],
+      "note": "HARD NEGATIVE (Stripe / openai-like-key): `sk_live_` with fewer than 24 body chars must NOT match — the rule requires the prefix + >=24 chars."
+    },
+    {
+      "text": "OpenAI key sk-EXAMPLEEXAMPLEEXAMPLEEXAMPLE0000 leaked in a gist",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "CLOUD-CRED positive (OpenAI): the hyphen-prefixed `sk-` key (distinct from the underscore Stripe `sk_`) detects as `secret`. PUSH-SAFE LOW-ENTROPY synthetic body."
+    },
+    {
+      "text": "the slug sk-tooShort is a short identifier, not an OpenAI key",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (OpenAI): `sk-` with a <20-char body must NOT match — the body-length floor keeps a bare `sk-foo` slug from firing."
+    },
+    {
+      "text": "Anthropic key sk-ant-api03-EXAMPLEEXAMPLEEXAMPLEEXAMPLE0000 in the env file",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "CLOUD-CRED positive (Anthropic): the `sk-ant-` Claude key detects as `secret` (its own rule runs before the generic OpenAI `sk-` rule). PUSH-SAFE LOW-ENTROPY synthetic body."
+    },
+    {
+      "text": "the string sk-ant-tiny is too short to be a Claude key",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (Anthropic): `sk-ant-` with a <16-char body must NOT match."
+    },
+    {
+      "text": "Google OAuth client secret GOCSPX-EXAMPLEEXAMPLEEXAMPLE0000000 in the config",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "CLOUD-CRED positive (Google OAuth): the `GOCSPX-` + 28-char client secret detects as `secret`. PUSH-SAFE LOW-ENTROPY synthetic body (pad to exactly 28)."
+    },
+    {
+      "text": "the token GOCSPX-tooShortBody is not a full client secret",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (Google OAuth): `GOCSPX-` without exactly 28 trailing URL-safe chars must NOT match."
+    },
+    {
+      "text": "SendGrid key SG.EXAMPLEEXAMPLE00000000.EXAMPLEEXAMPLEEXAMPLE0000000000000000000000 leaked",
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "CLOUD-CRED positive (SendGrid): the `SG.<22>.<43>` API key detects as `api_key`. PUSH-SAFE LOW-ENTROPY synthetic body (each dotted segment padded to its exact length)."
+    },
+    {
+      "text": "the value SG.EXAMPLEEXAMPLE00000000.SHORT has the wrong second segment length",
+      "expect": [{ "type": "api_key", "present": false }],
+      "note": "HARD NEGATIVE (SendGrid): the second dotted segment must be exactly 43 URL-safe chars — a short second segment must NOT match."
+    },
+    {
+      "text": "Twilio SID AC00000000000000000000000000000000 in the credentials block",
+      "expect": [{ "type": "api_key", "present": true }],
+      "note": "CLOUD-CRED positive (Twilio): the `AC`/`SK` + 32-HEX account/API SID detects as `api_key`. PUSH-SAFE LOW-ENTROPY synthetic body (all-zero hex)."
+    },
+    {
+      "text": "the run ACzzzzzzzz000000000000000000000000 carries non-hex chars",
+      "expect": [{ "type": "api_key", "present": false }],
+      "note": "HARD NEGATIVE (Twilio): the 32-char body must be HEX — a same-length body with non-hex letters (z) must NOT match. The hex-only anchor is what keeps a random base62 run from firing."
+    },
+    {
+      "text": "npm token npm_EXAMPLEEXAMPLEEXAMPLE000000000000000 published by accident",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "CLOUD-CRED positive (npm): the `npm_` + 36-char token detects as `secret`. PUSH-SAFE LOW-ENTROPY synthetic body (pad to exactly 36)."
+    },
+    {
+      "text": "the marker npm_short is not a publish token",
+      "expect": [{ "type": "secret", "present": false }],
+      "note": "HARD NEGATIVE (npm): `npm_` without exactly 36 trailing base62 chars must NOT match."
+    },
+    {
+      "text": "Azure connection string with AccountKey=EXAMPLEEXAMPLEEXAMPLEEXAMPLE000000== noted here",
+      "expect": [{ "type": "secret", "present": true }],
+      "note": "CLOUD-CRED positive (Azure Storage): the `AccountKey=<base64>` connection-string segment is caught via the assignment-secret vocabulary (an un-anchored 88-char-base64 rule would false-fire on any blob, so the `AccountKey=` assignment context is the anchor). PUSH-SAFE LOW-ENTROPY synthetic body."
+    },
+    {
+      "text": "a random base62 blob Ab3xQ9KmZ2pLw7Rt5Yn1Vc8Df4Gh6Js0Bv2Nx5Mq3Pe7Wa9 with no provider prefix",
+      "expect": [
+        { "type": "secret", "present": false },
+        { "type": "api_key", "present": false }
+      ],
+      "note": "HARD NEGATIVE (random base62, no anchor): a 47-char random base62 string with NO provider prefix (no sk-/GOCSPX-/SG./AC/npm_) must NOT false-fire any cloud-credential rule — every new rule is anchored on a fixed prefix + charclass + length, so bare entropy never matches."
     }
   ]
 }
