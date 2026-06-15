@@ -18,7 +18,7 @@ The name comes from Haechi, a Korean guardian figure associated with discernment
 
 This repository is intended for local development, security design review, and self-hosted integration experiments. It is not a compliance guarantee.
 
-**1.0.0 is the first stable release.** From 1.0 the public API is a frozen contract under strict semver: the `package.json` `exports` surface, the CLI's machine-readable behavior, the audit event schema, and the config key shape are all part of the major-versioned contract, with a documented deprecation policy and a one in-minor security exception. See [`docs/current/api-stability.md`](docs/current/api-stability.md). The four `haechi-*` satellites stay pre-1.0 and version independently of core.
+**1.0.0 is the first stable release.** From 1.0 the public API is a frozen contract under strict semver: the `package.json` `exports` surface, the CLI's machine-readable behavior, the audit event schema, and the config key shape are all part of the major-versioned contract, with a documented deprecation policy and a one in-minor security exception. See [`docs/current/api-stability.md`](docs/current/api-stability.md). The `haechi-*` satellites stay pre-1.0 and version independently of core (see [Satellite packages](#satellite-packages)).
 
 The current scope focuses on local adoption:
 
@@ -195,14 +195,27 @@ haechi auth revoke <id>
 - **Rate limit**: per-identity requests-per-minute → `429` (in-memory, per-process).
 - Audit events carry the **PII-safe** `identity` (keyed-HMAC subject/issuer, never raw values) and the resolved `profile`; `auth_denied` / `model_not_allowed` / `rate_limited` decisions never include credentials. `/__haechi/health` stays unauthenticated.
 
-JWT/JWKS auth and KMS-backed key custody ship as `haechi-*` satellite packages, each versioned and published independently of core. They remain pre-1.0 and declare a `haechi` peer range of `>=0.8.0 <2.0.0` (the upper bound tracks the core major, so core 1.0.0 does not break satellite installs):
+JWT/JWKS auth and KMS-backed key custody (and other optional capabilities) ship as the **`haechi-*` satellite packages** — see [Satellite packages](#satellite-packages) below.
 
-- [`haechi-auth-jwt`](satellites/auth-jwt/) (0.2.1) — headless JWKS bearer verification; additively exports a reusable JWS verifier (`createJwtVerifier`).
-- [`haechi-crypto-kms`](satellites/crypto-kms/) (0.2.1) — envelope encryption with a real KMS client; AWS plus GCP (`./gcp`), Azure (`./azure`), and HashiCorp Vault Transit (`./vault`, `node:`-only) backends.
-- [`haechi-dashboard`](satellites/dashboard/) (0.1.2) — a zero-dependency, read-only audit viewer (`node:http`) over the audit log and its hash-chain status.
-- [`haechi-auth-oidc`](satellites/auth-oidc/) (0.1.2) — an interactive OIDC session broker (authorization-code + PKCE) that provides the dashboard's human login.
+## Satellite packages
 
-The satellites are `node:`-only by default (heavy SDKs are optional peers) and keep core zero-dependency.
+Optional capabilities ship as independently-published **`haechi-*` packages on npm** — each versioned separately from core, `node:`-only by default (heavy SDKs like a KMS or Redis client are optional peers), and each declaring a `haechi` peer range of `>=0.8.0 <2.0.0` (the upper bound tracks the core major, so a core minor never breaks a satellite install).
+
+**Install the core alongside any satellite** — `haechi` is a **peer dependency, not bundled**, so a satellite does nothing on its own:
+
+```bash
+npm install haechi haechi-<satellite>
+```
+
+| Package | What it adds |
+|---|---|
+| [`haechi-auth-jwt`](satellites/auth-jwt/) | Headless JWKS bearer (JWT) `authProvider`; additively exports a reusable JWS verifier (`createJwtVerifier`). |
+| [`haechi-auth-oidc`](satellites/auth-oidc/) | Interactive OIDC session broker (authorization-code + PKCE) — the dashboard's human login. Reuses `haechi-auth-jwt`. |
+| [`haechi-crypto-kms`](satellites/crypto-kms/) | Envelope-encryption `cryptoProvider` for `keys.provider: external` — AWS, GCP (`./gcp`), Azure (`./azure`), and HashiCorp Vault Transit (`./vault`, `node:`-only) backends. |
+| [`haechi-dashboard`](satellites/dashboard/) | Zero-dependency, read-only audit viewer (`node:http`) over the audit log and its hash-chain status. |
+| [`haechi-ratelimit-redis`](satellites/ratelimit-redis/) | Shared-store (Redis-backed) `rateLimiter` for multi-replica deployments, via the `providers.rateLimiter` injection seam. |
+
+Each package's README covers its usage and exact peer requirements. The satellites keep core zero-dependency: their heavy SDKs are optional peers installed only when you use that backend.
 
 ## Configuration
 

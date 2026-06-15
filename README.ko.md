@@ -18,7 +18,7 @@ Haechi는 LLM·MCP·vLLM·Ollama 및 에이전트 payload가 모델, 도구, 로
 
 이 저장소는 로컬 개발, 보안 설계 검토, 자체 호스팅 통합 실험을 위한 것입니다. 컴플라이언스를 보장하지는 않습니다.
 
-**1.0.0이 첫 stable 릴리스입니다.** 1.0부터 public API는 strict semver 하의 frozen 계약입니다. `package.json`의 `exports` 표면, CLI의 기계 판독 동작, audit event schema, config key shape이 모두 major 버전 계약의 일부이며, 문서화된 deprecation 정책과 in-minor 보안 예외 하나가 함께 적용됩니다. [`docs/current/api-stability.md`](docs/current/api-stability.md)를 참고하세요. 네 개의 `haechi-*` 위성은 pre-1.0으로 유지되며 core와 독립적으로 버저닝됩니다.
+**1.0.0이 첫 stable 릴리스입니다.** 1.0부터 public API는 strict semver 하의 frozen 계약입니다. `package.json`의 `exports` 표면, CLI의 기계 판독 동작, audit event schema, config key shape이 모두 major 버전 계약의 일부이며, 문서화된 deprecation 정책과 in-minor 보안 예외 하나가 함께 적용됩니다. [`docs/current/api-stability.md`](docs/current/api-stability.md)를 참고하세요. `haechi-*` 위성은 pre-1.0으로 유지되며 core와 독립적으로 버저닝됩니다([위성 패키지](#위성-패키지) 참고).
 
 현재 범위는 로컬 도입에 초점을 맞춥니다.
 
@@ -195,14 +195,27 @@ haechi auth revoke <id>
 - **Rate limit**: identity별 분당 요청 수 → `429`(인메모리, 프로세스별).
 - Audit 이벤트에는 **PII-safe** `identity`(keyed-HMAC subject/issuer이며 원시 값이 아닙니다)와 매핑된 `profile`이 들어가고, `auth_denied`/`model_not_allowed`/`rate_limited` 결정에는 credential이 포함되지 않습니다. `/__haechi/health`는 인증 없이 접근할 수 있습니다.
 
-JWT/JWKS 인증과 KMS 기반 key custody는 `haechi-*` 위성 패키지로 제공되며, 각각 core와 독립적으로 버저닝·발행됩니다. 위성은 pre-1.0으로 유지되며 `haechi` peer 범위를 `>=0.8.0 <2.0.0`으로 선언합니다(상한이 core major를 따라가므로 core 1.0.0이 위성 설치를 깨뜨리지 않습니다).
+JWT/JWKS 인증과 KMS 기반 key custody(및 기타 선택 기능)는 **`haechi-*` 위성 패키지**로 제공됩니다 — 아래 [위성 패키지](#위성-패키지)를 참고하세요.
 
-- [`haechi-auth-jwt`](satellites/auth-jwt/)(0.2.1) — 헤드리스 JWKS bearer 검증. 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 추가로 export합니다.
-- [`haechi-crypto-kms`](satellites/crypto-kms/)(0.2.1) — 실제 KMS 클라이언트 기반 envelope 암호화. AWS에 더해 GCP(`./gcp`), Azure(`./azure`), HashiCorp Vault Transit(`./vault`, `node:` 전용) 백엔드를 지원합니다.
-- [`haechi-dashboard`](satellites/dashboard/)(0.1.2) — audit 로그와 hash chain 상태를 보는 zero-dependency 읽기 전용 audit 뷰어(`node:http`)입니다.
-- [`haechi-auth-oidc`](satellites/auth-oidc/)(0.1.2) — 대시보드의 사람 로그인을 담당하는 대화형 OIDC 세션 브로커(authorization-code + PKCE)입니다.
+## 위성 패키지
 
-위성은 기본적으로 `node:` 전용이며(무거운 SDK는 optional peer), core를 zero-dependency로 유지합니다.
+선택 기능은 **npm에 독립 발행되는 `haechi-*` 패키지**로 제공됩니다 — 각각 core와 별도로 버저닝되고, 기본적으로 `node:` 전용이며(KMS나 Redis 클라이언트 같은 무거운 SDK는 optional peer), `haechi` peer 범위를 `>=0.8.0 <2.0.0`으로 선언합니다(상한이 core major를 따라가므로 core minor가 위성 설치를 깨뜨리지 않습니다).
+
+**위성과 함께 core를 반드시 설치하세요** — `haechi`는 **번들되지 않은 peer dependency**이므로, 위성만으로는 동작하지 않습니다:
+
+```bash
+npm install haechi haechi-<satellite>
+```
+
+| 패키지 | 추가하는 기능 |
+|---|---|
+| [`haechi-auth-jwt`](satellites/auth-jwt/) | 헤드리스 JWKS bearer(JWT) `authProvider`. 재사용 가능한 JWS 검증기(`createJwtVerifier`)를 추가로 export합니다. |
+| [`haechi-auth-oidc`](satellites/auth-oidc/) | 대화형 OIDC 세션 브로커(authorization-code + PKCE) — 대시보드의 사람 로그인. `haechi-auth-jwt`를 재사용합니다. |
+| [`haechi-crypto-kms`](satellites/crypto-kms/) | `keys.provider: external`용 envelope 암호화 `cryptoProvider` — AWS, GCP(`./gcp`), Azure(`./azure`), HashiCorp Vault Transit(`./vault`, `node:` 전용) 백엔드. |
+| [`haechi-dashboard`](satellites/dashboard/) | audit 로그와 hash chain 상태를 보는 zero-dependency 읽기 전용 audit 뷰어(`node:http`). |
+| [`haechi-ratelimit-redis`](satellites/ratelimit-redis/) | `providers.rateLimiter` 주입 시임을 통한 다중 복제용 공유 저장소(Redis 기반) `rateLimiter`. |
+
+각 패키지의 README가 사용법과 정확한 peer 요구사항을 다룹니다. 위성의 무거운 SDK는 해당 백엔드를 쓸 때만 설치되는 optional peer라 core는 zero-dependency로 유지됩니다.
 
 ## 설정
 

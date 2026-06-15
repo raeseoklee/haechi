@@ -11,10 +11,10 @@ The envelope matches Haechi's contract (`v, alg, kid, iv, ct, tag, aadHash`) plu
 ## Install
 
 ```sh
-npm install haechi-crypto-kms        # peer: haechi >=0.8.0 <1.0.0
+npm install haechi haechi-crypto-kms        # peer: haechi >=0.8.0 <2.0.0
 ```
 
-The satellite reuses your installed `haechi` instance (declared as a peer dependency), so there is a single crypto/identity surface.
+**`haechi` (the core) must be installed** — it is a peer dependency, not bundled. The satellite reuses your installed `haechi` instance (declared as a peer dependency), so there is a single crypto/identity surface.
 
 ## The KMS client interface
 

@@ -2,6 +2,14 @@
 
 A **headless** JWKS bearer (JWT) `authProvider` for Haechi. It verifies an `Authorization: Bearer <jwt>` against an issuer's JWKS and resolves a **PII-safe identity** — using `node:` builtins only (no `jose`). Published independently as `haechi-auth-jwt`; it adds **no runtime dependency** to core.
 
+## Install
+
+```sh
+npm install haechi haechi-auth-jwt   # peer: haechi >=0.8.0 <2.0.0
+```
+
+**`haechi` (the core) must be installed** — it is a peer dependency, not bundled. This satellite imports `haechi/runtime` and reuses your installed `haechi` instance (single crypto/identity surface), so install the core alongside it.
+
 ## Usage
 
 ```js
