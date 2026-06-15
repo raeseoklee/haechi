@@ -7,10 +7,10 @@ It is **not** a per-request bearer validator — that role stays with [`haechi-a
 ## Install
 
 ```bash
-npm install haechi-auth-oidc      # peers: haechi >=0.8.0, haechi-auth-jwt >=0.2.0
+npm install haechi haechi-auth-jwt haechi-auth-oidc   # peers: haechi >=0.8.0 <2.0.0, haechi-auth-jwt >=0.2.0
 ```
 
-Zero runtime dependency — `node:` builtins (`crypto`, `dns`, `fetch`) plus the two peer imports only.
+**`haechi` (the core) must be installed** — it is a peer dependency, not bundled (and so is `haechi-auth-jwt`, whose verifier this broker reuses). Zero runtime dependency — `node:` builtins (`crypto`, `dns`, `fetch`) plus the two peer imports only.
 
 ## Usage
 

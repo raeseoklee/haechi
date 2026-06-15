@@ -7,6 +7,14 @@ step) plus a read-only JSON API over the audit log and its hash-chain status.
 **no runtime dependency** to core. It takes **paths** (`auditPath`/`anchorPath`),
 not a full runtime.
 
+## Install
+
+```sh
+npm install haechi haechi-dashboard   # peer: haechi >=0.8.0 <2.0.0
+```
+
+**`haechi` (the core) must be installed** — it is a peer dependency, not bundled. The dashboard imports `haechi/audit` and `haechi/proxy` from your installed `haechi` instance, so install the core alongside it.
+
 ## Usage
 
 ### Programmatic

@@ -17,10 +17,10 @@ The proxy `await`s `rateLimiter.allow(key, limit)`, so this async limiter gates 
 ## Install
 
 ```sh
-npm install haechi-ratelimit-redis        # peer: haechi >=0.8.0 <2.0.0
+npm install haechi haechi-ratelimit-redis        # peer: haechi >=0.8.0 <2.0.0
 ```
 
-The satellite reuses your installed `haechi` instance (declared as a peer dependency).
+**`haechi` (the core) must be installed** — it is a peer dependency, not bundled. The satellite reuses your installed `haechi` instance (declared as a peer dependency).
 
 ## The store contract
 
