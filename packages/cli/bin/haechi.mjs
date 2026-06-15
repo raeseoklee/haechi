@@ -737,7 +737,8 @@ Enforcement
 
 Upstream + proxy
   target.type               llm-http | openai-compatible | vllm-openai |
-                            ollama | llama-cpp                 (unknown = fail)
+                            ollama | llama-cpp | anthropic |
+                            gemini                             (unknown = fail)
   target.upstream           the only upstream the proxy forwards to
   proxy.host / proxy.port   127.0.0.1 / ${DEFAULT_PROXY_PORT}
                             non-loopback host needs --allow-remote-bind (CLI flag)
