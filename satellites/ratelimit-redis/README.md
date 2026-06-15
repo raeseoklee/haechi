@@ -89,4 +89,16 @@ const limiter = createSharedRateLimiter({ store: createMemoryStore() });
 await limiter.allow("alice", 3); // true, true, true, then false
 ```
 
+## Validating against a real Redis
+
+The unit tests use a mock client. To validate the bundled Redis adapter against a **real** Redis — and prove that two limiter instances (two replicas) sharing one Redis enforce a single budget — run the optional integration test, which is skipped unless `HAECHI_REDIS_URL` is set:
+
+```bash
+npm i -D redis   # once, in the repo root (redis is an optional peer)
+HAECHI_REDIS_URL=redis://127.0.0.1:6379 \
+  node --test satellites/ratelimit-redis/ratelimit-redis.integration.test.mjs
+```
+
+It asserts cross-replica shared enforcement (3 hits on replica A + 1 on replica B = the budget; the 5th is denied on either connection), per-identity isolation, and fixed-window reset — all against the live server.
+
 See [`configuration.md` → Rate limiter injection](https://github.com/raeseoklee/haechi/blob/main/docs/current/configuration.md) and [shared-responsibility.md §4](https://github.com/raeseoklee/haechi/blob/main/docs/current/shared-responsibility.md).
