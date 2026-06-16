@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { once } from "node:events";
 import { inspectResponseStream } from "../stream-filter/index.mjs";
 
 export const DEFAULT_PROXY_PORT = 11016;
@@ -106,6 +107,19 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
   // no-op so a hand-built runtime object without metrics still works.
   const metrics = runtime.metrics ?? noopMetrics();
   const logger = createLogger(config.logging?.format ?? "text");
+
+  // P0-CR-001 — the upstream header forward policy, derived ONCE from config.
+  // gatewayConsumedAuthorization is true whenever the gateway authenticates the
+  // CLIENT (auth.provider !== "none"): the request's Authorization is then the
+  // gateway credential Haechi consumed and must NOT be forwarded to the model
+  // upstream. With auth.provider "none" the client's Authorization is the
+  // upstream provider key and IS forwarded. extraHeaders is the operator's
+  // additive target.forwardHeaders allowlist (validated lowercase in
+  // normalizeConfig); it can only widen, never override the always-drop set.
+  const forwardPolicy = {
+    gatewayConsumedAuthorization: (config.auth?.provider ?? "none") !== "none",
+    extraHeaders: new Set(config.target?.forwardHeaders ?? [])
+  };
 
   // WS4-B backpressure: a configurable global max-in-flight ceiling. 0 (default)
   // disables it, preserving 1.1 behavior. When > 0 and the live count is at the
@@ -237,7 +251,7 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
 
       if (isStreamingRequest(json, routeContext)) {
         if (config.streaming.requestMode === "inspect") {
-          await handleInspectedStream({ runtime, request, response, routeContext, json, authContext, metrics });
+          await handleInspectedStream({ runtime, request, response, routeContext, json, authContext, metrics, forwardPolicy });
           return;
         }
 
@@ -259,11 +273,24 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
             request,
             body,
             timeoutMs: config.limits.upstreamTimeoutMs,
-            metrics
+            metrics,
+            forwardPolicy
           });
-          const { body: rawBody } = await readUpstreamBody(upstreamResponse);
-          response.writeHead(upstreamResponse.status, Object.fromEntries(upstreamResponse.headers.entries()));
-          response.end(rawBody);
+          // P1-CR-003 — sanitize response headers (strip the upstream's
+          // content-encoding/content-length/transfer/hop-by-hop) on this path
+          // too: Node fetch() auto-decompressed the body, so the original
+          // compressed headers would now be wrong. P1-CR-004 — TRUE bounded
+          // streaming pass-through: pipe the upstream body to the client with a
+          // running byte cap instead of buffering the whole response.
+          response.writeHead(upstreamResponse.status, sanitizeResponseHeaders(upstreamResponse));
+          await pipeUpstreamBodyBounded({
+            upstreamResponse,
+            response,
+            maxBytes: streamingPassThroughMaxBytes(config),
+            logger,
+            metrics,
+            correlationId
+          });
           return;
         }
 
@@ -301,7 +328,8 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
         request,
         body: JSON.stringify(result.payload),
         timeoutMs: config.limits.upstreamTimeoutMs,
-        metrics
+        metrics,
+        forwardPolicy
       });
 
       const forwarded = await maybeProtectResponse({
@@ -633,7 +661,7 @@ async function recordAuthDenied({ runtime, routeContext, reason, correlationId =
   });
 }
 
-async function handleInspectedStream({ runtime, request, response, routeContext, json, authContext = {}, metrics = null }) {
+async function handleInspectedStream({ runtime, request, response, routeContext, json, authContext = {}, metrics = null, forwardPolicy = {} }) {
   const { haechi, config } = runtime;
   const requestMode = config.policy.mode ?? config.mode;
 
@@ -674,7 +702,8 @@ async function handleInspectedStream({ runtime, request, response, routeContext,
     request,
     body: JSON.stringify(requestResult.payload),
     timeoutMs: config.limits.upstreamTimeoutMs,
-    metrics
+    metrics,
+    forwardPolicy
   });
 
   const streamMode = config.streaming.responseMode ?? config.responseProtection.mode ?? config.policy.mode ?? config.mode;
@@ -687,7 +716,7 @@ async function handleInspectedStream({ runtime, request, response, routeContext,
     maxMatchBytes: config.streaming.maxMatchBytes
   });
 
-  response.writeHead(upstreamResponse.status, streamingResponseHeaders(upstreamResponse));
+  response.writeHead(upstreamResponse.status, sanitizeResponseHeaders(upstreamResponse));
 
   const { blocked, summary } = await inspectResponseStream({
     source: upstreamResponse.body ?? emptyAsyncIterable(),
@@ -708,11 +737,95 @@ async function handleInspectedStream({ runtime, request, response, routeContext,
   response.end();
 }
 
-function streamingResponseHeaders(upstreamResponse) {
+// P1-CR-003 — the SINGLE centralized response-header sanitizer used on EVERY
+// response path (pass-through, forwarded/unprotected, protected, streaming).
+// Node fetch() auto-decompresses gzip/br/deflate, so the upstream's original
+// content-encoding/content-length now describe the WIRE bytes Haechi no longer
+// emits — forwarding them makes a downstream client see "content-encoding: gzip"
+// on plain bytes and fail with "incorrect header check". transfer-encoding and
+// the hop-by-hop control headers (RFC 7230 §6.1) likewise describe the upstream
+// hop, not Haechi's connection to the client, so they are stripped too. A
+// correct content-length is re-set ONLY by a caller that emits a fully-buffered
+// body (transformedJsonHeaders / the buffered-body helper below); a streamed or
+// raw-piped body intentionally carries no content-length.
+const RESPONSE_HOP_BY_HOP_HEADERS = [
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authenticate"
+];
+
+function sanitizeResponseHeaders(upstreamResponse) {
   const headers = Object.fromEntries(upstreamResponse.headers.entries());
-  delete headers["content-length"];
-  delete headers["content-encoding"];
+  for (const name of RESPONSE_HOP_BY_HOP_HEADERS) {
+    delete headers[name];
+  }
   return headers;
+}
+
+// P1-CR-004 — the byte cap for the streaming pass-through path. Reuse
+// responseProtection.maxBytes (the existing hard response-size cap) so a single
+// dial governs all raw upstream-body reads; falls back to a 1 MiB default for a
+// hand-built config without responseProtection.
+function streamingPassThroughMaxBytes(config) {
+  const cap = config.responseProtection?.maxBytes;
+  return typeof cap === "number" && cap > 0 ? cap : 1048576;
+}
+
+// P1-CR-004 — TRUE bounded streaming pass-through. Pipe the upstream body to the
+// client response as it arrives (real streaming) while counting bytes; if the
+// running total exceeds maxBytes, abort: cancel the upstream reader and destroy
+// the client response so a long-lived or malicious stream cannot hold memory or
+// the connection open unbounded. Bytes already written cannot be retracted, so
+// this caps total memory/throughput, not the already-flushed prefix.
+async function pipeUpstreamBodyBounded({ upstreamResponse, response, maxBytes, logger = null, metrics = null, correlationId = null }) {
+  if (!upstreamResponse.body) {
+    response.end();
+    return;
+  }
+
+  const reader = upstreamResponse.body.getReader();
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      received += value.byteLength;
+      if (maxBytes && received > maxBytes) {
+        // Over the cap: stop reading upstream and tear down the client write so
+        // the oversize stream is bounded (fail-closed on size).
+        void cancelReader(reader);
+        metrics?.increment("haechi_response_stream_truncated_total");
+        logger?.error("proxy_stream_pass_through_too_large", {
+          correlationId,
+          maxBytes
+        });
+        if (!response.writableEnded) {
+          response.destroy();
+        }
+        return;
+      }
+      // Respect downstream backpressure: stop pulling upstream until the client
+      // socket has drained.
+      const ok = response.write(Buffer.from(value));
+      if (!ok) {
+        await once(response, "drain");
+      }
+    }
+    response.end();
+  } catch (error) {
+    void cancelReader(reader);
+    if (!response.writableEnded) {
+      response.destroy();
+    }
+  }
 }
 
 function nodeResponseSink(response) {
@@ -751,20 +864,42 @@ async function recordStreamDecision({ runtime, routeContext, blocked, summary, m
 }
 
 async function maybeProtectResponse({ upstreamResponse, routeContext, runtime, authContext = {}, issuedTokens = [], metrics = null }) {
-  const headers = Object.fromEntries(upstreamResponse.headers.entries());
+  // P1-CR-003 — content-encoding is read off the RAW upstream headers (before
+  // sanitation) for the compressed-response gate; the headers RETURNED to the
+  // client are always the sanitized set (no stale compression/length metadata).
+  const rawHeaders = Object.fromEntries(upstreamResponse.headers.entries());
+  const headers = sanitizeResponseHeaders(upstreamResponse);
 
   if (!runtime.config.responseProtection.enabled || !routeContext.protectResponse) {
-    const { body: rawBody } = await readUpstreamBody(upstreamResponse);
+    // P1-CR-004 — apply the same byte cap to this raw upstream-body read so an
+    // unprotected/forwarded response cannot be buffered unbounded. Fail closed
+    // (502) when the upstream body exceeds the cap.
+    const passThroughMax = streamingPassThroughMaxBytes(runtime.config);
+    const { body: rawBody, tooLarge } = await readUpstreamBody(upstreamResponse, { maxBytes: passThroughMax });
+    if (tooLarge) {
+      metrics?.increment("haechi_response_stream_truncated_total");
+      return {
+        decision: "response_unprotected_blocked",
+        status: 502,
+        headers: { "content-type": "application/json" },
+        body: Buffer.from(`${JSON.stringify({
+          error: "haechi_response_too_large",
+          reason: "response_body_too_large",
+          message: `Response body exceeds responseProtection.maxBytes (${passThroughMax})`
+        }, null, 2)}\n`)
+      };
+    }
     return {
       status: upstreamResponse.status,
-      headers,
+      // Re-set a correct content-length: this is a fully-buffered body.
+      headers: { ...headers, "content-length": String(rawBody.byteLength) },
       body: rawBody,
       decision: "forwarded"
     };
   }
 
   const responsePolicy = runtime.config.responseProtection;
-  const contentEncoding = headers["content-encoding"] ?? "";
+  const contentEncoding = rawHeaders["content-encoding"] ?? "";
   const bodyRead = await readUpstreamBody(upstreamResponse, { maxBytes: responsePolicy.maxBytes });
 
   if (bodyRead.tooLarge) {
@@ -916,12 +1051,12 @@ function restoreTokens(value, tokenValues) {
   return value;
 }
 
-async function forward({ upstream, request, body, timeoutMs = null, metrics = null }) {
+async function forward({ upstream, request, body, timeoutMs = null, metrics = null, forwardPolicy = {} }) {
   const target = buildUpstreamUrl({ upstream, requestUrl: request.url });
   try {
     return await fetch(target, {
       method: request.method,
-      headers: filteredHeaders(request.headers),
+      headers: filteredHeaders(request.headers, forwardPolicy),
       body: request.method === "GET" || request.method === "HEAD" ? undefined : body,
       signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined
     });
@@ -949,22 +1084,115 @@ function buildUpstreamUrl({ upstream, requestUrl }) {
   return new URL(`${parsed.pathname}${parsed.search}`, upstream.endsWith("/") ? upstream : `${upstream}/`);
 }
 
-function filteredHeaders(headers) {
+// P0-CR-001 — DEFAULT-DROP upstream header allowlist. The client's request
+// headers cross from the local gateway trust boundary into the MODEL PROVIDER
+// boundary, so the policy is: forward ONLY a known-safe set; everything else
+// (including ambient client credentials — Cookie, Proxy-Authorization, and the
+// client's gateway Authorization) is dropped. The conditional `authorization`
+// rule is handled in filteredHeaders against the forward policy. An operator can
+// additively widen the set with `target.forwardHeaders` for an unusual upstream.
+//
+// The forwarded set is exactly the headers the OpenAI-compatible / Anthropic /
+// Gemini adapters need: the provider key headers (x-api-key, x-goog-api-key,
+// openai-organization, openai-beta), provider version/feature pins
+// (anthropic-version, anthropic-beta), and benign request metadata (accept,
+// content-type — always rewritten to application/json, user-agent,
+// accept-language). content-type is set unconditionally below so it is NOT in
+// this set.
+const FORWARD_HEADER_ALLOWLIST = new Set([
+  "x-api-key",
+  "anthropic-version",
+  "anthropic-beta",
+  "x-goog-api-key",
+  "openai-organization",
+  "openai-beta",
+  "accept",
+  "user-agent",
+  "accept-language"
+]);
+
+// ALWAYS-DROP: ambient client credentials + hop-by-hop control headers. These
+// must NEVER reach the upstream regardless of the allowlist or the operator's
+// target.forwardHeaders extension (a fail-closed denylist that wins over both).
+//   - host / content-length: rewritten/recomputed by fetch for the new request.
+//   - cookie / set-cookie / proxy-authorization: ambient client credentials.
+//   - connection / keep-alive / te / trailer / transfer-encoding / upgrade:
+//     hop-by-hop headers (RFC 7230 §6.1) that must not be tunneled end-to-end.
+const FORWARD_HEADER_DENYLIST = new Set([
+  "host",
+  "content-length",
+  "cookie",
+  "set-cookie",
+  "proxy-authorization",
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade"
+]);
+
+// `forwardPolicy` is built by createHaechiProxy from the runtime: it carries
+//   - gatewayConsumedAuthorization: true when auth.provider !== "none", i.e. the
+//     gateway authenticated the CLIENT with the request's Authorization. That
+//     header is the GATEWAY credential Haechi already consumed; forwarding it
+//     would leak a gateway secret into the model provider, so it is DROPPED.
+//     When false (auth.provider "none"), the client's Authorization is the
+//     UPSTREAM provider key (the OpenAI-compatible pass-through pattern), so it
+//     is FORWARDED.
+//   - extraHeaders: the operator's additive target.forwardHeaders allowlist
+//     (lowercase names) — never able to override the always-drop denylist.
+function filteredHeaders(headers, forwardPolicy = {}) {
+  const gatewayConsumedAuthorization = Boolean(forwardPolicy.gatewayConsumedAuthorization);
+  const extraHeaders = forwardPolicy.extraHeaders instanceof Set
+    ? forwardPolicy.extraHeaders
+    : new Set(Array.isArray(forwardPolicy.extraHeaders) ? forwardPolicy.extraHeaders : []);
+
   const next = new Headers();
   for (const [key, value] of Object.entries(headers)) {
-    if (!value || ["host", "content-length"].includes(key.toLowerCase())) {
+    if (!value) {
       continue;
     }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        next.append(key, item);
-      }
-    } else {
-      next.set(key, value);
+    const name = key.toLowerCase();
+
+    // Always-drop wins over everything (credentials + hop-by-hop).
+    if (FORWARD_HEADER_DENYLIST.has(name)) {
+      continue;
     }
+
+    // Conditional gateway-vs-upstream Authorization separation.
+    if (name === "authorization") {
+      if (gatewayConsumedAuthorization) {
+        // Gateway token Haechi already consumed — must not leak upstream.
+        continue;
+      }
+      // auth.provider "none": the client put the UPSTREAM provider key here.
+      appendHeader(next, key, value);
+      continue;
+    }
+
+    // content-type is rewritten unconditionally below; skip the client's value.
+    if (name === "content-type") {
+      continue;
+    }
+
+    if (FORWARD_HEADER_ALLOWLIST.has(name) || extraHeaders.has(name)) {
+      appendHeader(next, key, value);
+    }
+    // Everything else is default-dropped (fail-closed).
   }
   next.set("content-type", "application/json");
   return next;
+}
+
+function appendHeader(target, key, value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      target.append(key, item);
+    }
+  } else {
+    target.set(key, value);
+  }
 }
 
 function readBody(request, { maxBytes }) {
@@ -1042,9 +1270,13 @@ function isJson(contentType = "") {
 }
 
 function transformedJsonHeaders(headers) {
+  // P1-CR-003 — defensively strip the full hop-by-hop/compression set (the
+  // caller already passes the sanitized headers, but the transformed JSON body
+  // is freshly serialized, so any stale length/encoding metadata must not leak).
   const next = { ...headers, "content-type": "application/json" };
-  delete next["content-length"];
-  delete next["content-encoding"];
+  for (const name of RESPONSE_HOP_BY_HOP_HEADERS) {
+    delete next[name];
+  }
   return next;
 }
 
@@ -1077,10 +1309,13 @@ async function unprotectedResponseDecision({
   metrics?.increment("haechi_response_unprotected_total");
 
   if (allowed) {
+    // P1-CR-003 — `headers` is already the sanitized set (no stale
+    // compression/length metadata). Re-set a correct content-length for this
+    // fully-buffered body.
     return {
       decision,
       status: upstreamResponse.status,
-      headers,
+      headers: { ...headers, "content-length": String(rawBody.byteLength) },
       body: rawBody
     };
   }

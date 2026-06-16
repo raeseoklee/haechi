@@ -9,7 +9,7 @@
 |---|---|---|
 | 로컬 개발 | CLI, default config, dev key 생성 | dev key를 운영 환경이나 공유 환경에 재사용하지 않습니다 |
 | 정책 집행 | redact/mask/tokenize/encrypt/block pipeline | 규제 정책과 조직 정책에 맞는 action을 선택합니다 |
-| HTTP proxy | loopback 기본값, remote bind guard, body/response limit | 인증, TLS termination, firewall, upstream auth를 담당합니다 |
+| HTTP proxy | loopback 기본값, remote bind guard, body/response limit, 기본 차단 upstream 헤더 허용목록(gateway-클라이언트 인증과 upstream-제공자 인증 분리) | 인증, TLS termination, firewall, upstream auth를 담당합니다. upstream 제공자 키는 의도적으로 공급합니다(클라이언트 `Authorization`은 `auth.provider: none`일 때만 전달되며, 그 외에는 `x-api-key` 같은 제공자 키 헤더를 설정하거나 추가 헤더를 `target.forwardHeaders`에 나열합니다) |
 | Streaming | 기본 차단 | pass-through를 사용할 때 보호가 적용되지 않는 위험을 감수합니다 |
 | TokenVault | 암호화 저장, reveal 기본 차단, purge | reveal 승인 절차와 DSAR/retention 운영을 담당합니다 |
 | Audit | 평문 제거, hash chain | append-only storage, backup, 보존 기간, 외부 서명을 담당합니다 |
@@ -45,3 +45,12 @@ Haechi의 상태 보유 통제는 설계상 단일 프로세스입니다. 로드
 - **Audit hash chain + anchor**는 단일 작성자입니다. 각 복제본에 **고유한** `audit.path`(및 anchor 경로)를 주세요. 하나의 audit 파일을 복제본 간에 공유하면 체인이 분기되어 검증 불가 상태가 됩니다.
 - **TokenVault와 auth store**는 whole-file 로컬 저장소입니다 — 단일 호스트에서는 올바르지만 공유 다중 작성자 저장소는 아닙니다. 다중 복제 토큰화에는 공유 `tokenVault`를 주입하세요.
 - 파일 락은 `O_EXCL` + atomic rename에 의존하며 NFS/공유 파일시스템에서는 보장되지 않습니다 — 이 저장소들은 로컬 디스크에 두세요.
+
+## 5. Gateway 인증과 upstream 인증 (헤더 전달)
+
+Haechi는 **gateway-클라이언트 인증**과 **upstream-제공자 인증**을 분리합니다. proxy는 임의의 클라이언트 헤더를 모델 upstream으로 전달하지 않고 기본 차단 허용목록을 적용합니다(P0-CR-001):
+
+- `auth.provider`가 `bearer`/`external`/`plugin`이면 클라이언트의 `Authorization`은 Haechi가 소비한 **gateway credential**이므로 upstream으로 **절대 전달되지 않습니다**. upstream 제공자 키는 별도로 공급하세요 — 클라이언트 요청에 제공자 키 헤더(`x-api-key`, `x-goog-api-key` 등, 모두 허용목록에 포함)를 설정하거나, 자체 credential 주입으로 upstream을 감싸십시오.
+- `auth.provider`가 `none`이면 클라이언트의 `Authorization`은 **upstream 제공자 키**로 간주되어 전달됩니다(OpenAI 호환 pass-through 패턴).
+- `Cookie`, `Set-Cookie`, `Proxy-Authorization`, hop-by-hop 헤더는 항상 폐기되고, 허용목록에 없는 헤더는 기본 폐기됩니다. 특이한 upstream에는 `target.forwardHeaders`(소문자 이름)로 허용목록을 넓히세요 — 항상 폐기되는 credential/hop-by-hop 헤더는 다시 켤 수 없습니다.
+- **운영자 책임:** upstream이 필요한 credential 헤더를 실제로 받는지 확인하고(gateway 인증에서는 gateway가 더 이상 클라이언트 `Authorization`을 중계하지 않습니다), `target.forwardHeaders`는 무분별한 통과 목록이 아니라 검토된 허용목록으로 다루세요.

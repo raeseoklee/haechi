@@ -118,7 +118,7 @@ Haechi는 OpenAI 호환 서버, vLLM, Ollama, llama.cpp, Anthropic Messages API,
 }
 ```
 
-그런 다음 OpenAI 호환 클라이언트를 `http://127.0.0.1:11016/v1`으로 향하게 합니다. Ollama 네이티브 API는 `target.adapter: "ollama"`를 사용하고 proxy를 통해 `/api/chat` 또는 `/api/generate`를 호출하세요. Claude는 `target.type: "anthropic"`을 설정하고 `/v1/messages`(또는 `/v1/messages/count_tokens`, `/v1/complete`)를 호출하세요. 클라이언트의 `x-api-key`/`anthropic-version` 헤더는 upstream으로 그대로 전달됩니다. Gemini는 `target.type: "gemini"`를 설정하고 모델이 경로에 포함된 엔드포인트 `/v1beta/models/{model}:generateContent`(또는 `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`)를 호출하세요. 클라이언트의 `x-goog-api-key`(또는 `?key=`)는 upstream으로 그대로 전달됩니다.
+그런 다음 OpenAI 호환 클라이언트를 `http://127.0.0.1:11016/v1`으로 향하게 합니다. Ollama 네이티브 API는 `target.adapter: "ollama"`를 사용하고 proxy를 통해 `/api/chat` 또는 `/api/generate`를 호출하세요. Claude는 `target.type: "anthropic"`을 설정하고 `/v1/messages`(또는 `/v1/messages/count_tokens`, `/v1/complete`)를 호출하세요. 클라이언트의 `x-api-key`/`anthropic-version` 헤더는 upstream으로 전달됩니다(upstream 헤더 허용목록에 포함되어 있습니다). Gemini는 `target.type: "gemini"`를 설정하고 모델이 경로에 포함된 엔드포인트 `/v1beta/models/{model}:generateContent`(또는 `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`)를 호출하세요. 클라이언트의 `x-goog-api-key`(또는 `?key=`)는 upstream으로 전달됩니다. proxy는 명시적 허용목록의 헤더만 전달하고 클라이언트의 주변 credential은 절대 전달하지 않습니다 — [Gateway 인증과 upstream 인증의 분리](#gateway-인증과-upstream-인증의-분리-헤더-전달)를 참고하세요.
 
 ## 토큰 왕복
 
@@ -195,6 +195,16 @@ haechi auth revoke <id>
 - **Rate limit**: identity별 분당 요청 수 → `429`(인메모리, 프로세스별).
 - Audit 이벤트에는 **PII-safe** `identity`(keyed-HMAC subject/issuer이며 원시 값이 아닙니다)와 매핑된 `profile`이 들어가고, `auth_denied`/`model_not_allowed`/`rate_limited` 결정에는 credential이 포함되지 않습니다. `/__haechi/health`는 인증 없이 접근할 수 있습니다.
 
+### Gateway 인증과 upstream 인증의 분리 (헤더 전달)
+
+Haechi는 **gateway-클라이언트 인증**과 **upstream-제공자 인증**을 분리하며, 요청 헤더를 모델 upstream으로 무조건 전달하지 않습니다. proxy는 **기본 차단(default-drop) 허용목록**을 적용합니다. 알려진 안전한 헤더 집합만 모델 제공자 경계로 넘어가고, 클라이언트의 주변(ambient) credential은 폐기됩니다.
+
+- **`auth.provider: bearer` / `external` / `plugin` (gateway가 클라이언트를 인증).** 클라이언트의 `Authorization` 헤더는 Haechi가 클라이언트 인증에 사용한 **gateway credential**이므로 **폐기됩니다** — upstream으로 절대 전달되지 않습니다. 이로써 gateway 토큰이 신뢰 경계를 넘어 모델 제공자로 유출되는 것을 막습니다.
+- **`auth.provider: none` (gateway 인증 없음).** 클라이언트의 `Authorization` 헤더는 **upstream 제공자 키**로 간주되어 **전달됩니다**(클라이언트가 `Authorization`에 모델 API 키를 넣는 OpenAI 호환 pass-through 패턴).
+- **모드와 무관하게 항상 폐기:** `Cookie`, `Set-Cookie`, `Proxy-Authorization`, hop-by-hop 헤더(`Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`), 그리고 허용목록에 없는 모든 헤더.
+- **항상 전달(제공자/어댑터 헤더):** `x-api-key`, `anthropic-version`, `anthropic-beta`, `x-goog-api-key`, `openai-organization`, `openai-beta`, `accept`, `accept-language`, `user-agent`, 그리고 `content-type`(`application/json`으로 재작성).
+- **예외 통로:** 특이한 upstream이 추가 헤더를 요구하면 그 소문자 이름을 `target.forwardHeaders`에 나열하십시오(예: `"forwardHeaders": ["x-tenant-id"]`). 이는 허용목록을 **추가로 넓히기만** 할 수 있으며, 항상 폐기되는 credential/hop-by-hop 헤더를 다시 켤 수는 없습니다(해당 이름은 설정 시점에 fail-closed로 거부됩니다).
+
 JWT/JWKS 인증과 KMS 기반 key custody(및 기타 선택 기능)는 **`haechi-*` 위성 패키지**로 제공됩니다 — 아래 [위성 패키지](#위성-패키지)를 참고하세요.
 
 ## 위성 패키지
@@ -226,6 +236,7 @@ npm install haechi haechi-<satellite>
 | `mode` / `policy.mode` | `dry-run` | `dry-run`과 `report-only`는 탐지와 audit만 하고, `enforce`는 변환/차단을 적용합니다. `policy.mode`가 `mode`보다 우선합니다 |
 | `target.type` / `target.adapter` | `llm-http` / `openai-compatible` | upstream 프로토콜: `openai-compatible`, `vllm-openai`, `ollama`, `llama-cpp`, `anthropic`, `gemini`. 알 수 없는 type은 fail-closed로 처리됩니다 |
 | `target.upstream` | `http://127.0.0.1:9999` | proxy가 요청을 전달하는 유일한 upstream(절대 URL 요청 대상은 거부됩니다) |
+| `target.forwardHeaders` | `[]`(미설정) | 내장 허용목록 외에 upstream으로 전달할 추가 소문자 헤더 이름. 추가만 가능하며, 항상 폐기되는 credential/hop-by-hop 헤더를 다시 켤 수는 없습니다 |
 | `proxy.host` / `proxy.port` | `127.0.0.1` / `11016` | proxy 바인드 주소. 아래 remote 바인딩 참고 |
 | `responseProtection.enabled` | `false` | upstream JSON 응답을 검사합니다. `failureMode: fail-closed`는 비JSON/압축/대용량 응답을 거부합니다 |
 | `responseProtection.maxBytes` | `1048576` | 응답 크기 상한 — `failureMode: allow`에서도 적용됩니다 |
