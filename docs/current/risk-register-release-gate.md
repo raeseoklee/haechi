@@ -1,20 +1,22 @@
 # Haechi Risk Register and Release Gates
 
 - Status: Living document (tracks core 1.3.x)
-- Date: 2026-06-11
+- Date: 2026-06-16
 - Target version: 1.3.x
 - Branch: `main`
 
 ## 1. Current Assessment
 
-Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haechi@0.3.2`) and every gate through G6 (1.1.0 plugin capability enforcement) are passed; the gate history below is retained as the audit trail. 1.0.0 declared the frozen API contract under strict semver (with a documented deprecation policy and `tests/api-contract.test.mjs` as the freeze guard) and narrowly lifted the dynamic-loading ban for a signed, sandboxed `authProvider` plugin; 1.1.0 added the opt-in `process-isolated` plugin runtime with kernel-enforced capability denial. The previously distribution-blocking conditions for the stable label — 1.0 API stability, the external `cryptoProvider`/KMS reference adapter (`haechi-crypto-kms`), and stream-aware enforcement (`streaming.requestMode: "inspect"`) — are all in place. Haechi remains a self-hosted security toolkit, not a compliance guarantee, and production deployments still own network access control, upstream authentication, and key custody (see §5 of the threat model).
+Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haechi@0.3.2`) and every gate through G8 (1.3.0 backend + detection coverage expansion) are passed; the gate history below is retained as the audit trail. 1.0.0 declared the frozen API contract under strict semver (with a documented deprecation policy and `tests/api-contract.test.mjs` as the freeze guard) and narrowly lifted the dynamic-loading ban for a signed, sandboxed `authProvider` plugin; 1.1.0 added the opt-in `process-isolated` plugin runtime with kernel-enforced capability denial. The previously distribution-blocking conditions for the stable label — 1.0 API stability, the external `cryptoProvider`/KMS reference adapter (`haechi-crypto-kms`), and stream-aware enforcement (`streaming.requestMode: "inspect"`) — are all in place. Haechi remains a self-hosted security toolkit, not a compliance guarantee, and production deployments still own network access control, upstream authentication, and key custody (see §5 of the threat model).
+
+**2026-06-16 current gate overlay:** a full code review opened the risk register at `docs/current/code-review-risk-register-2026-06-16.md`. The review found one P0 credential-boundary leak and four P1 release-blocking issues. Historical gates remain passed, but new release tags and npm publishes are blocked until the P0/P1 `P*-CR-*` findings in §5.7 are resolved or explicitly accepted with owner rationale.
 
 | Category | Judgment | Rationale |
 |---|---|---|
 | GitHub public | Allowed | Security limitations, threat model, and shared responsibility are documented |
-| GitHub release/tag | Allowed | Stable `1.x` line; release notes track each gate (G0–G6) |
-| npm stable | Allowed | The 1.0 stable label conditions — frozen API contract, external KMS reference adapter, and stream-aware enforcement — are met; core publishes with provenance |
-| Production use | Operator-gated | Supported as a self-hosted gateway when the operator supplies network access control, authentication/authorization, and production key custody; Haechi is not a compliance guarantee |
+| GitHub release/tag | Blocked for new tags | Existing releases remain historical records; new tags are blocked until §5.7 P0/P1 findings are resolved or formally accepted |
+| npm stable | Blocked for next publish | The stable-line baseline is met, but the current P0/P1 code-review overlay blocks the next npm publish |
+| Production use | Operator-gated with current warning | Supported only with operator network controls, authz/authn, and key custody; do not route sensitive third-party upstream traffic through the current proxy until P0-CR-001 is resolved or accepted |
 
 ## 2. Release Gates
 
@@ -29,6 +31,7 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | G6 | 1.1.0 plugin capability enforcement (`process-isolated`) | P1-SEC-027 / P1-SEC-028 mitigated; the `process-isolated` runtime (child under `--permission`, zero grants, `data:`-URL load, stdio-ignored, JSON-string IPC) + the fail-closed `--allow-net` feature detection (`netEnforcement:"require-permission"`) + the core `haechi/ssrf` guard + host-mediated key material + the spawn-storm circuit breaker; the fs/net/stdio red-team + SSRF + config tests green (the behavioral suite runs on a `--allow-net` Node and skips fail-closed otherwise); the API freeze stays green (additive `./ssrf` export + additive config keys); core stays zero runtime dependency; core bumped to 1.1.0 (additive + opt-in minor) | Pass |
 | G7 | 1.2.0 Reliability Hardening Track (WS1–WS6) | Detection quality measured + tightened (WS2: a labeled-corpus precision/recall `bench:detection` gate, credential + international-PII coverage, `filters.minConfidence` / `filters.allowlist` with the hard-block-types invariant, NFKC unicode-evasion folding with offset-integrity); WS3 injectable `rateLimiter` seam + bounded fixed-window map; WS4 operability (`/__haechi/live`+`/ready` split, injectable `/metrics`, structured logs + per-request `correlationId`, graceful drain, max-in-flight backpressure, env overlay, hardened Dockerfile/compose/runbook, `configVersion`); WS6 proxy TLS / remote-bind hardening (`proxy.tls` / `proxy.trustForwardedProto`, fail-closed `assertSafeProxyTransport`) + OWASP-LLM/NIST control-mapping whitepaper + RFC 9116 `security.txt` + vulnerability-disclosure path. Every change is additive behind 1.1-preserving defaults (`tests/api-contract.test.mjs` green); the no-plaintext-in-audit invariant extends to telemetry; core stays zero runtime dependency; core bumped to 1.2.0 (additive minor) | Pass |
 | G8 | 1.3.0 backend + detection coverage expansion | New protocol adapters for the **Anthropic Messages API** (`/v1/messages`, content-block + SSE `delta.text` with `event:`-line-preserving re-serialize) and the **Google Gemini API** (model-in-path `:generateContent`/`:streamGenerateContent` via an additive `:method`-suffix route matcher that leaves the exact-match adapters byte-identical); detection coverage expansion — cloud/SaaS provider keys (OpenAI/Anthropic/Google-OAuth/SendGrid/Twilio/npm/Azure, anchored) and international PII (FR/ES/JP + IT/SG/IN/DE/NL national IDs with checksum validators), each hard-block-vs-dial-eligible decision driven by measured collision rates (a non-numeric anchor or implausibly-rare shape is required for hard-block; a bare-digit run over a common length stays allowlist-clearable); a `bench:throughput` proxy load benchmark; the `haechi-ratelimit-redis` shared-store rate-limiter satellite (the WS3 seam's production consumer; the proxy now `await`s `rateLimiter.allow`); `haechi-dashboard` surfaces the per-request `correlationId`. Every change is additive — new `target.type`/detection-type/`privacy.profile` *values*, not new config keys (`configVersion` stays `1`); `tests/api-contract.test.mjs` green; core stays zero runtime dependency; core bumped to 1.3.0 (additive minor) | Pass |
+| G9 | 2026-06-16 full code-review remediation gate | `P0-CR-001` and `P1-CR-002` through `P1-CR-005` resolved or formally accepted; P2 items either resolved or scheduled with explicit non-blocking rationale; linked register updated | Blocked |
 
 ## 3. P0 Distribution-Blocking Risk Status
 
@@ -136,6 +139,26 @@ Additive, accumulating on `main` toward a later `1.2.0` minor; the seam + honest
 |---|---|---|---|
 | P1-OPS-010 | Proxy rate limiter is single-process and **not injectable**, and its fixed-window `Map` is **never pruned** — a one-shot identity's slot lingers forever, so a high-cardinality identity stream is unbounded memory growth keyed by identity; and a multi-replica deployment silently weakens the limit (per-process throughput multiplies by the replica count) with no replaceable seam | Mitigated | The rate limiter is now an **injectable collaborator** mirroring `cryptoProvider`/`auditSink`/`tokenVault`: `createRuntime(config, { rateLimiter })` (`packages/cli/runtime.mjs`) supplies it, `assertProvider("rateLimiter", …, ["allow"])` fails closed at construction if it lacks `allow()`, and it is exposed on the returned runtime object; the proxy consults `runtime.rateLimiter` (`packages/proxy/index.mjs`, with a backward-compatible local-default fallback for a hand-built runtime). The default per-process in-memory fixed-window limiter (the documented default; `allow(key, limit) -> boolean`, 429 semantics unchanged) is **self-bounding**: a lazy, amortized sweep evicts fully-expired window slots once the `Map` crosses a size threshold — **no background timer** (so `node --test` does not hang). A multi-replica operator injects a shared-store implementation (e.g. Redis) satisfying the same contract, or enforces the limit at a shared front door. Docs: `configuration.md`(+ko) "Rate limiter injection" seam, `shared-responsibility.md`(+ko) §4. Tests: `tests/rate-limiter.test.mjs` — an injected limiter is the one consulted (deny→429, allow→pass-through), fail-closed on a missing `allow()`, the default limiter prunes aged-out one-shot identities (bounded `Map` via `_size()`), and the fixed-window limit/isolation semantics are unchanged; the existing `tests/proxy-auth.test.mjs` 429 test stays green. **Residual:** core ships **no** built-in distributed limiter (track non-goal §5) — a shared-store implementation is the operator's injection or a future satellite; the default's per-process scope is the documented honest default |
 
+## 5.7 2026-06-16 Full Code Review Open Risk Status
+
+The authoritative itemized register is `docs/current/code-review-risk-register-2026-06-16.md`. This section is the release-gate summary. `P0-CR-001` and `P1-CR-002` through `P1-CR-005` block any new GitHub release tag or npm publish until they are resolved or explicitly accepted with owner rationale.
+
+| ID | Risk | Status | Required closure evidence |
+|---|---|---|---|
+| P0-CR-001 | Proxy forwards client `Authorization`, `Cookie`, proxy-auth, and similar ambient credentials to the model upstream | Open | Explicit upstream header allowlist; gateway-client auth separated from upstream-provider auth; regression proving Haechi bearer token is not visible to local upstream; provider credential pass-through only by explicit config/adapter rule |
+| P1-CR-002 | SSRF guard misses hex IPv4-mapped IPv6 private addresses such as `::ffff:7f00:1` | Open | Shared normalization/checker across core SSRF, auth-jwt, and KMS vault paths; dotted and hex mapped IPv6 private/public tests |
+| P1-CR-003 | Auto-decompressed upstream body can be returned with original compressed response headers | Open | Central response-header sanitation for all read/transformed-body paths; gzip/br protected and unprotected response tests |
+| P1-CR-004 | `streaming.requestMode: "pass-through"` buffers the full upstream body without a response-size cap | Open | True bounded streaming or fail-closed/disabled mode; byte and duration limits on all raw response reads; long-lived stream and client-disconnect tests |
+| P1-CR-005 | Streaming inspection raw-passes non-JSON SSE/NDJSON frames, allowing plain-text PII bypass | Open | Parse-failed content frames inspected as text; protocol-control allowlist; tests for plain-text SSE, malformed JSON with PII, and provider control frames |
+| P2-CR-006 | `mcp-wrap` inherits child `stderr` without filtering or audit | Open | Filter/drop/inherit mode with safe default, or explicit boundary documentation; stderr behavior test |
+| P2-CR-007 | Existing key files are not validated by `initLocalKeyFile()` | Open | Existing-file validation for active/retired keys; tests for malformed and valid migration cases |
+| P2-CR-008 | Satellite packaging check does not validate `manifest.bin` target files | Open | Packed-file validation for every bin target; negative fixture |
+| P2-CR-009 | `authProvider.authenticate()` exception path lacks regression coverage | Open | Test generic fail-closed client response, audit shape, and no raw provider error leak |
+| P2-CR-010 | Process-isolated sandbox quota branches lack parity tests | Open | Result-size, queue-capacity, timeout, and child-exit tests |
+| P2-CR-011 | Audit chain middle-tamper branches lack focused tests | Open | Tests for middle mutation, missing/wrong `prev`, and wrong `integrity.hash`; tail truncation remains documented as a limitation |
+| P2-CR-012 | KMS vault IPv6 loopback carve-out lacks IPv6-focused tests | Open | Tests for `::1`, `[::1]`, dotted mapped IPv6, and hex mapped IPv6 according to intended policy |
+| P2-CR-013 | SSE multi-line `data:` fields are joined without newline separators | Open | Parser fix to join with `\n`; tests for multi-line JSON and plain-text SSE events |
+
 ## 6. P2 Product/Documentation Risk Status
 
 | ID | Risk | Status | Resolution evidence |
@@ -148,6 +171,8 @@ Additive, accumulating on `main` toward a later `1.2.0` minor; the seam + honest
 ## 7. npm Release Pre-Distribution Checklist
 
 This checklist is the standing pre-distribution template for every release on the `1.x` stable line; it was first exercised for the `0.3.2` developer preview, whose results are retained below as the reference record.
+
+Current 2026-06-16 status: do not start this checklist for a new publish until G9 is no longer `Blocked`.
 
 External npm gate check results (`0.3.2` developer preview, 2026-06-10, post-publish):
 
