@@ -133,12 +133,12 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 ## 5.7 2026-06-16 전체 코드리뷰 Open 리스크 상태
 
-권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16.ko.md`입니다. 이 절은 릴리스 게이트 요약입니다. `P0-CR-001`, `P1-CR-003`, `P1-CR-004`는 **Resolved**입니다(1.3.1 대상 프록시 보안 패치). `P1-CR-002`, `P1-CR-005`, 그리고 남은 P2 항목은 해결되거나 책임자 근거와 함께 명시 수용되기 전까지 새 GitHub release tag와 npm publish를 차단합니다.
+권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16.ko.md`입니다. 이 절은 릴리스 게이트 요약입니다. `P0-CR-001`, `P1-CR-002`, `P1-CR-003`, `P1-CR-004`는 **Resolved**입니다(1.3.1 대상 프록시 보안 패치 및 SSRF IPv4-mapped 정규화). `P1-CR-005`와 남은 P2 항목은 해결되거나 책임자 근거와 함께 명시 수용되기 전까지 새 GitHub release tag와 npm publish를 차단합니다.
 
 | ID | 리스크 | 상태 | 종료에 필요한 증거 |
 |---|---|---|---|
 | P0-CR-001 | 프록시가 클라이언트 `Authorization`, `Cookie`, proxy-auth 등 주변 자격증명을 모델 업스트림으로 전달 | Resolved | `filteredHeaders()`의 기본 차단 업스트림 헤더 허용목록 + `createHaechiProxy`에서 전달되는 `forwardPolicy`(게이트웨이 클라이언트 인증과 업스트림 공급자 인증 분리: `auth.provider !== none`이면 클라이언트 `Authorization` 폐기, `none`이면 전달); cookie/proxy-auth/hop-by-hop 항상 폐기; 추가 fail-closed `target.forwardHeaders`; `tests/proxy-header-allowlist.test.mjs`가 게이트웨이 bearer는 업스트림에 안 보이고 공급자 헤더(`x-api-key`/`anthropic-version`/`x-goog-api-key`)는 보임을 증명; README/threat-model/shared-responsibility/configuration(+ko) 갱신 |
-| P1-CR-002 | SSRF 가드가 `::ffff:7f00:1` 같은 hex IPv4-mapped IPv6 private 주소를 놓침 | Open | core SSRF, auth-jwt, KMS vault 경로에서 공유 normalization/checker 사용; dotted/hex mapped IPv6 private/public 테스트 |
+| P1-CR-002 | SSRF 가드가 `::ffff:7f00:1` 같은 hex IPv4-mapped IPv6 private 주소를 놓침 | Resolved | 각 `isBlockedAddress` 복사본(core `packages/ssrf`, `satellites/auth-jwt`, `satellites/crypto-kms/vault.mjs`)이 IPv4-mapped IPv6 주소를 16바이트로 파싱해 임베드된 IPv4(dotted `::ffff:127.0.0.1` 및 hex `::ffff:7f00:1`, bracketed, leading-zero, 혼합 `::`, 대소문자 무시)를 private/loopback/link-local/metadata 검사 전에 정규화; 공인 mapped 주소(`::ffff:8.8.8.8` == `::ffff:808:808`)는 허용 유지되고 기존 vault 과차단도 제거. 복사본은 의도적으로 독립 유지(어떤 위성도 `haechi/ssrf`를 import하지 않음 — core peer floor가 올라감); drift는 parity 테스트로 보증. 테스트: `tests/ssrf.test.mjs`(hex/dotted/bracketed loopback+RFC1918+metadata+public 벡터, core-vs-auth-jwt parity), `satellites/auth-jwt/auth-jwt.test.mjs`(mapped-IPv6 생성 차단 + public-mapped 미차단), `satellites/crypto-kms/vault.test.mjs`(확장된 range table + P2-CR-012 IPv6 loopback 테스트), `satellites/crypto-kms/ssrf-parity.test.mjs`(dotted+hex mapped parity 벡터) |
 | P1-CR-003 | 자동 압축 해제된 업스트림 본문이 기존 압축 응답 헤더와 함께 반환될 수 있음 | Resolved | 중앙화 `sanitizeResponseHeaders()`(content-encoding/content-length/transfer-encoding/hop-by-hop 제거)를 모든 응답 경로(pass-through, 전달/미보호, 보호, streaming)에 적용; 올바른 content-length는 버퍼링된 바디에만 재설정; `tests/proxy-header-allowlist.test.mjs` gzip pass-through + 미보호 응답 테스트가 잔존 content-encoding 없음과 downstream 읽기 가능을 증명 |
 | P1-CR-004 | `streaming.requestMode: "pass-through"`가 response-size cap 없이 전체 업스트림 본문을 버퍼링 | Resolved | 실행 바이트 한도(`responseProtection.maxBytes`)를 가진 진정한 경계 streaming pass-through(`pipeUpstreamBodyBounded`); 초과 시 업스트림 취소 + 클라이언트 쓰기 종료; 미보호/전달 raw read도 한도 적용(초과 시 502); `tests/proxy-header-allowlist.test.mjs`가 oversize pass-through 스트림이 경계/중단됨을 증명 |
 | P1-CR-005 | streaming inspection이 non-JSON SSE/NDJSON 프레임을 원문 통과시켜 plain-text PII 우회 가능 | Open | parse 실패 content frame을 텍스트로 검사; protocol-control allowlist; plain-text SSE, PII 포함 malformed JSON, provider control frame 테스트 |
@@ -148,7 +148,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 | P2-CR-009 | `authProvider.authenticate()` 예외 경로 회귀 테스트 부재 | Open | generic fail-closed client response, audit shape, raw provider error 미노출 테스트 |
 | P2-CR-010 | process-isolated sandbox quota 분기 parity 테스트 부족 | Open | result-size, queue-capacity, timeout, child-exit 테스트 |
 | P2-CR-011 | audit chain 중간 변조 분기 집중 테스트 부족 | Open | middle mutation, missing/wrong `prev`, wrong `integrity.hash` 테스트; tail truncation은 계속 한계로 문서화 |
-| P2-CR-012 | KMS vault IPv6 loopback carve-out의 IPv6 테스트 부족 | Open | 의도된 정책에 맞춰 `::1`, `[::1]`, dotted mapped IPv6, hex mapped IPv6 테스트 |
+| P2-CR-012 | KMS vault IPv6 loopback carve-out의 IPv6 테스트 부족 | Resolved | `satellites/crypto-kms/vault.test.mjs`에 전용 IPv6 loopback 정책 테스트("…enforces the IPv6 loopback policy (::1, [::1], dotted + hex mapped) — P2-CR-012")를 추가해 bare `::1`, bracketed `[::1]`, dotted `::ffff:127.0.0.1`, hex `::ffff:7f00:1`/`::ffff:7f00:0001`(및 bracketed 변형)을 검증하고, 공인 mapped 주소(`::ffff:8.8.8.8`/`::ffff:808:808`)가 과차단되지 않음을 단언; 확장된 range table과 `ssrf-parity.test.mjs`가 auth-jwt와의 dotted+hex 일치를 고정 |
 | P2-CR-013 | SSE multi-line `data:` 필드를 newline separator 없이 합침 | Open | `\n` join으로 parser 수정; multi-line JSON/plain-text SSE 테스트 |
 
 ## 6. P2 제품/문서 리스크 상태

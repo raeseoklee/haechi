@@ -11,7 +11,7 @@ This register captures risks discovered after the 0.3.2 and 1.3.x hardening work
 
 Until the P0/P1 items below are fixed or explicitly accepted with a documented owner decision, new release tags and npm publishes should be blocked.
 
-Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The remaining open items below (P1-CR-002, P1-CR-005, and the P2s) still gate new release tags / npm publishes.
+Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The remaining open items below (P1-CR-005 and the remaining P2s) still gate new release tags / npm publishes.
 
 ## Severity Policy
 
@@ -24,7 +24,7 @@ Public source availability can continue because the repository is already public
 | ID | Severity | Area | Risk | Status | Release impact |
 | --- | --- | --- | --- | --- | --- |
 | P0-CR-001 | P0 | Proxy headers | Client `Authorization`, `Cookie`, proxy-auth, and similar ambient credentials can be forwarded to the model upstream. | Resolved | Was blocking release |
-| P1-CR-002 | P1 | SSRF guard | Hex-form IPv4-mapped IPv6 addresses such as `::ffff:7f00:1` are not classified as private loopback. | Open | Blocks release |
+| P1-CR-002 | P1 | SSRF guard | Hex-form IPv4-mapped IPv6 addresses such as `::ffff:7f00:1` are not classified as private loopback. | Resolved | Was blocking release |
 | P1-CR-003 | P1 | Proxy responses | Auto-decompressed upstream bodies can be returned with original compressed `content-encoding` / `content-length` headers. | Resolved | Was blocking release |
 | P1-CR-004 | P1 | Streaming | `streaming.requestMode: "pass-through"` buffers the full upstream body and has no response-size cap. | Resolved | Was blocking release |
 | P1-CR-005 | P1 | Streaming inspection | Non-JSON SSE/NDJSON frames are passed raw, so plain-text PII can bypass protection. | Open | Blocks release |
@@ -34,7 +34,7 @@ Public source availability can continue because the repository is already public
 | P2-CR-009 | P2 | Auth tests | `authProvider.authenticate()` throw path lacks a focused regression test. | Open | Test gap |
 | P2-CR-010 | P2 | Plugin sandbox tests | Process-isolated quota and oversize branches lack parity with worker sandbox tests. | Open | Test gap |
 | P2-CR-011 | P2 | Audit tests | Middle-record audit-chain tamper paths lack focused regression coverage. | Open | Test gap |
-| P2-CR-012 | P2 | Vault tests | KMS vault IPv6 loopback carve-out has only IPv4 coverage. | Open | Test gap |
+| P2-CR-012 | P2 | Vault tests | KMS vault IPv6 loopback carve-out has only IPv4 coverage. | Resolved | Was a test gap |
 | P2-CR-013 | P2 | SSE correctness | Multi-line SSE `data:` fields are joined without the spec-required newline. | Open | Correctness gap |
 
 ## Detailed Findings
@@ -78,31 +78,38 @@ Release decision: blocks any new release or npm publish until fixed or formally 
 
 ### P1-CR-002: SSRF Guard Misses Hex IPv4-Mapped IPv6
 
-Status: Open  
-Affected code: `packages/ssrf/index.mjs`, `satellites/auth-jwt/index.mjs`  
+Status: Resolved (2026-06-16, toward 1.3.1)  
+Affected code: `packages/ssrf/index.mjs`, `satellites/auth-jwt/index.mjs` (and `satellites/crypto-kms/vault.mjs`, which had a related over-block)  
 Evidence:
 
-Manual classification check:
+Manual classification check (after the fix — the formerly-misclassified rows are now correct):
 
-| Input | Current result | Expected |
+| Input | Result | Expected |
 | --- | --- | --- |
 | `::ffff:127.0.0.1` | Private | Private |
-| `::ffff:7f00:1` | Public | Private |
-| `[::ffff:7f00:1]` | Public | Private |
+| `::ffff:7f00:1` | Private | Private |
+| `[::ffff:7f00:1]` | Private | Private |
 | `::ffff:10.0.0.1` | Private | Private |
-| `::ffff:a00:1` | Public | Private |
+| `::ffff:a00:1` | Private | Private |
+| `::ffff:8.8.8.8` / `::ffff:808:808` | Public | Public (not over-blocked) |
 
-Impact:
+Impact (was):
 
-Guarded fetch paths can misclassify private loopback or RFC1918 IPv4 targets when they are represented as hexadecimal IPv4-mapped IPv6. This affects core guarded fetch behavior and the auth-jwt JWKS/OIDC fetch guard. The KMS vault code appears to contain a more complete variant, so the current state also creates parity drift between security-sensitive URL guards.
+Guarded fetch paths could misclassify private loopback or RFC1918 IPv4 targets when they were represented as hexadecimal IPv4-mapped IPv6. This affected core guarded fetch behavior and the auth-jwt JWKS/OIDC fetch guard. The KMS vault copy had a related defect in the opposite direction: any `::ffff:` form it did not recognize fell through to a "blocked" first hextet, over-blocking a public mapped address such as `::ffff:808:808`.
 
-Required remediation:
+Resolution:
 
-- Normalize IPv4-mapped IPv6 forms before private-range checks.
-- Reuse one shared parser/checker across core SSRF, auth-jwt, and KMS vault paths.
-- Add tests for dotted and hex mapped loopback/RFC1918/link-local forms, bracketed host syntax, and allowed public IPv6.
+- Each `isBlockedAddress` copy now parses an IPv4-mapped IPv6 address into its 16 octets and normalizes the embedded IPv4 (last 32 bits, recognized only when bytes 0..9 are zero and bytes 10..11 are `0xffff`) before the private/loopback/link-local/metadata check. This handles every textual form: dotted (`::ffff:127.0.0.1`), hex (`::ffff:7f00:1`), bracketed (`[::ffff:7f00:1]`), leading-zero (`::ffff:7f00:0001`), mixed `::` compression, and case-insensitive `ffff`. A genuinely public mapped address (`::ffff:8.8.8.8` == `::ffff:808:808`) classifies as its public v4 and stays allowed.
+- The DELIBERATE 1.1 decoupling is preserved: no satellite imports `haechi/ssrf` (that would raise their `haechi` peer floor and republish them). The SAME normalization is applied to EACH independent copy and the agreement is locked by the parity tests, so the copies stay independent-but-consistent.
 
-Release decision: blocks release until fixed.
+Closure evidence (new/extended tests):
+
+- `tests/ssrf.test.mjs` — the canonical vector table gains hex/dotted/bracketed IPv4-mapped loopback, RFC1918, and metadata vectors plus an allowed public mapped pair, all also asserted equal to the auth-jwt copy (core-vs-auth-jwt parity).
+- `satellites/auth-jwt/auth-jwt.test.mjs` — `createJwtAuthProvider` construction now rejects dotted AND hex IPv4-mapped IPv6 private/metadata hosts, and does NOT SSRF-block a public mapped host.
+- `satellites/crypto-kms/vault.test.mjs` — the documented range table adds the hex mapped private/metadata forms and the public mapped allow cases.
+- `satellites/crypto-kms/ssrf-parity.test.mjs` — a new "IPv4-mapped IPv6 (dotted + hex)" group pins auth-jwt ⇄ crypto-kms agreement; the parity test stays green.
+
+Release decision: resolved; this finding no longer blocks release.
 
 ### P1-CR-003: Decompressed Body Returned With Compressed Headers
 
@@ -300,21 +307,22 @@ Release decision: test gap.
 
 ### P2-CR-012: KMS Vault IPv6 Loopback Test Gap
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `satellites/crypto-kms/vault.mjs`  
-Evidence:
+Evidence (was):
 
-- Localhost carve-out coverage currently proves IPv4 loopback behavior but not IPv6 loopback variants.
+- Localhost carve-out coverage proved IPv4 loopback behavior but not IPv6 loopback variants.
 
-Impact:
+Impact (was):
 
-The vault guard is security-sensitive and has slightly different URL parsing logic from the core SSRF guard. IPv6-specific tests are needed to prevent future divergence.
+The vault guard is security-sensitive and has slightly different URL parsing logic from the core SSRF guard. IPv6-specific tests were needed to prevent future divergence.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Add tests for `::1`, `[::1]`, dotted IPv4-mapped IPv6, and hex IPv4-mapped IPv6 forms according to the intended vault policy.
+- `satellites/crypto-kms/vault.test.mjs` adds a dedicated test, "isBlockedAddress enforces the IPv6 loopback policy (::1, [::1], dotted + hex mapped) — P2-CR-012", covering bare `::1`, bracketed `[::1]`, dotted `::ffff:127.0.0.1` (and its bracketed form), and hex `::ffff:7f00:1` / `::ffff:7f00:0001` (and its bracketed form), all per the intended vault policy (blocked), and asserting that a public IPv4-mapped address (`::ffff:8.8.8.8` / `::ffff:808:808`) is NOT over-blocked.
+- The vault range table is extended with the hex mapped private/metadata forms and the public mapped allow cases, and `satellites/crypto-kms/ssrf-parity.test.mjs` pins the dotted+hex agreement with the auth-jwt copy — the intentional non-IP fail-closed divergence stays explicitly pinned, so future divergence is caught.
 
-Release decision: test gap.
+Release decision: resolved; the test gap is closed.
 
 ### P2-CR-013: SSE Multi-Line `data:` Join Semantics
 

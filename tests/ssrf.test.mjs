@@ -34,8 +34,20 @@ const VECTORS = [
   ["fc00::1", true],          // ULA
   ["fdff::1", true],
   ["ff00::1", true],          // multicast
-  ["::ffff:127.0.0.1", true], // IPv4-mapped loopback
-  ["::ffff:8.8.8.8", false],  // IPv4-mapped public
+  ["::ffff:127.0.0.1", true], // IPv4-mapped loopback (dotted)
+  ["::ffff:8.8.8.8", false],  // IPv4-mapped public (dotted)
+  // P1-CR-002: HEX IPv4-mapped IPv6 must classify by the embedded v4, not slip
+  // through as "public". 7f00:1 == 127.0.0.1, a00:1 == 10.0.0.1, etc.
+  ["::ffff:7f00:1", true],    // hex loopback
+  ["::ffff:7f00:0001", true], // hex loopback, leading-zero hextet
+  ["[::ffff:7f00:1]", true],  // hex loopback, bracketed host syntax
+  ["::ffff:a00:1", true],     // hex 10.0.0.1 (RFC1918)
+  ["::ffff:c0a8:1", true],    // hex 192.168.0.1 (RFC1918)
+  ["::ffff:ac10:1", true],    // hex 172.16.0.1 (RFC1918 lower edge)
+  ["::ffff:a9fe:a9fe", true], // hex 169.254.169.254 (cloud metadata)
+  ["::ffff:808:808", false],  // hex 8.8.8.8 — public mapped stays ALLOWED
+  ["[::ffff:808:808]", false],// hex public, bracketed — still allowed
+  ["::ffff:ac0f:1", false],   // hex 172.15.0.1 — just below 172.16/12, allowed
   ["2606:4700:4700::1111", false], // public IPv6
   ["not-an-ip", false],       // hostnames are checked post-DNS, not here
   ["example.com", false]

@@ -11,7 +11,7 @@
 
 아래 P0/P1 항목이 수정되거나 책임자 판단으로 명시 수용되기 전까지 새 릴리스 태그와 npm publish는 차단한다.
 
-저장소는 이미 공개 상태이므로 public source 공개는 유지할 수 있다. 클라이언트 인증 헤더 전달 리스크(P0-CR-001)는 이제 Resolved다 — 프록시는 기본 차단 업스트림 헤더 허용목록을 적용하며 게이트웨이 `Authorization`/`Cookie`/`Proxy-Authorization`를 모델 업스트림으로 전달하지 않는다. 아래 남은 항목(P1-CR-002, P1-CR-005, P2들)은 여전히 새 릴리스 태그 / npm publish를 차단한다.
+저장소는 이미 공개 상태이므로 public source 공개는 유지할 수 있다. 클라이언트 인증 헤더 전달 리스크(P0-CR-001)는 이제 Resolved다 — 프록시는 기본 차단 업스트림 헤더 허용목록을 적용하며 게이트웨이 `Authorization`/`Cookie`/`Proxy-Authorization`를 모델 업스트림으로 전달하지 않는다. hex IPv4-mapped IPv6 SSRF 공백(P1-CR-002)과 그 vault 테스트 공백(P2-CR-012)도 이제 Resolved다 — 모든 `isBlockedAddress` 복사본이 private range 검사 전에 IPv4-mapped IPv6 주소를 임베드된 IPv4로 정규화한다. 아래 남은 항목(P1-CR-005, 그리고 남은 P2들)은 여전히 새 릴리스 태그 / npm publish를 차단한다.
 
 ## 심각도 기준
 
@@ -24,7 +24,7 @@
 | ID | 심각도 | 영역 | 리스크 | 상태 | 릴리스 영향 |
 | --- | --- | --- | --- | --- | --- |
 | P0-CR-001 | P0 | 프록시 헤더 | 클라이언트 `Authorization`, `Cookie`, proxy-auth 등 주변 자격증명이 모델 업스트림으로 전달될 수 있다. | Resolved | 릴리스 차단이었음 |
-| P1-CR-002 | P1 | SSRF 가드 | `::ffff:7f00:1` 같은 hex 형식 IPv4-mapped IPv6 주소가 private loopback으로 분류되지 않는다. | Open | 릴리스 차단 |
+| P1-CR-002 | P1 | SSRF 가드 | `::ffff:7f00:1` 같은 hex 형식 IPv4-mapped IPv6 주소가 private loopback으로 분류되지 않는다. | Resolved | 릴리스 차단이었음 |
 | P1-CR-003 | P1 | 프록시 응답 | 자동 압축 해제된 업스트림 본문이 기존 압축 `content-encoding` / `content-length` 헤더와 함께 반환될 수 있다. | Resolved | 릴리스 차단이었음 |
 | P1-CR-004 | P1 | 스트리밍 | `streaming.requestMode: "pass-through"`가 실제 스트리밍이 아니라 전체 본문을 무제한 버퍼링한다. | Resolved | 릴리스 차단이었음 |
 | P1-CR-005 | P1 | 스트리밍 검사 | JSON이 아닌 SSE/NDJSON 프레임이 원문 통과되어 plain-text PII가 보호를 우회할 수 있다. | Open | 릴리스 차단 |
@@ -34,7 +34,7 @@
 | P2-CR-009 | P2 | 인증 테스트 | `authProvider.authenticate()` 예외 경로 회귀 테스트가 없다. | Open | 테스트 공백 |
 | P2-CR-010 | P2 | 플러그인 샌드박스 테스트 | process-isolated quota/oversize 분기 테스트가 worker sandbox와 동등하지 않다. | Open | 테스트 공백 |
 | P2-CR-011 | P2 | 감사 테스트 | audit chain 중간 레코드 변조 분기 테스트가 부족하다. | Open | 테스트 공백 |
-| P2-CR-012 | P2 | Vault 테스트 | KMS vault IPv6 loopback carve-out 테스트가 IPv4 중심이다. | Open | 테스트 공백 |
+| P2-CR-012 | P2 | Vault 테스트 | KMS vault IPv6 loopback carve-out 테스트가 IPv4 중심이다. | Resolved | 테스트 공백이었음 |
 | P2-CR-013 | P2 | SSE 정확성 | multi-line SSE `data:` 필드를 스펙과 다르게 newline 없이 합친다. | Open | 정확성 공백 |
 
 ## 상세 항목
@@ -78,31 +78,38 @@
 
 ### P1-CR-002: SSRF 가드가 Hex IPv4-Mapped IPv6를 놓침
 
-상태: Open  
-영향 코드: `packages/ssrf/index.mjs`, `satellites/auth-jwt/index.mjs`  
+상태: Resolved (2026-06-16, 1.3.1 대상)  
+영향 코드: `packages/ssrf/index.mjs`, `satellites/auth-jwt/index.mjs` (그리고 관련 과차단이 있던 `satellites/crypto-kms/vault.mjs`)  
 증거:
 
-수동 분류 결과:
+수동 분류 결과(수정 후 — 과거에 오분류되던 행이 이제 올바릅니다):
 
-| 입력 | 현재 결과 | 기대 결과 |
+| 입력 | 결과 | 기대 결과 |
 | --- | --- | --- |
 | `::ffff:127.0.0.1` | Private | Private |
-| `::ffff:7f00:1` | Public | Private |
-| `[::ffff:7f00:1]` | Public | Private |
+| `::ffff:7f00:1` | Private | Private |
+| `[::ffff:7f00:1]` | Private | Private |
 | `::ffff:10.0.0.1` | Private | Private |
-| `::ffff:a00:1` | Public | Private |
+| `::ffff:a00:1` | Private | Private |
+| `::ffff:8.8.8.8` / `::ffff:808:808` | Public | Public(과차단 아님) |
 
-영향:
+영향(과거):
 
-guarded fetch 경로가 hexadecimal IPv4-mapped IPv6로 표현된 loopback 또는 RFC1918 주소를 public으로 오분류할 수 있다. core guarded fetch와 auth-jwt JWKS/OIDC fetch guard에 영향을 준다. KMS vault 코드에는 더 완전한 변형이 있는 것으로 보이므로 보안 URL 가드 간 동작 불일치도 발생한다.
+guarded fetch 경로가 hexadecimal IPv4-mapped IPv6로 표현된 loopback 또는 RFC1918 주소를 public으로 오분류할 수 있었습니다. core guarded fetch와 auth-jwt JWKS/OIDC fetch guard에 영향을 줬습니다. KMS vault 복사본은 반대 방향의 결함이 있어, 인식하지 못한 모든 `::ffff:` 형식이 "차단" 첫 hextet으로 빠져 `::ffff:808:808` 같은 공인 mapped 주소를 과차단했습니다.
 
-필수 보완:
+해결:
 
-- private range 검사 전에 IPv4-mapped IPv6 형식을 정규화한다.
-- core SSRF, auth-jwt, KMS vault에서 하나의 공유 parser/checker를 사용한다.
-- dotted/hex mapped loopback, RFC1918, link-local, bracketed host, 허용 public IPv6 테스트를 추가한다.
+- 각 `isBlockedAddress` 복사본이 IPv4-mapped IPv6 주소를 16바이트로 파싱해, private/loopback/link-local/metadata 검사 전에 임베드된 IPv4(마지막 32비트, 바이트 0..9가 0이고 바이트 10..11이 `0xffff`일 때만 인식)를 정규화합니다. 이로써 모든 텍스트 형식을 처리합니다: dotted(`::ffff:127.0.0.1`), hex(`::ffff:7f00:1`), bracketed(`[::ffff:7f00:1]`), leading-zero(`::ffff:7f00:0001`), 혼합 `::` 압축, 대소문자 무시 `ffff`. 공인 mapped 주소(`::ffff:8.8.8.8` == `::ffff:808:808`)는 공인 v4로 분류되어 허용 유지됩니다.
+- 의도된 1.1 디커플링을 유지합니다: 어떤 위성도 `haechi/ssrf`를 import하지 않습니다(그러면 `haechi` peer floor가 올라가 재배포가 필요). 동일한 정규화를 각 독립 복사본에 적용하고 parity 테스트로 일치를 고정해, 복사본은 독립적이면서도 일관됩니다.
 
-릴리스 판단: 수정 전까지 릴리스 차단.
+종료 증거(신규/확장 테스트):
+
+- `tests/ssrf.test.mjs` — 표준 벡터 테이블에 hex/dotted/bracketed IPv4-mapped loopback, RFC1918, metadata 벡터와 허용 public mapped 쌍을 추가하고, 모두 auth-jwt 복사본과 같음을 단언(core-vs-auth-jwt parity).
+- `satellites/auth-jwt/auth-jwt.test.mjs` — `createJwtAuthProvider` 생성이 dotted 및 hex IPv4-mapped IPv6 private/metadata 호스트를 거부하고, public mapped 호스트는 SSRF 차단하지 않음을 확인.
+- `satellites/crypto-kms/vault.test.mjs` — 문서화된 range table에 hex mapped private/metadata 형식과 public mapped 허용 케이스를 추가.
+- `satellites/crypto-kms/ssrf-parity.test.mjs` — 새 "IPv4-mapped IPv6 (dotted + hex)" 그룹이 auth-jwt ⇄ crypto-kms 일치를 고정하며 parity 테스트는 계속 green.
+
+릴리스 판단: 해결됨; 이 항목은 더 이상 릴리스를 차단하지 않습니다.
 
 ### P1-CR-003: 압축 해제 본문과 압축 헤더 불일치
 
@@ -300,21 +307,22 @@ process isolation은 향후 plugin 작업의 보안 경계다. denial-of-service
 
 ### P2-CR-012: KMS Vault IPv6 Loopback 테스트 공백
 
-상태: Open  
+상태: Resolved (2026-06-16, 1.3.1 대상)  
 영향 코드: `satellites/crypto-kms/vault.mjs`  
-증거:
+증거(과거):
 
-- localhost carve-out 테스트가 현재 IPv4 loopback 중심이다.
+- localhost carve-out 테스트가 IPv4 loopback 중심이었습니다.
 
-영향:
+영향(과거):
 
-vault guard는 보안 민감 경로이며 core SSRF guard와 URL parsing logic이 약간 다르다. 향후 불일치를 막으려면 IPv6 전용 테스트가 필요하다.
+vault guard는 보안 민감 경로이며 core SSRF guard와 URL parsing logic이 약간 달랐습니다. 향후 불일치를 막으려면 IPv6 전용 테스트가 필요했습니다.
 
-필수 보완:
+해결 / 종료 증거:
 
-- 의도된 vault policy에 따라 `::1`, `[::1]`, dotted IPv4-mapped IPv6, hex IPv4-mapped IPv6 테스트를 추가한다.
+- `satellites/crypto-kms/vault.test.mjs`에 전용 테스트 "isBlockedAddress enforces the IPv6 loopback policy (::1, [::1], dotted + hex mapped) — P2-CR-012"를 추가해, bare `::1`, bracketed `[::1]`, dotted `::ffff:127.0.0.1`(및 bracketed 형), hex `::ffff:7f00:1` / `::ffff:7f00:0001`(및 bracketed 형)을 의도된 vault policy(차단)에 맞춰 검증하고, 공인 IPv4-mapped 주소(`::ffff:8.8.8.8` / `::ffff:808:808`)가 과차단되지 않음을 단언합니다.
+- vault range table을 hex mapped private/metadata 형식과 public mapped 허용 케이스로 확장하고, `satellites/crypto-kms/ssrf-parity.test.mjs`가 auth-jwt 복사본과의 dotted+hex 일치를 고정합니다 — 의도된 non-IP fail-closed 불일치는 명시적으로 고정되어 향후 drift를 잡아냅니다.
 
-릴리스 판단: 테스트 공백.
+릴리스 판단: 해결됨; 테스트 공백이 닫혔습니다.
 
 ### P2-CR-013: SSE Multi-Line `data:` Join Semantics
 

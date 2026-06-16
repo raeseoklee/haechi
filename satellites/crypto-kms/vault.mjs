@@ -55,33 +55,81 @@ const MAX_RESPONSE_BYTES = 1 << 20; // 1 MiB — a transit response is tiny; bou
 //
 // Blocks: 127/8, ::1, 10/8, 172.16/12, 192.168/16, 169.254/16 (incl.
 // 169.254.169.254), 0/8, fe80::/10, fc00::/7, ff00::/8, and IPv4-mapped
-// ::ffff:<blocked-v4>.
+// ::ffff:<blocked-v4> in EVERY textual form (dotted ::ffff:127.0.0.1 AND hex
+// ::ffff:7f00:1 / ::ffff:7f00:0001) — see P1-CR-002.
+//
+// The IPv4-mapped normalisation is kept byte-for-behavior identical to
+// packages/ssrf/index.mjs and satellites/auth-jwt/index.mjs (parity-tested via
+// ssrf-parity.test.mjs); the DELIBERATE 1.1 decoupling means this copy carries
+// the logic rather than importing haechi/ssrf.
 // ---------------------------------------------------------------------------
 export function isBlockedAddress(address) {
   if (typeof address !== "string" || address.length === 0) return true; // fail closed
   let ip = address.trim();
 
-  // Strip an IPv6 zone id (fe80::1%eth0).
+  // Strip surrounding brackets ([::1]) and an IPv6 zone id (fe80::1%eth0).
+  ip = ip.replace(/^\[|\]$/g, "");
   const zone = ip.indexOf("%");
   if (zone !== -1) ip = ip.slice(0, zone);
 
-  // IPv4-mapped IPv6 (::ffff:127.0.0.1 or ::ffff:7f00:0001) — unwrap to the v4.
-  const mapped = ip.match(/^::ffff:(.+)$/i);
-  if (mapped) {
-    const inner = mapped[1];
-    if (inner.includes(".")) {
-      return isBlockedV4(inner);
-    }
-    // hex form ::ffff:7f00:0001 -> reconstruct dotted quad
-    const hex = inner.replace(":", "");
-    if (/^[0-9a-f]{8}$/i.test(hex)) {
-      const b = hex.match(/.{2}/g).map((h) => parseInt(h, 16));
-      return isBlockedV4(`${b[0]}.${b[1]}.${b[2]}.${b[3]}`);
-    }
-  }
+  // IPv4-mapped IPv6 (::ffff:127.0.0.1 dotted, ::ffff:7f00:1 / ::ffff:7f00:0001
+  // hex) — normalise to the embedded IPv4 and run the v4 check. A genuinely
+  // public mapped address (::ffff:8.8.8.8 == ::ffff:808:808) classifies as its
+  // public v4 and stays allowed; a non-mapped v6 falls through to isBlockedV6.
+  const mapped = mappedIpv4(ip);
+  if (mapped !== null) return isBlockedV4(mapped);
 
   if (ip.includes(":")) return isBlockedV6(ip);
   return isBlockedV4(ip);
+}
+
+// Parse an IPv6 literal into its 16 octets (or null when it is not a valid IPv6
+// text form), then expose the embedded IPv4 of an IPv4-mapped IPv6 address. This
+// is the SOUND way to recognise ::ffff:<v4> in every textual form (dotted, hex,
+// leading-zero, mixed `::` compression, case-insensitive ffff) without the old
+// "any unrecognised ::ffff: form falls through to a blocked first hextet" bug
+// that over-blocked public mapped addresses like ::ffff:808:808.
+function ipv6ToBytes(str) {
+  let s = str;
+  let tailV4 = null;
+  if (s.includes(".")) {
+    const idx = s.lastIndexOf(":");
+    if (idx === -1) return null;
+    const quad = s.slice(idx + 1).split(".");
+    if (quad.length !== 4) return null;
+    const oct = quad.map(Number);
+    if (oct.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    tailV4 = oct;
+    s = `${s.slice(0, idx + 1)}0:0`; // placeholder hextets; overwritten below
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null; // at most one "::"
+  const toGroups = (g) => (g === "" ? [] : g.split(":").map((h) => (/^[0-9a-fA-F]{1,4}$/.test(h) ? parseInt(h, 16) : NaN)));
+  const head = toGroups(halves[0]);
+  const tail = halves.length === 2 ? toGroups(halves[1]) : null;
+  if (head.some(Number.isNaN) || (tail && tail.some(Number.isNaN))) return null;
+  let groups;
+  if (tail === null) {
+    if (head.length !== 8) return null;
+    groups = head;
+  } else {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array(missing).fill(0), ...tail];
+  }
+  if (groups.length !== 8) return null;
+  const bytes = [];
+  for (const g of groups) bytes.push((g >> 8) & 0xff, g & 0xff);
+  if (tailV4) { bytes[12] = tailV4[0]; bytes[13] = tailV4[1]; bytes[14] = tailV4[2]; bytes[15] = tailV4[3]; }
+  return bytes;
+}
+
+function mappedIpv4(bare) {
+  const b = ipv6ToBytes(bare);
+  if (!b) return null;
+  for (let i = 0; i < 10; i += 1) if (b[i] !== 0) return null; // bytes 0..9 must be zero
+  if (b[10] !== 0xff || b[11] !== 0xff) return null;           // bytes 10..11 must be 0xffff
+  return `${b[12]}.${b[13]}.${b[14]}.${b[15]}`;
 }
 
 function isBlockedV4(ip) {

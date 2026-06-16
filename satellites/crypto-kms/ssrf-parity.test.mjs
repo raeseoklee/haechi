@@ -82,6 +82,27 @@ describe("SSRF parity — allowed public IPv6", () => {
 });
 
 // ---------------------------------------------------------------------------
+// IPv4-mapped IPv6 — both copies must classify by the embedded v4 (P1-CR-002).
+// DOTTED (::ffff:127.0.0.1) and HEX (::ffff:7f00:1) forms must agree, and a
+// genuinely public mapped address must stay allowed (no over-block).
+// ---------------------------------------------------------------------------
+describe("SSRF parity — IPv4-mapped IPv6 (dotted + hex, P1-CR-002)", () => {
+  // Blocked: loopback / RFC1918 / metadata in dotted and hex forms.
+  it("blocks ::ffff:127.0.0.1 (dotted loopback)", () => assertParity("::ffff:127.0.0.1", true));
+  it("blocks ::ffff:7f00:1 (hex loopback)", () => assertParity("::ffff:7f00:1", true));
+  it("blocks ::ffff:7f00:0001 (hex loopback, leading zero)", () => assertParity("::ffff:7f00:0001", true));
+  it("blocks ::ffff:10.0.0.1 (dotted RFC1918)", () => assertParity("::ffff:10.0.0.1", true));
+  it("blocks ::ffff:a00:1 (hex 10.0.0.1)", () => assertParity("::ffff:a00:1", true));
+  it("blocks ::ffff:c0a8:1 (hex 192.168.0.1)", () => assertParity("::ffff:c0a8:1", true));
+  it("blocks ::ffff:ac10:1 (hex 172.16.0.1)", () => assertParity("::ffff:ac10:1", true));
+  it("blocks ::ffff:a9fe:a9fe (hex 169.254.169.254 metadata)", () => assertParity("::ffff:a9fe:a9fe", true));
+  // Allowed: a genuinely public mapped address (no over-block).
+  it("allows ::ffff:8.8.8.8 (dotted public)", () => assertParity("::ffff:8.8.8.8", false));
+  it("allows ::ffff:808:808 (hex 8.8.8.8 public)", () => assertParity("::ffff:808:808", false));
+  it("allows ::ffff:ac0f:1 (hex 172.15.0.1, just below 172.16/12)", () => assertParity("::ffff:ac0f:1", false));
+});
+
+// ---------------------------------------------------------------------------
 // KNOWN, INTENTIONAL DIVERGENCE — non-IP string input.
 //
 // The two copies are called at different points in the egress pipeline:
