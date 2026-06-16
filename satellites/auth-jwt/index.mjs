@@ -59,6 +59,66 @@ function parseHttpsUrl(value, label) {
   return url;
 }
 
+// Parse an IPv6 literal into its 16 octets (or null when it is not a valid IPv6
+// text form). This is the SOUND way to recognise an IPv4-mapped IPv6 address in
+// EVERY textual form: dotted (::ffff:127.0.0.1), HEX (::ffff:7f00:1), bracketed
+// ([::ffff:7f00:1], stripped by the caller), leading-zero (::ffff:7f00:0001),
+// mixed `::` compression, and case-insensitive ffff. We classify the last 32
+// bits as the embedded IPv4 ONLY when bytes 0..9 are zero and bytes 10..11 are
+// 0xffff (the ::ffff:0:0/96 IPv4-mapped prefix), so a genuinely public mapped
+// address (::ffff:8.8.8.8 == ::ffff:808:808) stays allowed and a non-mapped v6
+// (::ffff:0:7f00:1, NAT64 64:ff9b::…) is NOT mistaken for an embedded IPv4.
+//
+// Kept byte-for-behavior identical to packages/ssrf/index.mjs and
+// satellites/crypto-kms/vault.mjs (parity-tested) — see this module's header and
+// crypto-kms/ssrf-parity.test.mjs. The DELIBERATE 1.1 decoupling means each copy
+// carries this logic rather than importing haechi/ssrf.
+function ipv6ToBytes(str) {
+  let s = str;
+  // A trailing dotted IPv4 quad (::ffff:127.0.0.1) — peel it off into the final
+  // two hextets so the remaining text is pure hex groups.
+  let tailV4 = null;
+  if (s.includes(".")) {
+    const idx = s.lastIndexOf(":");
+    if (idx === -1) return null;
+    const quad = s.slice(idx + 1).split(".");
+    if (quad.length !== 4) return null;
+    const oct = quad.map(Number);
+    if (oct.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    tailV4 = oct;
+    s = `${s.slice(0, idx + 1)}0:0`; // placeholder hextets; overwritten below
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null; // at most one "::"
+  const toGroups = (g) => (g === "" ? [] : g.split(":").map((h) => (/^[0-9a-fA-F]{1,4}$/.test(h) ? parseInt(h, 16) : NaN)));
+  const head = toGroups(halves[0]);
+  const tail = halves.length === 2 ? toGroups(halves[1]) : null;
+  if (head.some(Number.isNaN) || (tail && tail.some(Number.isNaN))) return null;
+  let groups;
+  if (tail === null) {
+    if (head.length !== 8) return null;
+    groups = head;
+  } else {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    groups = [...head, ...Array(missing).fill(0), ...tail];
+  }
+  if (groups.length !== 8) return null;
+  const bytes = [];
+  for (const g of groups) bytes.push((g >> 8) & 0xff, g & 0xff);
+  if (tailV4) { bytes[12] = tailV4[0]; bytes[13] = tailV4[1]; bytes[14] = tailV4[2]; bytes[15] = tailV4[3]; }
+  return bytes;
+}
+
+// Return the embedded IPv4 dotted quad of an IPv4-mapped IPv6 address, or null.
+function mappedIpv4(bare) {
+  const b = ipv6ToBytes(bare);
+  if (!b) return null;
+  for (let i = 0; i < 10; i += 1) if (b[i] !== 0) return null; // bytes 0..9 must be zero
+  if (b[10] !== 0xff || b[11] !== 0xff) return null;           // bytes 10..11 must be 0xffff
+  return `${b[12]}.${b[13]}.${b[14]}.${b[15]}`;
+}
+
 // Block literal addresses in private/loopback/link-local ranges + cloud metadata.
 // Applied to both a literal host in the URL and every DNS-resolved address.
 // Exported (additive, behavior-preserving — auth-jwt stays 0.2.0) so the
@@ -82,10 +142,11 @@ export function isBlockedAddress(host) {
   if (v === 6) {
     const h = bare.toLowerCase();
     if (h === "::1" || h === "::") return true;             // loopback / unspecified
-    if (h.startsWith("::ffff:")) {                          // IPv4-mapped
-      const mapped = h.slice("::ffff:".length);
-      if (isIP(mapped) === 4) return isBlockedAddress(mapped);
-    }
+    // IPv4-mapped IPv6 — normalise to the embedded IPv4 (handles dotted AND hex
+    // forms, e.g. ::ffff:127.0.0.1 and ::ffff:7f00:1) and run the v4 check, so a
+    // private/loopback/metadata target can't slip past as hex (P1-CR-002).
+    const mapped = mappedIpv4(bare);
+    if (mapped !== null) return isBlockedAddress(mapped);
     // Range-check the first hextet (startsWith("fe80") wrongly let fe81–febf
     // through): fe80::/10 link-local, fc00::/7 ULA, ff00::/8 multicast.
     const firstHextet = parseInt(h.split(":")[0] || "", 16);

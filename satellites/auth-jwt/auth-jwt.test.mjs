@@ -249,9 +249,24 @@ test("construction fails closed on bad config", async () => {
   assert.throws(() => createJwtAuthProvider({ ...base, jwksUri: "https://cdn.other.com/jwks" }), /issuer host/);
   assert.throws(() => createJwtAuthProvider({ ...base, issuer: "urn:tenant:1" }), /issuer/);
   assert.throws(() => createJwtAuthProvider({ issuer: "https://169.254.169.254", audience: AUD, jwksUri: "https://169.254.169.254/jwks", cryptoProvider }), /blocked/);
-  // IPv6 link-local across the full fe80::/10 (not just fe80), and multicast
-  for (const ip of ["[fe80::1]", "[fe81::1]", "[febf::1]", "[ff02::1]", "[::1]"]) {
+  // IPv6 link-local across the full fe80::/10 (not just fe80), and multicast,
+  // plus P1-CR-002 IPv4-mapped IPv6 — both DOTTED and HEX forms must be blocked
+  // (7f00:1 == 127.0.0.1, a00:1 == 10.0.0.1, a9fe:a9fe == 169.254.169.254).
+  for (const ip of [
+    "[fe80::1]", "[fe81::1]", "[febf::1]", "[ff02::1]", "[::1]",
+    "[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:7f00:0001]",
+    "[::ffff:10.0.0.1]", "[::ffff:a00:1]", "[::ffff:c0a8:1]", "[::ffff:a9fe:a9fe]"
+  ]) {
     assert.throws(() => createJwtAuthProvider({ issuer: `https://${ip}`, audience: AUD, jwksUri: `https://${ip}/jwks`, cryptoProvider }), /blocked/, `expected ${ip} blocked`);
+  }
+  // A genuinely public IPv4-mapped IPv6 (hex 808:808 == 8.8.8.8) must NOT be
+  // over-blocked: it is allowed past the SSRF guard (and fails later for an
+  // unrelated reason — never with /blocked/).
+  for (const ip of ["[::ffff:8.8.8.8]", "[::ffff:808:808]"]) {
+    assert.doesNotThrow(
+      () => { try { createJwtAuthProvider({ issuer: `https://${ip}`, audience: AUD, jwksUri: `https://${ip}/jwks`, cryptoProvider }); } catch (e) { if (/blocked/.test(e.message)) throw e; } },
+      `public mapped ${ip} must not be SSRF-blocked`
+    );
   }
   assert.throws(() => createJwtAuthProvider({ ...base, clockSkewSeconds: 301 }), /clockSkew/);
   assert.throws(() => createJwtAuthProvider({ ...base, algorithms: ["HS256"] }), /unsafe|Unsupported/);

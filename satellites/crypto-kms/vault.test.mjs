@@ -311,9 +311,16 @@ test("isBlockedAddress blocks the full documented private/loopback/link-local/me
     "fe80::1", "fe80::abcd",                // fe80::/10 link-local
     "fc00::1", "fd12:3456::1",              // fc00::/7 unique-local
     "ff02::1",                               // ff00::/8 multicast
-    "::ffff:127.0.0.1",                     // IPv4-mapped loopback
-    "::ffff:169.254.169.254",               // IPv4-mapped metadata
-    "::ffff:10.0.0.1"                        // IPv4-mapped private
+    "::ffff:127.0.0.1",                     // IPv4-mapped loopback (dotted)
+    "::ffff:169.254.169.254",               // IPv4-mapped metadata (dotted)
+    "::ffff:10.0.0.1",                      // IPv4-mapped private (dotted)
+    // P1-CR-002: HEX IPv4-mapped IPv6 (7f00:1 == 127.0.0.1, a00:1 == 10.0.0.1,
+    // c0a8:1 == 192.168.0.1, ac10:1 == 172.16.0.1, a9fe:a9fe == 169.254.169.254).
+    "::ffff:7f00:1", "::ffff:7f00:0001",   // IPv4-mapped loopback (hex)
+    "::ffff:a00:1",                         // IPv4-mapped 10.0.0.1 (hex)
+    "::ffff:c0a8:1",                        // IPv4-mapped 192.168.0.1 (hex)
+    "::ffff:ac10:1",                        // IPv4-mapped 172.16.0.1 (hex)
+    "::ffff:a9fe:a9fe"                      // IPv4-mapped 169.254.169.254 (hex)
   ];
   for (const ip of blocked) {
     assert.equal(isBlockedAddress(ip), true, `${ip} must be blocked`);
@@ -329,7 +336,9 @@ test("isBlockedAddress blocks the full documented private/loopback/link-local/me
     "169.253.0.1",                           // just below 169.254/16
     "169.255.0.1",                           // just above 169.254/16
     "2606:2800:220:1:248:1893:25c8:1946",  // public IPv6 (example.com)
-    "::ffff:93.184.216.34"                  // IPv4-mapped public
+    "::ffff:93.184.216.34",                 // IPv4-mapped public (dotted)
+    "::ffff:8.8.8.8", "::ffff:808:808",    // IPv4-mapped 8.8.8.8 (dotted AND hex) — public, allowed
+    "::ffff:ac0f:1"                         // hex 172.15.0.1 — just below 172.16/12, allowed
   ];
   for (const ip of allowed) {
     assert.equal(isBlockedAddress(ip), false, `${ip} must be allowed`);
@@ -338,5 +347,32 @@ test("isBlockedAddress blocks the full documented private/loopback/link-local/me
   // Malformed / empty inputs fail closed (blocked).
   for (const bad of ["", "not-an-ip", "999.999.999.999", "1.2.3", null, undefined]) {
     assert.equal(isBlockedAddress(bad), true, `${String(bad)} must fail closed`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-CR-012: explicit IPv6 loopback policy coverage for the vault guard.
+// Closes the gap where the carve-out only proved IPv4 loopback behavior. Per the
+// intended vault policy, EVERY IPv6 loopback form is blocked: bare ::1, the
+// bracketed host syntax [::1] (a URL .hostname keeps the brackets), and the
+// IPv4-mapped loopback in BOTH dotted (::ffff:127.0.0.1) and hex (::ffff:7f00:1)
+// forms. A public IPv4-mapped IPv6 stays allowed (no over-block).
+// ---------------------------------------------------------------------------
+test("isBlockedAddress enforces the IPv6 loopback policy (::1, [::1], dotted + hex mapped) — P2-CR-012", () => {
+  const blockedLoopback = [
+    "::1",                 // bare IPv6 loopback
+    "[::1]",               // bracketed IPv6 loopback (URL hostname form)
+    "::ffff:127.0.0.1",    // dotted IPv4-mapped loopback
+    "[::ffff:127.0.0.1]",  // bracketed dotted IPv4-mapped loopback
+    "::ffff:7f00:1",       // hex IPv4-mapped loopback
+    "::ffff:7f00:0001",    // hex IPv4-mapped loopback (leading-zero hextet)
+    "[::ffff:7f00:1]"      // bracketed hex IPv4-mapped loopback
+  ];
+  for (const ip of blockedLoopback) {
+    assert.equal(isBlockedAddress(ip), true, `${ip} (IPv6 loopback) must be blocked`);
+  }
+  // Public IPv4-mapped IPv6 must NOT be over-blocked (dotted AND hex).
+  for (const ip of ["::ffff:8.8.8.8", "::ffff:808:808", "[::ffff:808:808]"]) {
+    assert.equal(isBlockedAddress(ip), false, `${ip} (public mapped) must be allowed`);
   }
 });
