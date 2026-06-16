@@ -150,6 +150,29 @@ function createSandboxedAuthProviderHandle({
       workerData: {}
     });
     w.on("message", (raw) => {
+      // REPLY SIZE BOUND (CR2-003): bound host-side work BEFORE JSON.parse. The
+      // worker has an implicit heap cap (resourceLimits), but enforce the same
+      // maxMessageBytes ceiling on the INBOUND plugin→host reply that the OUTBOUND
+      // host→plugin credential message obeys — a hostile/buggy plugin can build a
+      // multi-MB reply and a synchronous JSON.parse would stall the host event loop
+      // (the per-call timeout cannot fire mid-parse). The reply is a STRING posted
+      // via JSON.stringify; measure its byte length and, if oversized, settle the
+      // matched call as an oversized DENY (mirroring the credential deny) WITHOUT
+      // parsing. We must locate the pending settle WITHOUT parsing the cid, so an
+      // oversized reply settles the single live pending call (single-occupancy: at
+      // most one entry is ever live).
+      const replyBytes = typeof raw === "string"
+        ? Buffer.byteLength(raw, "utf8")
+        : Buffer.byteLength(String(raw), "utf8");
+      if (replyBytes > maxMessageBytes) {
+        // Single-occupancy: settle the one live pending call as oversized, never
+        // touching JSON.parse on the oversized payload.
+        for (const [cid, settle] of pending) {
+          pending.delete(cid);
+          settle({ __oversized: true });
+        }
+        return;
+      }
       let parsed;
       try {
         parsed = JSON.parse(typeof raw === "string" ? raw : String(raw));

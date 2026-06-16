@@ -17,7 +17,8 @@ import {
   ECHO_PLUGIN_SOURCE,
   POLLUTING_PLUGIN_SOURCE,
   HANGING_PLUGIN_SOURCE,
-  NONDETERMINISTIC_PLUGIN_SOURCE
+  NONDETERMINISTIC_PLUGIN_SOURCE,
+  OVERSIZED_REPLY_PLUGIN_SOURCE
 } from "./helpers/sandbox-fixtures.mjs";
 
 // ---------------------------------------------------------------------------
@@ -293,6 +294,28 @@ test("maxMessageBytes bounds the wire (oversized credential -> deny with reason 
     const denied = audit.eventsOfType("plugin.authenticate.deny");
     assert.ok(denied.some((e) => e.reason === "oversized"),
       `oversized path must emit reason "oversized" (got: ${JSON.stringify(denied.map((e) => e.reason))})`);
+  } finally {
+    await provider.close();
+  }
+});
+
+test("maxMessageBytes bounds the INBOUND reply (oversized plugin reply -> deny with reason oversized, never parsed/hung)", async () => {
+  // CR2-003: the plugin returns a ~2 MB claims object. The host must DROP the reply
+  // as an oversized deny BEFORE JSON.parse (bounding host event-loop work), not parse
+  // it, not hang, not throw. maxMessageBytes:4096 is enough for the conformance
+  // vectors but far under the multi-MB reply.
+  const built = buildSignedPlugin({ entrySource: OVERSIZED_REPLY_PLUGIN_SOURCE });
+  const audit = createRecordingAuditSink();
+  const provider = await createSandboxedAuthProvider(sandboxOptions(built, { auditSink: audit, maxMessageBytes: 4096 }));
+  try {
+    const result = await provider.authenticate(bearer("oversized-reply"));
+    assert.equal(result, null, "an oversized plugin reply must deny (null), not throw or hang");
+    const denied = audit.eventsOfType("plugin.authenticate.deny");
+    assert.ok(denied.some((e) => e.reason === "oversized"),
+      `oversized reply path must emit reason "oversized" (got: ${JSON.stringify(denied.map((e) => e.reason))})`);
+    // The sandbox stays usable: a subsequent valid call still authenticates.
+    const ok = await provider.authenticate(bearer("valid.n.r.alice.acme"));
+    assert.ok(ok, "the worker survives an oversized reply and a later valid call authenticates");
   } finally {
     await provider.close();
   }
