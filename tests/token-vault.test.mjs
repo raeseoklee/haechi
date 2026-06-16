@@ -120,6 +120,112 @@ test("token vault metadata does not expose sensitive object key names", async ()
   assert.doesNotMatch(audit, /seoul@example\.com/);
 });
 
+test("reveal never leaks a raw secret passed as the token argument", async () => {
+  // Synthetic, non-real example secret shaped like an Anthropic key.
+  const rawSecret = "sk-ant-api03-EXAMPLE-NOT-A-REAL-SECRET-000000000000000000";
+  const dir = await mkdtemp(join(tmpdir(), "haechi-token-vault-rawreveal-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const vaultPath = join(dir, ".haechi", "token-vault.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const events = [];
+  const vault = createLocalTokenVault({
+    path: vaultPath,
+    cryptoProvider: createLocalCryptoProvider({ keyFile }),
+    revealPolicy: "local-dev",
+    auditSink: { record: async (event) => { events.push(event); } }
+  });
+
+  let threw;
+  await assert.rejects(
+    () => vault.reveal({ token: rawSecret }),
+    (error) => {
+      threw = error;
+      return true;
+    }
+  );
+
+  // The thrown error must not echo the raw token argument.
+  assert.doesNotMatch(threw.message, /EXAMPLE-NOT-A-REAL-SECRET/);
+  assert.equal(threw.message, "Unknown token");
+
+  assert.equal(events.length, 1);
+  const event = events[0];
+  assert.equal(event.decision, "reveal_failed");
+  assert.equal(event.reason, "unknown_token");
+  // The raw secret must not appear anywhere in the serialized audit event,
+  // neither in `token` nor `reason`.
+  const serialized = JSON.stringify(event);
+  assert.doesNotMatch(serialized, /sk-ant-api03-EXAMPLE/);
+  assert.doesNotMatch(serialized, /EXAMPLE-NOT-A-REAL-SECRET/);
+  // A misused raw value is recorded as a keyed-HMAC marker, never verbatim.
+  assert.match(event.token, /^nontoken_[a-f0-9]{32}$/);
+});
+
+test("reveal of an expired token records token_expired without leaking value", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-token-vault-expired-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const vaultPath = join(dir, ".haechi", "token-vault.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const events = [];
+  const vault = createLocalTokenVault({
+    path: vaultPath,
+    cryptoProvider: createLocalCryptoProvider({ keyFile }),
+    revealPolicy: "local-dev",
+    retentionDays: -1, // tokens expire immediately
+    auditSink: { record: async (event) => { events.push(event); } }
+  });
+
+  const { token } = await vault.tokenize({
+    plaintext: "minji.kim@example.com",
+    type: "email"
+  });
+
+  let threw;
+  await assert.rejects(
+    () => vault.reveal({ token }),
+    (error) => {
+      threw = error;
+      return true;
+    }
+  );
+
+  assert.equal(threw.message, "Token expired");
+  assert.doesNotMatch(threw.message, /minji\.kim@example\.com/);
+
+  const failure = events.find((event) => event.decision === "reveal_failed");
+  assert.ok(failure, "expected a reveal_failed audit event");
+  assert.equal(failure.reason, "token_expired");
+  // A legitimate token id is recorded verbatim for correlation.
+  assert.equal(failure.token, token);
+  assert.match(failure.token, /^tok_email_[a-f0-9]{16,}$/);
+  assert.doesNotMatch(JSON.stringify(events), /minji\.kim@example\.com/);
+});
+
+test("purge never leaks a raw-secret-shaped token argument", async () => {
+  const rawSecret = "AKIAEXAMPLE0000000000-NOT-A-REAL-KEY";
+  const dir = await mkdtemp(join(tmpdir(), "haechi-token-vault-rawpurge-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const vaultPath = join(dir, ".haechi", "token-vault.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const events = [];
+  const vault = createLocalTokenVault({
+    path: vaultPath,
+    cryptoProvider: createLocalCryptoProvider({ keyFile }),
+    revealPolicy: "local-dev",
+    auditSink: { record: async (event) => { events.push(event); } }
+  });
+
+  const result = await vault.purge({ token: rawSecret });
+  assert.equal(result.purged, false);
+
+  const event = events.find((entry) => entry.decision === "purge");
+  assert.ok(event, "expected a purge audit event");
+  const serialized = JSON.stringify(event);
+  assert.doesNotMatch(serialized, /AKIAEXAMPLE/);
+  assert.doesNotMatch(serialized, /NOT-A-REAL-KEY/);
+  assert.match(event.token, /^nontoken_[a-f0-9]{32}$/);
+});
+
 test("token vault keeps all records under concurrent tokenization", async () => {
   const dir = await mkdtemp(join(tmpdir(), "haechi-token-vault-concurrent-"));
   const keyFile = join(dir, ".haechi", "dev.keys.json");
