@@ -117,6 +117,54 @@ test("inspect mode blocks an Ollama NDJSON stream carrying a secret", async () =
   }
 });
 
+test("P1-CR-005: inspect mode redacts a non-JSON plain-text SSE frame end-to-end", async () => {
+  // The exact repro: an upstream emits `data: <email>` (plain text, NOT JSON).
+  const upstream = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write("data: minji.kim@example.com\n\n");
+    response.write("data: [DONE]\n\n");
+    response.end();
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-stream-plaintext-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const auditPath = join(dir, ".haechi", "audit.jsonl");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: { type: "vllm-openai", upstream: `http://127.0.0.1:${upstreamAddress.port}` },
+    streaming: { requestMode: "inspect" },
+    policy: { mode: "enforce", presets: ["llm-redact"], defaultAction: "redact" },
+    keys: { keyFile },
+    audit: { path: auditPath }
+  });
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "hi" }] })
+    });
+    const body = await response.text();
+
+    // The plain-text email is no longer raw-passed: it is redacted, not leaked.
+    assert.doesNotMatch(body, /minji\.kim@example\.com/);
+    assert.match(body, /\[REDACTED:email\]/);
+    assert.match(body, /\[DONE\]/);
+
+    const audit = await readFile(auditPath, "utf8");
+    assert.match(audit, /"decision":"stream_inspected"/);
+    assert.doesNotMatch(audit, /minji\.kim@example\.com/);
+    assert.equal((await verifyAuditChain(auditPath)).valid, true);
+  } finally {
+    await proxy.close();
+    upstream.close();
+  }
+});
+
 test("inspect mode 501s a streaming route with no known format", async () => {
   const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-stream-noroute-"));
   const keyFile = join(dir, ".haechi", "dev.keys.json");

@@ -148,6 +148,21 @@ export function createHaechi({ filterEngine, policyEngine, cryptoProvider, audit
     }
 
     return {
+      // Single-shot text protection for a complete, self-contained text payload
+      // (P1-CR-005): a parse-failed CONTENT frame whose data: text is NOT JSON
+      // (plain text, malformed/partial JSON, provider-specific text). It detects,
+      // decides, tallies, and either returns { text } or { blocked: true } — the
+      // SAME transformSegment logic the delta channel commits with. CRITICALLY it
+      // does NOT touch the cross-frame `pending` buffer, so inspecting a non-JSON
+      // frame's text cannot corrupt the JSON delta channel's sliding-buffer state.
+      // Per-frame inspection only: cross-frame buffering of arbitrary non-JSON
+      // frames is out of scope (the delta channel keeps its own buffer).
+      async protectText(text) {
+        if (typeof text !== "string" || text.length === 0) {
+          return { text: text ?? "", blocked: false };
+        }
+        return transformSegment(text);
+      },
       // Protect string leaves of a parsed frame OTHER than the incremental
       // delta text (e.g. tool-call arguments). Returns the mutated object.
       async protectFrameExtras(value) {
