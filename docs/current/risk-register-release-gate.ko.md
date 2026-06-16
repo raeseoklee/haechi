@@ -14,9 +14,9 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
-| GitHub release/tag | 허용 (`v1.3.1` 릴리스됨) | `v1.3.1` 보완 컷이 태깅·릴리스됨; §5.7 항목이 모두 Resolved이고 G9은 Pass |
-| npm stable | `haechi@1.3.1` publish됨 | 코드리뷰 보완이 `haechi@1.3.1` attested OIDC publish(2026-06-16)로 발행됨; 이전 `1.3.0`은 수정 이전 동작을 담고 있음 |
-| production use | 운영자 게이트; `1.3.1`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; `haechi@1.3.0` 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 프록시 헤더 경계 수정(P0-CR-001)을 반영하도록 `1.3.1`로 업그레이드해야 함 |
+| GitHub release/tag | 허용 (`v1.3.2` 릴리스됨) | `v1.3.2` CR2 보완 컷이 태깅·릴리스됨; §5.7 및 §5.8(`CR2-001..008`) 항목이 모두 Resolved이고 G9/G10은 Pass |
+| npm stable | `haechi@1.3.2` publish됨 | CR2 보완이 `haechi@1.3.2` attested OIDC publish(2026-06-16)로 발행됨; 이전 `1.3.1`은 CR2 수정 이전 동작을 담고 있음 |
+| production use | 운영자 게이트; `1.3.2`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; `haechi@1.3.1` 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 CR2 수정(특히 `CR2-001` 프록시 upstream-cancel과 `CR2-002` token-vault audit hygiene)을 반영하도록 `1.3.2`로 업그레이드해야 함 |
 
 ## 2. 릴리스 게이트
 
@@ -32,7 +32,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G7 | 1.2.0 신뢰성 강화 트랙 (WS1–WS6) | 탐지 품질 측정+강화(WS2: 라벨 코퍼스 precision/recall `bench:detection` 게이트, 자격증명+국제 PII 커버리지, 하드블록 타입 불변식이 적용된 `filters.minConfidence` / `filters.allowlist`, offset 무결성을 갖춘 NFKC 유니코드 회피 폴딩); WS3 주입 가능한 `rateLimiter` 시임 + bounded fixed-window map; WS4 운영성(`/__haechi/live`+`/ready` 분리, 주입 가능한 `/metrics`, 구조적 로그 + 요청별 `correlationId`, graceful drain, max-in-flight backpressure, env overlay, 하드닝 Dockerfile/compose/runbook, `configVersion`); WS6 proxy TLS / remote-bind 하드닝(`proxy.tls` / `proxy.trustForwardedProto`, fail-closed `assertSafeProxyTransport`) + OWASP-LLM/NIST 컨트롤 매핑 백서 + RFC 9116 `security.txt` + 취약점 공개 경로. 모든 변경은 1.1 동작을 보존하는 기본값 뒤의 additive(`tests/api-contract.test.mjs` 통과); no-plaintext-in-audit 불변식이 텔레메트리까지 확장; core는 zero runtime dependency 유지; core 1.2.0 bump(additive 마이너) | Pass |
 | G8 | 1.3.0 백엔드 + 탐지 커버리지 확장 | **Anthropic Messages API**(`/v1/messages`, content-block + SSE `delta.text`, `event:` 라인 보존 재직렬화)와 **Google Gemini API**(model-in-path `:generateContent`/`:streamGenerateContent`, 기존 정확-매칭 어댑터를 바이트 동일하게 두는 additive `:method`-suffix 라우트 매처) 프로토콜 어댑터 추가; 탐지 커버리지 확장 — 클라우드/SaaS provider 키(OpenAI/Anthropic/Google-OAuth/SendGrid/Twilio/npm/Azure, anchored)와 국제 PII(FR/ES/JP + IT/SG/IN/DE/NL 국가 ID, 체크섬 validator), 각 하드블록-대-dial-eligible 결정은 측정된 충돌률 기반(하드블록은 비숫자 앵커 또는 비현실적으로 드문 형태가 필요; 흔한 길이의 bare-digit run은 allowlist로 정리 가능 유지); `bench:throughput` proxy 부하 벤치; `haechi-ratelimit-redis` 공유 저장소 rate-limiter 위성(WS3 시임의 운영 소비자; proxy가 이제 `rateLimiter.allow`를 `await`); `haechi-dashboard`가 요청별 `correlationId` 노출. 모든 변경은 additive — 새 `target.type`/탐지타입/`privacy.profile` *값*이며 새 config 키가 아님(`configVersion`은 `1` 유지); `tests/api-contract.test.mjs` 통과; core는 zero runtime dependency 유지; core 1.3.0 bump(additive 마이너) | Pass |
 | G9 | 2026-06-16 전체 코드리뷰 보완 게이트 (1.3.1로 발행) | `P0-CR-001` 및 `P1-CR-002`부터 `P1-CR-005`까지 해결 또는 책임자 명시 수용; P2 항목은 해결 또는 명시적 non-blocking 근거와 일정 기록; 연결된 등록부 갱신. **13개 `P*-CR-*` 항목이 모두 Resolved이며(§5.7) `haechi@1.3.1`(2026-06-16, attested OIDC publish)로 발행되었습니다; core가 1.3.0 → 1.3.1로 bump(patch, 보완 전용 — API/config 표면 변경 없음, `configVersion`은 `1` 유지)되었습니다.** | Pass (`haechi@1.3.1`, 2026-06-16) |
-| G10 | 2026-06-16 코드리뷰 round 2 (CR2) 보완 게이트 | CR2 등록부(`code-review-risk-register-2026-06-16-round2.md`, §5.8)는 **P0/P1을 발견하지 못했습니다**; 세 개의 P2(`CR2-001` 프록시 upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply 경계)와 P3 묶음을 다음 릴리스 태그 / npm publish 이전에 Resolved(또는 근거와 함께 수용)하고 연결된 등록부를 갱신해야 합니다. `haechi@1.3.2` 컷에서 해제됩니다. | Blocked (clears at 1.3.2 cut) |
+| G10 | 2026-06-16 코드리뷰 round 2 (CR2) 보완 게이트 | CR2 등록부(`code-review-risk-register-2026-06-16-round2.md`, §5.8)는 **P0/P1을 발견하지 못했습니다**; 세 개의 P2(`CR2-001` 프록시 upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply 경계)와 P3 묶음(`CR2-004..008`)이 모두 **Resolved이며 `haechi@1.3.2`로 발행되었고**(`CR2-009` won't-fix, `CR2-010` accepted) 연결된 등록부가 갱신되었습니다. | Pass (`haechi@1.3.2`, 2026-06-16) |
 
 ## 3. P0 배포 차단 리스크 상태
 
@@ -154,18 +154,18 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 ## 5.8 2026-06-16 코드리뷰 Round 2 (CR2) 상태 — 게이트 G10
 
-권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16-round2.md`입니다; 이 절은 릴리스 게이트 요약입니다. 1.3.1 컷 이후 진행한 2차 심층 리뷰는 **P0도 P1도 발견하지 못했습니다**(외부에서 P1로 보고된 두 항목 모두 검증 결과 P2로 내려갔습니다 — 둘 다 stored-plaintext leak도, auth/SSRF 우회도 아닙니다). 세 개의 P2 + P3 묶음이 **G10** 하에서 1.3.2 컷을 게이팅합니다; 보고된 한 항목은 **false positive**(`CR2-009`)였고 한 항목은 **이미 문서화된 수용 잔여 리스크**(`CR2-010`)였습니다. G10은 `haechi@1.3.2` 컷에서 해제됩니다.
+권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16-round2.md`입니다; 이 절은 릴리스 게이트 요약입니다. 1.3.1 컷 이후 진행한 2차 심층 리뷰는 **P0도 P1도 발견하지 못했습니다**(외부에서 P1로 보고된 두 항목 모두 검증 결과 P2로 내려갔습니다 — 둘 다 stored-plaintext leak도, auth/SSRF 우회도 아닙니다). 세 개의 P2 + P3 묶음(`CR2-001..008`)은 **Resolved이며 `haechi@1.3.2`로 발행되었습니다**; 보고된 한 항목은 **false positive**(`CR2-009`, won't-fix)였고 한 항목은 **이미 문서화된 수용 잔여 리스크**(`CR2-010`, accepted)였습니다. **G10은 Pass입니다.**
 
 | ID | 리스크 | 상태 | 종료에 필요한 증거 |
 |---|---|---|---|
-| CR2-001 | pass-through streaming이 downstream disconnect 시 upstream reader를 절대 취소하지 않음(`pipeUpstreamBodyBounded`가 `drain`에서 영원히 park) — 인증되지 않은 resource leak | Open | per-request `AbortController` + upstream reader를 취소하고 fetch를 abort하는 클라이언트 `close`/`aborted` listener; `drain` 대기를 `close`와 race; 스트림 도중 disconnect가 reader를 즉시 취소하는 회귀 테스트 |
-| CR2-002 | token-vault reveal/purge가 호출자 제공 raw `token` + `error.message`(token interpolate됨)를 audit event에 기록; `FORBIDDEN_KEYS`는 key 이름으로만 제거 | Open | 일반화된 오류 메시지; 기록 이전에 `token`을 keyed-HMAC하거나 `tok_` 형태로 검증; `error.message` 대신 enum `reasonCode`; raw token이 `reason`/`token`에 도달하지 않는다는 회귀 테스트; 불변식 표현 정합화 |
-| CR2-003 | plugin IPC reply가 `JSON.parse` 이전에 size-bound되지 않음; process child에 heap cap 없음 → 적대적 signed plugin으로 인한 event-loop 정지 + 메모리 급증 | Open | 두 sandbox 모두에서 parse 이전 reply byte-length 검사(oversized를 deny로 drop); 새 `resourceLimits` knob을 통한 process child의 `--max-old-space-size` heap cap; oversized-reply fixture 회귀 테스트 |
-| CR2-004 | `sanitizeResponseHeaders`가 변환된 응답에 stale body-coupled validator(`etag`/`content-md5`/`digest`/`last-modified`)를 유지 | Open | 모든 body-mutating 경로에서 해당 헤더 drop + `cache-control: no-store`; 변경된 응답이 upstream `ETag`를 drop하는 테스트 |
-| CR2-005 | `maxBytes` 초과 request body가 (유한한) Node `requestTimeout`까지 read-and-discard됨 — socket teardown 없음 | Open | 413 경로에서 `request.pause()`/`destroy()`(또는 `Connection: close`); 선택적으로 non-null 기본 timeout |
-| CR2-006 | `mcp-wrap --stderr filter`가 라인 지향이라 newline-split secret이 회피함(본질적; single-line secret은 잡힘, `drop` 사용 가능) | Open (doc) | `COMMAND_HELP` + 등록부 노트; 고민감 도구에 `--stderr drop` 권장 |
-| CR2-007 | README가 mcp-wrap "stderr ... pass through"라고 하지만 기본값은 이제 `--stderr filter` | Open (doc) | README + `README.ko.md` 수정 |
-| CR2-008 | README streaming split-match 주장이 범위 한정 없음(cross-frame buffering은 delta 채널만) | Open (doc) | README 두 구절 + `README.ko.md`를 delta 채널로 한정 |
+| CR2-001 | pass-through streaming이 downstream disconnect 시 upstream reader를 절대 취소하지 않음(`pipeUpstreamBodyBounded`가 `drain`에서 영원히 park) — 인증되지 않은 resource leak | Resolved | per-request `AbortController` + upstream reader를 취소하고 fetch를 abort하는 클라이언트 `close`/`aborted` listener; `drain` 대기를 `close`와 race; 스트림 도중 disconnect가 reader를 즉시 취소하는 회귀 테스트 |
+| CR2-002 | token-vault reveal/purge가 호출자 제공 raw `token` + `error.message`(token interpolate됨)를 audit event에 기록; `FORBIDDEN_KEYS`는 key 이름으로만 제거 | Resolved | 일반화된 오류 메시지; 기록 이전에 `token`을 keyed-HMAC하거나 `tok_` 형태로 검증; `error.message` 대신 enum `reasonCode`; raw token이 `reason`/`token`에 도달하지 않는다는 회귀 테스트; 불변식 표현 정합화 |
+| CR2-003 | plugin IPC reply가 `JSON.parse` 이전에 size-bound되지 않음; process child에 heap cap 없음 → 적대적 signed plugin으로 인한 event-loop 정지 + 메모리 급증 | Resolved | 두 sandbox 모두에서 parse 이전 reply byte-length 검사(oversized를 deny로 drop); 새 `resourceLimits` knob을 통한 process child의 `--max-old-space-size` heap cap; oversized-reply fixture 회귀 테스트 |
+| CR2-004 | `sanitizeResponseHeaders`가 변환된 응답에 stale body-coupled validator(`etag`/`content-md5`/`digest`/`last-modified`)를 유지 | Resolved | 모든 body-mutating 경로에서 해당 헤더 drop + `cache-control: no-store`; 변경된 응답이 upstream `ETag`를 drop하는 테스트 |
+| CR2-005 | `maxBytes` 초과 request body가 (유한한) Node `requestTimeout`까지 read-and-discard됨 — socket teardown 없음 | Resolved | 413 경로에서 `request.pause()`/`destroy()`(또는 `Connection: close`); 선택적으로 non-null 기본 timeout |
+| CR2-006 | `mcp-wrap --stderr filter`가 라인 지향이라 newline-split secret이 회피함(본질적; single-line secret은 잡힘, `drop` 사용 가능) | Resolved | `COMMAND_HELP` + 등록부 노트; 고민감 도구에 `--stderr drop` 권장 |
+| CR2-007 | README가 mcp-wrap "stderr ... pass through"라고 하지만 기본값은 이제 `--stderr filter` | Resolved | README + `README.ko.md` 수정 |
+| CR2-008 | README streaming split-match 주장이 범위 한정 없음(cross-frame buffering은 delta 채널만) | Resolved | README 두 구절 + `README.ko.md`를 delta 채널로 한정 |
 | CR2-009 | (보고된 P2) credential `maxMessageBytes` 검사 이후 append된 `keyMaterial` | Won't fix (FALSE POSITIVE) | `keyMaterial`은 운영자 통제 + fetcher `maxBytes`로 hard-bound; 공격자 증폭 없음 — 선택적 cosmetic re-assert만 |
 | CR2-010 | (보고된 P2) 두 NON-JSON SSE frame에 걸쳐 분할된 secret 미포착 | Accepted (documented) | round-1 `P1-CR-005`, `threat-model.md`, in-code comment에 이미 범위 외; JSON delta 채널은 `maxMatchBytes`까지 buffering함 |
 
@@ -182,7 +182,7 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 이 체크리스트는 `1.x` stable 라인의 모든 릴리스에 대한 상시 배포 전 템플릿이며, `0.3.2` developer preview에서 처음 적용되었습니다. 그 결과를 아래에 참조 기록으로 보존합니다.
 
-2026-06-16 현재 상태: G9은 `Pass`입니다(round-1 보완이 `haechi@1.3.1`로 발행됨). 새 게이트 **G10**(CR2, §5.8)은 `Blocked`입니다 — 다음 릴리스 태그 / npm publish는 CR2 P2 항목이 Resolved될 때까지 대기합니다; G10은 `haechi@1.3.2` 컷에서 해제됩니다. G10이 더 이상 `Blocked`가 아닐 때까지 새 publish를 위해 이 체크리스트를 시작하지 마십시오.
+2026-06-16 현재 상태: G9은 `Pass`입니다(round-1 보완이 `haechi@1.3.1`로 발행됨). 게이트 **G10**(CR2, §5.8)은 이제 `Pass`입니다 — CR2 P2 + P3 묶음(`CR2-001..008`)이 Resolved이며 `haechi@1.3.2`로 발행되었으므로, 그 컷에 대해 이 체크리스트가 해제되었습니다.
 
 외부 npm 게이트 확인 결과(`0.3.2` developer preview, 2026-06-10, 배포 후)는 다음과 같습니다.
 
