@@ -27,7 +27,9 @@ The intended publish path is GitHub Actions trusted publishing: npm authenticate
 
 1. ✅ On npmjs.com: package settings → Trusted Publisher → linked the `raeseoklee/haechi` repository and the `npm-publish.yml` workflow (2026-06-10).
 2. ✅ `.github/workflows/npm-publish.yml` authenticates via OIDC (2026-06-10): `NODE_AUTH_TOKEN` and `registry-url` removed, npm CLI upgraded to `>= 11.5.1` in the runner.
-3. ✅ Verified with `haechi@0.4.0` (2026-06-10): `npm view haechi --json` shows `dist.attestations` with a SLSA provenance v1 predicate. Only `haechi@0.3.2` remains unattested (published via local passkey).
+3. ✅ Verified with `haechi@0.4.0` (2026-06-10): `npm view haechi --json` shows `dist.attestations` with a SLSA provenance v1 predicate.
+
+**Unattested versions (local passkey first publishes):** `haechi@0.3.2` and `haechi-ratelimit-redis@0.1.0` (2026-06-16) were each published from a local machine with `--provenance=false`, so no provenance attestation exists for those two versions — both were the **name-claiming first publish** of a package that did not yet exist (see §5 on why a Trusted Publisher cannot bootstrap a brand-new name). Every later version of each package is attested via the OIDC workflow.
 
 Any publish performed without provenance must record the gap explicitly in the release notes (see `CONTRIBUTING.md`).
 
@@ -80,10 +82,16 @@ Satellites live under `satellites/*` in the npm workspaces monorepo and publish 
 
 **Per-satellite bootstrap order (first publish, no org needed):**
 
-1. On npmjs.com, **configure a Trusted Publisher** for the (not-yet-published) unscoped name (e.g. `haechi-crypto-kms`): link the `raeseoklee/haechi` repository and the satellite's **exact workflow filename** (e.g. `crypto-kms-publish.yml`). npm allows configuring a Trusted Publisher for a name you have not published yet.
-2. Push the prefixed tag and publish a GitHub Release (e.g. `crypto-kms-v0.1.0`) → the workflow's OIDC publish creates `0.1.0` with provenance and claims the name on first publish.
+A Trusted Publisher **cannot** be configured for a name that does not exist yet — npm only exposes the Trusted Publisher setting on an **existing** package's settings page. So a brand-new unscoped name has a two-phase bootstrap: a manual first publish to *create and claim* the name, then Trusted-Publisher configuration so every later version is OIDC-attested.
 
-No manual `npm publish` from a laptop is needed. Because the names are unscoped and free, there is no org-membership prerequisite.
+1. **Manual first publish (claims the name; local, no provenance).** From the satellite directory, authenticate via the browser so a passkey/WebAuthn account needs no terminal OTP, then publish with provenance off (a local machine has no OIDC id-token, so it cannot attest):
+   ```bash
+   npm login --auth-type=web
+   cd satellites/<name> && npm publish --auth-type=web --provenance=false
+   ```
+   `publishConfig.access: "public"` in each satellite's `package.json` makes the unscoped package public. This first version is **unattested** — record the gap per §2 / `CONTRIBUTING.md`.
+2. **Now the package exists → configure a Trusted Publisher** on npmjs.com: package settings → Trusted Publisher → link the `raeseoklee/haechi` repository and the satellite's **exact workflow filename** (e.g. `crypto-kms-publish.yml`).
+3. **Every subsequent version is OIDC-attested.** Bump the satellite `package.json`, push the prefixed tag, and publish a GitHub Release (e.g. `crypto-kms-v0.1.1`) → the workflow's OIDC publish ships that version with provenance. No laptop and no OTP from here on. Because the names are unscoped and free, there is no org-membership prerequisite.
 
 **Tag → workflow → package mapping:**
 
@@ -104,9 +112,9 @@ npm view haechi-crypto-kms --json   # dist.attestations present; access "public"
 
 **Dependency note:** `haechi-crypto-kms` keeps core zero-dependency — `@aws-sdk/client-kms` is an **optional peer dependency**, imported lazily only when a real AWS client is used and not injected. Consumers who use the in-memory or an injected client never install the SDK. The 0.2.0 `./gcp` (`@google-cloud/kms`) and `./azure` (`@azure/keyvault-keys` + `@azure/identity`) backends follow the same optional-peer/lazy-import model; the `./vault` backend has zero optional peer (`node:` `fetch` only).
 
-**0.9 satellites (new unscoped names — configure Trusted Publisher *before* the first tag):** `haechi-dashboard` and `haechi-auth-oidc` are first-published in 0.9 and follow the same per-satellite bootstrap order above. As with the 0.8 satellites, the unscoped name is claimed on first OIDC publish, so the npmjs.com Trusted Publisher for each must be configured **before** its first tag — link `raeseoklee/haechi` and the exact workflow filename (`dashboard-publish.yml` for `haechi-dashboard`, `auth-oidc-publish.yml` for `haechi-auth-oidc`), then push the prefixed tag (`dashboard-v0.1.0`, `auth-oidc-v0.1.0`) and publish the GitHub Release. The two existing satellites ride their already-bootstrapped tags/workflows: `haechi-auth-jwt@0.2.0` on `auth-jwt-v<semver>` (`auth-jwt-publish.yml`) and `haechi-crypto-kms@0.2.0` on `crypto-kms-v<semver>` (`crypto-kms-publish.yml`) — no new Trusted Publisher configuration is required for those two.
+**0.9 satellites (new unscoped names):** `haechi-dashboard` and `haechi-auth-oidc` were first-published in 0.9 via the two-phase bootstrap above — a manual first publish to claim each name, then the Trusted Publisher, after which their tagged releases (`dashboard-v<semver>`, `auth-oidc-v<semver>`) publish via OIDC. The two 0.8 satellites already exist and ride their already-bootstrapped tags/workflows: `haechi-auth-jwt` on `auth-jwt-v<semver>` (`auth-jwt-publish.yml`) and `haechi-crypto-kms` on `crypto-kms-v<semver>` (`crypto-kms-publish.yml`) — no new Trusted Publisher configuration is required for those two.
 
-**`haechi-ratelimit-redis` (new unscoped name — configure Trusted Publisher *before* the first tag):** the shared-store rate-limiter satellite is first-published from its own `ratelimit-redis-v<semver>` tag and follows the same per-satellite bootstrap order above. The unscoped name is claimed on its first OIDC publish, so its npmjs.com Trusted Publisher must be configured **before** its first tag — link `raeseoklee/haechi` and the exact workflow filename `ratelimit-redis-publish.yml`, then push the prefixed tag (`ratelimit-redis-v0.1.0`) and publish the GitHub Release. The `redis` client is an **optional peer dependency**, imported only by consumers using the bundled Redis adapter (the store/client is injected), so core stays zero-dependency.
+**`haechi-ratelimit-redis` (bootstrapped 2026-06-16):** the shared-store rate-limiter satellite followed the two-phase bootstrap above. `0.1.0` was the **manual first publish** (local passkey web auth, `--provenance=false`) that claimed the name — so it is **unattested** (recorded in §2). The Trusted Publisher (`ratelimit-redis-publish.yml`) was then configured, and every version from `0.1.1` on is published via the `ratelimit-redis-v<semver>` tag → workflow with provenance. The `redis` client is an **optional peer dependency**, imported only by consumers using the bundled Redis adapter (the store/client is injected), so core stays zero-dependency.
 
 ## 6. Deployment block conditions
 
