@@ -90,7 +90,7 @@ Point an existing HTTP JSON client at `http://localhost:11016` and set `target.u
 
 The proxy binds to loopback by default. Binding to `0.0.0.0`, `::`, or another non-loopback host fails unless `--allow-remote-bind` is provided. Use that flag only behind explicit network access controls.
 
-Streaming requests with `stream: true` are blocked by default. Set `streaming.requestMode` to `inspect` to stream-filter SSE/NDJSON responses (a bounded sliding buffer catches PII split across frames; see `streaming.maxMatchBytes`), or to `pass-through` only when the caller explicitly accepts unprotected streaming.
+Streaming requests with `stream: true` are blocked by default. Set `streaming.requestMode` to `inspect` to stream-filter SSE/NDJSON responses (a bounded sliding buffer over the JSON **delta channel** catches PII split across delta frames, up to `streaming.maxMatchBytes`; non-delta leaves and non-JSON frames are inspected within each frame), or to `pass-through` only when the caller explicitly accepts unprotected streaming.
 
 Ollama `/api/chat` and `/api/generate` stream by default when the `stream` field is omitted, so the proxy treats those requests as streaming unless `stream: false` is explicitly set.
 
@@ -153,7 +153,7 @@ Wrap any stdio MCP server so its traffic is filtered in both directions — chan
 }
 ```
 
-Client→server requests pass the `mcp.allowedMethods` allowlist and params protection; server→client results get params/result protection plus injection heuristics (see below). Rejections are answered to the client and never reach the server; stderr and exit codes pass through.
+Client→server requests pass the `mcp.allowedMethods` allowlist and params protection; server→client results get params/result protection plus injection heuristics (see below). Rejections are answered to the client and never reach the server. Exit codes pass through; the child's stderr is **filtered** through the same protection per line by default (`--stderr filter`) — use `--stderr inherit` for raw passthrough or `--stderr drop` to discard (recommended for high-sensitivity tools, since a per-line filter cannot catch a secret a child splits across a newline). `filter` transforms only under `policy.mode: enforce`.
 
 ## Injection Detection (Preview)
 
@@ -322,7 +322,7 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 
 0.4.0 adds the token round-trip (deterministic tokenization + request-scoped response detokenization), the `mcp-wrap` bidirectional MCP filter, `status` and `audit-verify` commands, report-only injection detection heuristics, and reserves the PII-safe `identity`/`authProvider` contracts for 0.6 auth. See `docs/current/release-0.4-implementation-scope.md`.
 
-0.5.0 adds SSE/NDJSON streaming response inspection: `streaming.requestMode: "inspect"` stream-filters responses with a bounded sliding buffer that catches PII split across frames (`streaming.maxMatchBytes`). See `docs/current/release-0.5-implementation-scope.md`.
+0.5.0 adds SSE/NDJSON streaming response inspection: `streaming.requestMode: "inspect"` stream-filters responses with a bounded sliding buffer over the JSON **delta channel** that catches PII split across delta frames (`streaming.maxMatchBytes`); non-delta leaves and non-JSON content frames are inspected within each frame. See `docs/current/release-0.5-implementation-scope.md`.
 
 0.6.0 adds authentication and per-client controls: built-in bearer auth with a hashed token store and `haechi auth` CLI, named policy profiles bound by identity scope/label, model allowlisting, and per-identity rate limiting — with PII-safe identity in the audit log. See `docs/current/release-0.6-implementation-scope.md`.
 
