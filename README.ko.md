@@ -90,7 +90,7 @@ node packages/cli/bin/haechi.mjs proxy --config haechi.config.json
 
 proxy는 기본적으로 loopback에 바인딩됩니다. `0.0.0.0`, `::`, 또는 그 밖의 non-loopback 호스트에 바인딩하려면 `--allow-remote-bind`를 명시적으로 전달해야 합니다. 이 플래그는 명시적인 네트워크 접근 통제가 있을 때만 사용하세요.
 
-`stream: true`인 스트리밍 요청은 기본적으로 차단됩니다. `streaming.requestMode`를 `inspect`로 설정하면 SSE/NDJSON 응답을 stream-filter합니다(bounded sliding buffer가 프레임에 걸쳐 나뉜 PII도 잡아냅니다. `streaming.maxMatchBytes` 참고). 호출자가 보호되지 않는 스트리밍을 명시적으로 감수하는 경우에만 `pass-through`로 설정하세요.
+`stream: true`인 스트리밍 요청은 기본적으로 차단됩니다. `streaming.requestMode`를 `inspect`로 설정하면 SSE/NDJSON 응답을 stream-filter합니다(JSON **델타 채널**을 훑는 bounded sliding buffer가 델타 프레임에 걸쳐 나뉜 PII도 `streaming.maxMatchBytes`까지 잡아냅니다. 델타가 아닌 leaf와 비JSON 프레임은 각 프레임 내에서 검사됩니다). 호출자가 보호되지 않는 스트리밍을 명시적으로 감수하는 경우에만 `pass-through`로 설정하세요.
 
 Ollama의 `/api/chat`과 `/api/generate`는 `stream` 필드가 없으면 기본적으로 스트리밍하므로, proxy는 `stream: false`가 명시되지 않는 한 이 요청들을 스트리밍으로 간주합니다.
 
@@ -153,7 +153,7 @@ stdio MCP 서버를 감싸 양방향 트래픽을 필터링합니다. MCP 클라
 }
 ```
 
-클라이언트→서버 요청은 `mcp.allowedMethods` allowlist와 params 보호를 거치고, 서버→클라이언트 결과는 params/result 보호와 injection 휴리스틱(아래 참고)을 적용받습니다. 거부된 요청은 클라이언트에 응답되고 서버에는 도달하지 않습니다. stderr과 exit code는 그대로 전달됩니다.
+클라이언트→서버 요청은 `mcp.allowedMethods` allowlist와 params 보호를 거치고, 서버→클라이언트 결과는 params/result 보호와 injection 휴리스틱(아래 참고)을 적용받습니다. 거부된 요청은 클라이언트에 응답되고 서버에는 도달하지 않습니다. exit code는 그대로 전달되며, 자식의 stderr은 기본적으로 줄 단위로 동일한 보호를 거쳐 **필터링됩니다**(`--stderr filter`) — 원시 전달은 `--stderr inherit`을, 폐기는 `--stderr drop`을 사용하세요(줄 단위 필터는 자식이 개행을 넘어 쪼갠 비밀을 잡지 못하므로, 고민감 도구에는 폐기를 권장합니다). `filter`는 `policy.mode: enforce`에서만 변환합니다.
 
 ## Injection Detection (Preview)
 
@@ -322,7 +322,7 @@ Haechi는 로컬 정책 부트스트래핑을 위한 지역별 기본 Privacy Pr
 
 0.4.0은 token round-trip(deterministic tokenization + 요청 스코프 응답 detokenization), `mcp-wrap` 양방향 MCP 필터, `status` 및 `audit-verify` 커맨드, report-only injection detection 휴리스틱을 추가하고, 0.6 인증을 위한 PII-safe `identity`/`authProvider` 계약을 예약합니다. `docs/current/release-0.4-implementation-scope.md` 참고.
 
-0.5.0은 SSE/NDJSON 스트리밍 응답 검사를 추가합니다. `streaming.requestMode: "inspect"`가 bounded sliding buffer로 응답을 stream-filter하여 프레임에 걸쳐 나뉜 PII도 잡아냅니다(`streaming.maxMatchBytes`). `docs/current/release-0.5-implementation-scope.md` 참고.
+0.5.0은 SSE/NDJSON 스트리밍 응답 검사를 추가합니다. `streaming.requestMode: "inspect"`가 JSON **델타 채널**을 훑는 bounded sliding buffer로 응답을 stream-filter하여 델타 프레임에 걸쳐 나뉜 PII도 잡아냅니다(`streaming.maxMatchBytes`). 델타가 아닌 leaf와 비JSON 콘텐츠 프레임은 각 프레임 내에서 검사됩니다. `docs/current/release-0.5-implementation-scope.md` 참고.
 
 0.6.0은 인증과 클라이언트별 통제를 추가합니다. 해시 기반 token 저장소와 `haechi auth` CLI를 갖춘 내장 bearer auth, identity scope/label로 바인딩되는 named policy profile, model allowlisting, identity별 rate limiting을 제공하며, audit 로그에는 PII-safe identity가 기록됩니다. `docs/current/release-0.6-implementation-scope.md` 참고.
 

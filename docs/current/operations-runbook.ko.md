@@ -140,7 +140,27 @@ HAECHI_BENCH_REQUESTS=5000 HAECHI_BENCH_CONCURRENCY=64 npm run bench:throughput
 > 네트워크/하드웨어 처리량 벤치마크가 **아니며** 보장 수치로 인용해서는 **안
 > 됩니다**. 이 벤치는 `release:preflight`에서 실행되지 않습니다.
 
-## 8. 빠른 참조
+## 8. 실 업스트림 검증 (real vLLM / Ollama)
+
+`local-inference` 통합 스위트는 요청을 **실제** OpenAI 호환(vLLM) 및/또는
+Ollama 업스트림으로 프록시하여, 프록시가 올바르게 왕복하는지 검증합니다(실제
+소켓 위에서의 adapter 라우팅 + 요청/응답 보호). 이 스위트는 env-gated되어, 백엔드를
+가리키지 않으면 **스킵**합니다 — CI는 프로토콜 스텁을 상대로 실행합니다(실제 vLLM은
+GPU가 필요하고 GitHub 호스팅 러너에서 도달할 수 없습니다). 도달 가능한 호스트에서
+본인의 백엔드를 상대로 검증하려면:
+
+```bash
+HAECHI_VLLM_URL=http://VLLM_HOST:8000  HAECHI_VLLM_MODEL=<served-model> \
+HAECHI_OLLAMA_URL=http://OLLAMA_HOST:11434  HAECHI_OLLAMA_MODEL=<pulled-model> \
+  npm run test:inference:live
+```
+
+보유한 백엔드만 설정하십시오 — 각 테스트는 해당 URL이 설정되지 않으면 스킵합니다.
+본인의 호스트/IP를 사용하십시오(커밋하지 마십시오). 지속적으로 구동되는 실제 백엔드
+게이트가 필요하면, 해당 네트워크에 self-hosted 러너를 등록하고 그곳에서 스위트를
+트리거하십시오. GitHub 호스팅 러너는 사설 LAN에 도달할 수 없습니다.
+
+## 9. 빠른 참조
 
 | 작업 | 커맨드 |
 |---|---|

@@ -225,7 +225,28 @@ default 2000), `HAECHI_BENCH_CONCURRENCY` (default 32), `HAECHI_BENCH_WARMUP`
 > and must **not** be quoted as guarantees. The bench is not run by
 > `release:preflight`.
 
-## 8. Quick reference
+## 8. Live upstream validation (real vLLM / Ollama)
+
+The `local-inference` integration suite proxies a request through to a **real**
+OpenAI-compatible (vLLM) and/or Ollama upstream and asserts the proxy round-trips
+correctly (adapter routing + request/response protection over a real socket). It
+is env-gated, so it **skips** unless you point it at a backend — CI runs it
+against a protocol stub (a real vLLM needs a GPU and is not reachable from a
+GitHub-hosted runner). To validate against your own backend from a host that can
+reach it:
+
+```bash
+HAECHI_VLLM_URL=http://VLLM_HOST:8000  HAECHI_VLLM_MODEL=<served-model> \
+HAECHI_OLLAMA_URL=http://OLLAMA_HOST:11434  HAECHI_OLLAMA_MODEL=<pulled-model> \
+  npm run test:inference:live
+```
+
+Set only the backend(s) you have — each test skips when its URL is unset. Use
+your own host/IP (do not commit it). For a continuously-exercised real-backend
+gate, register a self-hosted runner on that network and trigger the suite there;
+GitHub-hosted runners cannot reach a private LAN.
+
+## 9. Quick reference
 
 | Task | Command |
 |---|---|
