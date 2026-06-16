@@ -227,7 +227,8 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
       const authContext = { identity, profile, policyEngine, correlationId };
 
       const body = await readBody(request, {
-        maxBytes: config.limits.maxRequestBytes
+        maxBytes: config.limits.maxRequestBytes,
+        response
       });
       const json = parseJsonBody(body);
 
@@ -268,13 +269,18 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
             blocked: false
           });
           countDecision(metrics, { routeContext, mode, decision: "forwarded" });
+          // CR2-001 — a per-request AbortController whose signal is threaded into
+          // the upstream fetch; aborting it (on a downstream client disconnect)
+          // tears down the upstream request + body so neither leaks.
+          const streamAbort = new AbortController();
           const upstreamResponse = await forward({
             upstream: config.target.upstream,
             request,
             body,
             timeoutMs: config.limits.upstreamTimeoutMs,
             metrics,
-            forwardPolicy
+            forwardPolicy,
+            abortController: streamAbort
           });
           // P1-CR-003 — sanitize response headers (strip the upstream's
           // content-encoding/content-length/transfer/hop-by-hop) on this path
@@ -286,7 +292,9 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
           await pipeUpstreamBodyBounded({
             upstreamResponse,
             response,
+            request,
             maxBytes: streamingPassThroughMaxBytes(config),
+            abortController: streamAbort,
             logger,
             metrics,
             correlationId
@@ -360,10 +368,16 @@ export function createHaechiProxy({ runtime, port = DEFAULT_PROXY_PORT, host = "
         });
         metrics.increment("haechi_internal_error_total");
       }
+      // CR2-005 — an over-limit request body teardown carries `Connection: close`
+      // so the socket releases once the 413 is delivered (readBody destroys the
+      // request on response finish/close).
+      const extraHeaders = error?.errorCode === "haechi_request_body_too_large"
+        ? { connection: "close" }
+        : null;
       writeJson(response, error.statusCode ?? 500, {
         error: error.errorCode ?? "haechi_proxy_error",
         message: expected ? error.message : "Internal proxy error"
-      });
+      }, extraHeaders);
     } finally {
       const elapsedSeconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       // route label is a bounded route id (or "unknown") — never an identity/value.
@@ -783,7 +797,7 @@ function streamingPassThroughMaxBytes(config) {
 // the client response so a long-lived or malicious stream cannot hold memory or
 // the connection open unbounded. Bytes already written cannot be retracted, so
 // this caps total memory/throughput, not the already-flushed prefix.
-async function pipeUpstreamBodyBounded({ upstreamResponse, response, maxBytes, logger = null, metrics = null, correlationId = null }) {
+async function pipeUpstreamBodyBounded({ upstreamResponse, response, request = null, maxBytes, abortController = null, logger = null, metrics = null, correlationId = null }) {
   if (!upstreamResponse.body) {
     response.end();
     return;
@@ -791,8 +805,50 @@ async function pipeUpstreamBodyBounded({ upstreamResponse, response, maxBytes, l
 
   const reader = upstreamResponse.body.getReader();
   let received = 0;
+
+  // CR2-001 — a ONE-SHOT teardown on a downstream client disconnect. Without it,
+  // a parked `await once(response, "drain")` (backpressure) or a parked
+  // `await reader.read()` (no backpressure, upstream idle) never unparks after the
+  // client socket dies — neither `drain` nor `error` fires — so the async task and
+  // the upstream connection leak. On `close`/`aborted` we cancel the upstream
+  // reader (interrupts a parked read) AND abort the upstream fetch (tears down the
+  // connection); the listeners are removed on normal completion so the happy path
+  // does not leak a handle.
+  let disconnected = false;
+  // A SINGLE promise resolved by the one-shot tearDown below, so the backpressure
+  // wait can race against the disconnect WITHOUT registering a fresh `close`
+  // listener every drain cycle (which would accumulate on a sustained
+  // backpressured stream and trip MaxListenersExceededWarning).
+  let signalDisconnected;
+  const disconnectedPromise = new Promise((resolve) => {
+    signalDisconnected = resolve;
+  });
+  const tearDown = () => {
+    if (disconnected) {
+      return;
+    }
+    disconnected = true;
+    signalDisconnected();
+    void cancelReader(reader);
+    abortController?.abort();
+  };
+  const disconnectSources = [response, request].filter(Boolean);
+  for (const source of disconnectSources) {
+    source.once("close", tearDown);
+    source.once("aborted", tearDown);
+  }
+  const cleanupListeners = () => {
+    for (const source of disconnectSources) {
+      source.removeListener("close", tearDown);
+      source.removeListener("aborted", tearDown);
+    }
+  };
+
   try {
     while (true) {
+      if (disconnected) {
+        return;
+      }
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -802,6 +858,7 @@ async function pipeUpstreamBodyBounded({ upstreamResponse, response, maxBytes, l
         // Over the cap: stop reading upstream and tear down the client write so
         // the oversize stream is bounded (fail-closed on size).
         void cancelReader(reader);
+        abortController?.abort();
         metrics?.increment("haechi_response_stream_truncated_total");
         logger?.error("proxy_stream_pass_through_too_large", {
           correlationId,
@@ -813,18 +870,29 @@ async function pipeUpstreamBodyBounded({ upstreamResponse, response, maxBytes, l
         return;
       }
       // Respect downstream backpressure: stop pulling upstream until the client
-      // socket has drained.
+      // socket has drained. CR2-001 — race the drain wait against `close` so a
+      // client disconnect mid-backpressure unparks the wait instead of hanging
+      // until the request timeout.
       const ok = response.write(Buffer.from(value));
-      if (!ok) {
-        await once(response, "drain");
+      if (!ok && !disconnected) {
+        await Promise.race([
+          once(response, "drain"),
+          disconnectedPromise
+        ]);
+        if (disconnected || response.writableEnded || response.destroyed) {
+          return;
+        }
       }
     }
     response.end();
   } catch (error) {
     void cancelReader(reader);
+    abortController?.abort();
     if (!response.writableEnded) {
       response.destroy();
     }
+  } finally {
+    cleanupListeners();
   }
 }
 
@@ -1051,14 +1119,24 @@ function restoreTokens(value, tokenValues) {
   return value;
 }
 
-async function forward({ upstream, request, body, timeoutMs = null, metrics = null, forwardPolicy = {} }) {
+async function forward({ upstream, request, body, timeoutMs = null, metrics = null, forwardPolicy = {}, abortController = null }) {
   const target = buildUpstreamUrl({ upstream, requestUrl: request.url });
+  // CR2-001 — combine the upstream timeout with a per-request AbortController so a
+  // downstream client disconnect (which aborts `abortController`) tears down the
+  // in-flight upstream fetch + its body, instead of leaking the connection.
+  const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : null;
+  let signal;
+  if (abortController && timeoutSignal) {
+    signal = AbortSignal.any([abortController.signal, timeoutSignal]);
+  } else {
+    signal = abortController ? abortController.signal : timeoutSignal ?? undefined;
+  }
   try {
     return await fetch(target, {
       method: request.method,
       headers: filteredHeaders(request.headers, forwardPolicy),
       body: request.method === "GET" || request.method === "HEAD" ? undefined : body,
-      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined
+      signal
     });
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
@@ -1195,7 +1273,7 @@ function appendHeader(target, key, value) {
   }
 }
 
-function readBody(request, { maxBytes }) {
+function readBody(request, { maxBytes, response = null }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let received = 0;
@@ -1208,6 +1286,26 @@ function readBody(request, { maxBytes }) {
       received += chunk.byteLength;
       if (received > maxBytes) {
         rejected = true;
+        // CR2-005 — stop reading and release the socket PROMPTLY instead of
+        // reading-and-discarding the rest of the upload until Node's finite
+        // requestTimeout. pause() halts the flowing read immediately (no further
+        // data is consumed); the connection is then torn down — but only AFTER the
+        // 413 has been written, so the client still receives it. The 413 carries
+        // `Connection: close` and the socket is destroyed once the response
+        // finishes/closes (destroying before the response is sent would reset the
+        // socket and the client would get a transport error instead of the 413).
+        request.pause();
+        if (response) {
+          const destroyRequest = () => {
+            if (!request.destroyed) {
+              request.destroy();
+            }
+          };
+          response.once("finish", destroyRequest);
+          response.once("close", destroyRequest);
+        } else {
+          request.destroy();
+        }
         reject(proxyError({
           statusCode: 413,
           errorCode: "haechi_request_body_too_large",
@@ -1260,14 +1358,25 @@ function parseJsonBody(body) {
   }
 }
 
-function writeJson(response, status, body) {
-  response.writeHead(status, { "content-type": "application/json" });
+function writeJson(response, status, body, extraHeaders = null) {
+  response.writeHead(status, { "content-type": "application/json", ...(extraHeaders ?? {}) });
   response.end(`${JSON.stringify(body, null, 2)}\n`);
 }
 
 function isJson(contentType = "") {
   return contentType.toLowerCase().includes("application/json");
 }
+
+// CR2-004 — body-coupled validator headers that describe the UPSTREAM body. On a
+// transformed (protected/redacted/re-serialized) response the body changed, so
+// these become stale and must be dropped (a client/proxy honoring the upstream's
+// etag/last-modified could otherwise serve or revalidate against the wrong body).
+const BODY_COUPLED_VALIDATOR_HEADERS = [
+  "etag",
+  "content-md5",
+  "digest",
+  "last-modified"
+];
 
 function transformedJsonHeaders(headers) {
   // P1-CR-003 — defensively strip the full hop-by-hop/compression set (the
@@ -1277,6 +1386,13 @@ function transformedJsonHeaders(headers) {
   for (const name of RESPONSE_HOP_BY_HOP_HEADERS) {
     delete next[name];
   }
+  // CR2-004 — the body was MUTATED, so drop validators coupled to the upstream
+  // body and forbid caching the rewritten response. This path only (the raw
+  // pass-through path keeps its etag — its body is byte-unchanged so still valid).
+  for (const name of BODY_COUPLED_VALIDATOR_HEADERS) {
+    delete next[name];
+  }
+  next["cache-control"] = "no-store";
   return next;
 }
 

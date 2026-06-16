@@ -407,3 +407,208 @@ test("P1-CR-004: unprotected/forwarded path fails closed on an oversize buffered
     await close(upstream);
   }
 });
+
+// --- CR2-004 -----------------------------------------------------------------
+
+test("CR2-004: a transformed (protected) response drops the upstream etag and sets cache-control: no-store", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-cr2-004-mutated-"));
+  const { keyFile, auditPath } = await project(dir);
+
+  // The upstream response body carries PII that response protection redacts, so
+  // the body is MUTATED/re-serialized. The upstream also sets body-coupled
+  // validators that must not survive the mutation.
+  const upstream = createServer((request, response) => {
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "etag": "\"upstream-v1\"",
+      "last-modified": "Wed, 21 Oct 2015 07:28:00 GMT",
+      "content-md5": "Q2hlY2sgSW50ZWdyaXR5IQ==",
+      "digest": "sha-256=abc",
+      "cache-control": "public, max-age=3600"
+    });
+    response.end(JSON.stringify({ choices: [{ message: { content: "email me at leak@example.com" } }] }));
+  });
+
+  const { proxy, base } = await startProxy({
+    mode: "enforce",
+    responseProtection: { enabled: true },
+    policy: { mode: "enforce", presets: ["llm-redact"], defaultAction: "redact" },
+    keys: { keyFile }, audit: { path: auditPath }
+  }, upstream);
+
+  try {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] })
+    });
+    assert.equal(res.status, 200);
+    const body = await res.text();
+    // The body really was mutated (PII redacted).
+    assert.doesNotMatch(body, /leak@example\.com/);
+    assert.match(body, /\[REDACTED:email\]/);
+    // Body-coupled validators no longer describe the mutated body → dropped.
+    assert.equal(res.headers.get("etag"), null);
+    assert.equal(res.headers.get("last-modified"), null);
+    assert.equal(res.headers.get("content-md5"), null);
+    assert.equal(res.headers.get("digest"), null);
+    // The rewritten response must not be cached.
+    assert.equal(res.headers.get("cache-control"), "no-store");
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("CR2-004: a pass-through (unmutated) response KEEPS its upstream etag", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-cr2-004-passthrough-"));
+  const { keyFile, auditPath } = await project(dir);
+
+  // Streaming pass-through: the body is piped unchanged, so its etag is still a
+  // valid validator and must survive.
+  const upstream = createServer((request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "etag": "\"upstream-stream-v1\""
+    });
+    response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "hello" } }] })}\n\n`);
+    response.write("data: [DONE]\n\n");
+    response.end();
+  });
+
+  const { proxy, base } = await startProxy({
+    mode: "enforce",
+    streaming: { requestMode: "pass-through" },
+    policy: { mode: "enforce", presets: [], defaultAction: "allow" },
+    keys: { keyFile }, audit: { path: auditPath }
+  }, upstream);
+
+  try {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stream: true, messages: [] })
+    });
+    assert.equal(res.status, 200);
+    // The pass-through body is unchanged, so its etag is still valid → kept.
+    assert.equal(res.headers.get("etag"), "\"upstream-stream-v1\"");
+    await res.text();
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+// --- CR2-005 -----------------------------------------------------------------
+
+test("CR2-005: an over-limit request body still gets the 413 and signals socket release", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-cr2-005-overlimit-"));
+  const { keyFile, auditPath } = await project(dir);
+
+  // A stub upstream that should NEVER be reached (the body is rejected at the
+  // gateway before forwarding).
+  let upstreamHit = false;
+  const upstream = createServer((request, response) => {
+    upstreamHit = true;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+
+  const cap = 1024;
+  const { proxy, base } = await startProxy({
+    mode: "enforce",
+    limits: { maxRequestBytes: cap },
+    policy: { mode: "enforce", presets: [], defaultAction: "allow" },
+    keys: { keyFile }, audit: { path: auditPath }
+  }, upstream);
+
+  try {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // Far over the cap so the limit trips mid-upload.
+      body: JSON.stringify({ messages: [{ role: "user", content: "x".repeat(cap * 16) }] })
+    });
+
+    // The existing 413 / error shape is preserved.
+    assert.equal(res.status, 413);
+    const json = await res.json();
+    assert.equal(json.error, "haechi_request_body_too_large");
+    // The teardown signals the socket release with Connection: close.
+    assert.equal(res.headers.get("connection"), "close");
+    // The over-limit request was rejected before reaching the upstream.
+    assert.equal(upstreamHit, false);
+  } finally {
+    await proxy.close();
+    await close(upstream);
+  }
+});
+
+test("CR2-005: the server tears the socket down promptly after an over-limit 413 (no read-and-discard)", async () => {
+  // A raw-socket assertion on the teardown semantics: drive a raw HTTP request
+  // and confirm the server closes the connection from its side (Connection: close
+  // + request.destroy()) PROMPTLY rather than reading-and-discarding the rest of
+  // the upload until the finite requestTimeout.
+  const dir = await mkdtemp(join(tmpdir(), "haechi-cr2-005-teardown-"));
+  const { keyFile, auditPath } = await project(dir);
+
+  const upstream = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+
+  const cap = 512;
+  const { proxy, base } = await startProxy({
+    mode: "enforce",
+    limits: { maxRequestBytes: cap },
+    policy: { mode: "enforce", presets: [], defaultAction: "allow" },
+    keys: { keyFile }, audit: { path: auditPath }
+  }, upstream);
+
+  const url = new URL(base);
+  const { connect } = await import("node:net");
+  const socket = connect({ host: url.hostname, port: Number(url.port) });
+  const collected = [];
+  let serverClosedSocket = false;
+
+  try {
+    await new Promise((resolve, reject) => {
+      socket.on("connect", resolve);
+      socket.on("error", reject);
+    });
+
+    const oversize = "x".repeat(cap * 8);
+    const payload = JSON.stringify({ messages: [{ role: "user", content: oversize }] });
+    socket.write(
+      `POST /v1/chat/completions HTTP/1.1\r\n` +
+      `Host: ${url.hostname}:${url.port}\r\n` +
+      `Content-Type: application/json\r\n` +
+      `Content-Length: ${Buffer.byteLength(payload)}\r\n` +
+      `\r\n` +
+      payload
+    );
+
+    socket.on("data", (chunk) => collected.push(chunk));
+    // The server must close the socket from its side promptly (well under the
+    // finite requestTimeout). Race against a short watchdog so a leak fails fast.
+    await new Promise((resolve) => {
+      const watchdog = setTimeout(resolve, 5000);
+      socket.on("close", () => {
+        serverClosedSocket = true;
+        clearTimeout(watchdog);
+        resolve();
+      });
+    });
+
+    const responseText = Buffer.concat(collected).toString("utf8");
+    assert.match(responseText, /413/);
+    assert.match(responseText, /haechi_request_body_too_large/);
+    assert.match(responseText.toLowerCase(), /connection: close/);
+    assert.equal(serverClosedSocket, true,
+      "the server must tear down the socket promptly after the over-limit 413");
+  } finally {
+    socket.destroy();
+    await proxy.close();
+    await close(upstream);
+  }
+});

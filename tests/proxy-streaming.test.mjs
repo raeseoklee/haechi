@@ -194,6 +194,71 @@ test("inspect mode 501s a streaming route with no known format", async () => {
   }
 });
 
+test("CR2-001: a downstream client disconnect mid-stream promptly tears down the upstream connection", async () => {
+  // A never-ending streaming upstream: it sends one frame then holds the
+  // connection open forever (no further writes, never ends). Without the
+  // disconnect teardown, the proxy's pipe parks on `reader.read()`/`drain` until
+  // the request timeout and the upstream connection leaks. We assert the upstream
+  // request is torn down (its `close`/`aborted` fires) PROMPTLY after the client
+  // disconnects — not parked until the (long) upstream timeout.
+  let upstreamClosedResolve;
+  const upstreamClosed = new Promise((resolve) => { upstreamClosedResolve = resolve; });
+  const upstream = createServer((request, response) => {
+    request.on("close", () => upstreamClosedResolve(true));
+    request.on("aborted", () => upstreamClosedResolve(true));
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "first chunk" } }] })}\n\n`);
+    // Intentionally never write again and never end — hold the stream open.
+  });
+  const upstreamAddress = await listen(upstream);
+
+  const dir = await mkdtemp(join(tmpdir(), "haechi-proxy-stream-disconnect-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const runtime = createRuntime({
+    mode: "enforce",
+    target: { type: "vllm-openai", upstream: `http://127.0.0.1:${upstreamAddress.port}` },
+    streaming: { requestMode: "pass-through" },
+    // A long upstream timeout so a pass (prompt teardown) is unambiguous: if the
+    // teardown is missing, this test would only pass after this timeout fires.
+    limits: { upstreamTimeoutMs: 120000 },
+    policy: { mode: "enforce", presets: [], defaultAction: "allow" },
+    keys: { keyFile },
+    audit: { path: join(dir, ".haechi", "audit.jsonl") }
+  });
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+
+  try {
+    const controller = new AbortController();
+    const response = await fetch(`http://${proxyAddress.host}:${proxyAddress.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "hi" }] }),
+      signal: controller.signal
+    });
+    // Read the first frame so the stream is actively flowing, then disconnect.
+    const reader = response.body.getReader();
+    await reader.read();
+    // Disconnect the client: cancel the body reader (which closes the downstream
+    // socket) and abort the request. Swallow the resulting AbortError on the
+    // in-flight read so it does not surface as an unhandled rejection.
+    const drained = reader.read().catch(() => {});
+    controller.abort();
+    await drained;
+
+    // The upstream connection must be torn down promptly (well under the 120s
+    // upstream timeout). Race against a short watchdog so a leak fails fast.
+    const watchdog = new Promise((resolve) => setTimeout(() => resolve(false), 5000));
+    const closedPromptly = await Promise.race([upstreamClosed, watchdog]);
+    assert.equal(closedPromptly, true,
+      "upstream connection must be torn down promptly after the client disconnects (not parked until the upstream timeout)");
+  } finally {
+    await proxy.close();
+    upstream.close();
+  }
+});
+
 test("config validation covers the new streaming keys", () => {
   assert.throws(() => normalizeConfig({ streaming: { requestMode: "weird" } }), /streaming.requestMode/);
   assert.throws(() => normalizeConfig({ streaming: { responseMode: "weird" } }), /streaming.responseMode/);
