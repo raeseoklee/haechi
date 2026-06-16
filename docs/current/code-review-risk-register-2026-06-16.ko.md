@@ -1,6 +1,6 @@
 # 2026-06-16 전체 코드리뷰 리스크 등록부
 
-상태: 보완 완료(13개 항목 모두 Resolved, G9는 1.3.1 컷에서 해제)  
+상태: 보완 완료 및 `haechi@1.3.1`로 발행(13개 항목 모두 Resolved; G9 Pass, 2026-06-16)  
 범위: `main`의 `a47a6a79c380db412b6a464a2798b7df61f3b68d`  
 검토일: 2026-06-16  
 출처: 저장소 전체 코드리뷰, 보안/프로토콜/패키징/회귀 테스트 관점의 추가 검토
@@ -11,7 +11,7 @@
 
 아래 P0/P1 항목이 수정되거나 책임자 판단으로 명시 수용되기 전까지 새 릴리스 태그와 npm publish는 차단한다.
 
-저장소는 이미 공개 상태이므로 public source 공개는 유지할 수 있다. 클라이언트 인증 헤더 전달 리스크(P0-CR-001)는 이제 Resolved다 — 프록시는 기본 차단 업스트림 헤더 허용목록을 적용하며 게이트웨이 `Authorization`/`Cookie`/`Proxy-Authorization`를 모델 업스트림으로 전달하지 않는다. hex IPv4-mapped IPv6 SSRF 공백(P1-CR-002)과 그 vault 테스트 공백(P2-CR-012)도 이제 Resolved다 — 모든 `isBlockedAddress` 복사본이 private range 검사 전에 IPv4-mapped IPv6 주소를 임베드된 IPv4로 정규화한다. streaming inspection 우회(P1-CR-005)와 SSE multi-line `data:` 정확성 공백(P2-CR-013)도 이제 Resolved다 — parse 실패한 non-JSON CONTENT frame을 텍스트로 검사하고 multi-line `data:` line을 스펙이 요구하는 newline으로 합친다. 마지막 여섯 개 P2(P2-CR-006 mcp-wrap stderr, P2-CR-007 init key-file 검증, P2-CR-008 satellite `manifest.bin` check, P2-CR-009 auth-throw 테스트, P2-CR-010 process-sandbox quota 테스트, P2-CR-011 audit middle-tamper 테스트)도 이제 Resolved다. **13개 항목이 모두 Resolved다.** 이제 어떤 보완 항목도 릴리스를 차단하지 않으며, G9 릴리스 차단 게이트는 1.3.1 컷(버전 bump + 공식 게이트 전환)에서 해제된다.
+저장소는 이미 공개 상태이므로 public source 공개는 유지할 수 있다. 클라이언트 인증 헤더 전달 리스크(P0-CR-001)는 이제 Resolved다 — 프록시는 기본 차단 업스트림 헤더 허용목록을 적용하며 게이트웨이 `Authorization`/`Cookie`/`Proxy-Authorization`를 모델 업스트림으로 전달하지 않는다. hex IPv4-mapped IPv6 SSRF 공백(P1-CR-002)과 그 vault 테스트 공백(P2-CR-012)도 이제 Resolved다 — 모든 `isBlockedAddress` 복사본이 private range 검사 전에 IPv4-mapped IPv6 주소를 임베드된 IPv4로 정규화한다. streaming inspection 우회(P1-CR-005)와 SSE multi-line `data:` 정확성 공백(P2-CR-013)도 이제 Resolved다 — parse 실패한 non-JSON CONTENT frame을 텍스트로 검사하고 multi-line `data:` line을 스펙이 요구하는 newline으로 합친다. 마지막 여섯 개 P2(P2-CR-006 mcp-wrap stderr, P2-CR-007 init key-file 검증, P2-CR-008 satellite `manifest.bin` check, P2-CR-009 auth-throw 테스트, P2-CR-010 process-sandbox quota 테스트, P2-CR-011 audit middle-tamper 테스트)도 이제 Resolved다. **13개 항목이 모두 Resolved이며 `haechi@1.3.1`로 발행되었다**(2026-06-16, attested OIDC publish; core가 1.3.0 → 1.3.1로 bump된 보완 전용 patch). **G9** 릴리스 차단 게이트는 **Pass**다. 운영자는 수정 사항을 반영하려면 `1.3.0`에서 `1.3.1`로 업그레이드해야 한다.
 
 ## 심각도 기준
 

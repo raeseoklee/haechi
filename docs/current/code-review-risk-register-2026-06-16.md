@@ -1,6 +1,6 @@
 # 2026-06-16 Full Code Review Risk Register
 
-Status: remediation complete (all 13 findings Resolved; G9 clears at the 1.3.1 cut)  
+Status: remediation complete and shipped in `haechi@1.3.1` (all 13 findings Resolved; G9 Pass, 2026-06-16)  
 Scope: `main` at `a47a6a79c380db412b6a464a2798b7df61f3b68d`  
 Review date: 2026-06-16  
 Source: full repository code review with focused security, protocol, packaging, and regression-test passes
@@ -11,7 +11,7 @@ This register captures risks discovered after the 0.3.2 and 1.3.x hardening work
 
 Until the P0/P1 items below are fixed or explicitly accepted with a documented owner decision, new release tags and npm publishes should be blocked.
 
-Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The streaming-inspection bypass (P1-CR-005) and the SSE multi-line `data:` correctness gap (P2-CR-013) are also now Resolved — a parse-failed non-JSON CONTENT frame is inspected as text and multi-line `data:` lines are joined with the spec-required newline. The final six P2s (P2-CR-006 mcp-wrap stderr, P2-CR-007 init key-file validation, P2-CR-008 satellite `manifest.bin` check, P2-CR-009 auth-throw test, P2-CR-010 process-sandbox quota tests, P2-CR-011 audit middle-tamper tests) are now Resolved as well. **All 13 findings are Resolved.** No remediation item now blocks release; the G9 release-block gate clears at the 1.3.1 cut (the version bump + formal gate flip).
+Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The streaming-inspection bypass (P1-CR-005) and the SSE multi-line `data:` correctness gap (P2-CR-013) are also now Resolved — a parse-failed non-JSON CONTENT frame is inspected as text and multi-line `data:` lines are joined with the spec-required newline. The final six P2s (P2-CR-006 mcp-wrap stderr, P2-CR-007 init key-file validation, P2-CR-008 satellite `manifest.bin` check, P2-CR-009 auth-throw test, P2-CR-010 process-sandbox quota tests, P2-CR-011 audit middle-tamper tests) are now Resolved as well. **All 13 findings are Resolved and shipped in `haechi@1.3.1`** (2026-06-16, attested OIDC publish; core bumped 1.3.0 → 1.3.1, a remediation-only patch). The **G9** release-block gate is **Pass**. Operators should upgrade from `1.3.0` to `1.3.1` to pick up the fixes.
 
 ## Severity Policy
 
