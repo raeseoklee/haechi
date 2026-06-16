@@ -11,7 +11,7 @@ This register captures risks discovered after the 0.3.2 and 1.3.x hardening work
 
 Until the P0/P1 items below are fixed or explicitly accepted with a documented owner decision, new release tags and npm publishes should be blocked.
 
-Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The remaining open items below (P1-CR-005 and the remaining P2s) still gate new release tags / npm publishes.
+Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The streaming-inspection bypass (P1-CR-005) and the SSE multi-line `data:` correctness gap (P2-CR-013) are also now Resolved — a parse-failed non-JSON CONTENT frame is inspected as text and multi-line `data:` lines are joined with the spec-required newline. The remaining open items below (the remaining P2s) still gate new release tags / npm publishes.
 
 ## Severity Policy
 
@@ -27,7 +27,7 @@ Public source availability can continue because the repository is already public
 | P1-CR-002 | P1 | SSRF guard | Hex-form IPv4-mapped IPv6 addresses such as `::ffff:7f00:1` are not classified as private loopback. | Resolved | Was blocking release |
 | P1-CR-003 | P1 | Proxy responses | Auto-decompressed upstream bodies can be returned with original compressed `content-encoding` / `content-length` headers. | Resolved | Was blocking release |
 | P1-CR-004 | P1 | Streaming | `streaming.requestMode: "pass-through"` buffers the full upstream body and has no response-size cap. | Resolved | Was blocking release |
-| P1-CR-005 | P1 | Streaming inspection | Non-JSON SSE/NDJSON frames are passed raw, so plain-text PII can bypass protection. | Open | Blocks release |
+| P1-CR-005 | P1 | Streaming inspection | Non-JSON SSE/NDJSON frames are passed raw, so plain-text PII can bypass protection. | Resolved | Was blocking release |
 | P2-CR-006 | P2 | MCP wrap | Child process `stderr` is inherited and unfiltered. | Open | Requires remediation or explicit boundary documentation |
 | P2-CR-007 | P2 | Key custody | `initLocalKeyFile()` reports success for existing files without validating key-file shape. | Open | Should fix before next publish |
 | P2-CR-008 | P2 | Satellite packaging | Satellite packaging checks do not validate `manifest.bin` targets. | Open | Should fix before next publish |
@@ -35,7 +35,7 @@ Public source availability can continue because the repository is already public
 | P2-CR-010 | P2 | Plugin sandbox tests | Process-isolated quota and oversize branches lack parity with worker sandbox tests. | Open | Test gap |
 | P2-CR-011 | P2 | Audit tests | Middle-record audit-chain tamper paths lack focused regression coverage. | Open | Test gap |
 | P2-CR-012 | P2 | Vault tests | KMS vault IPv6 loopback carve-out has only IPv4 coverage. | Resolved | Was a test gap |
-| P2-CR-013 | P2 | SSE correctness | Multi-line SSE `data:` fields are joined without the spec-required newline. | Open | Correctness gap |
+| P2-CR-013 | P2 | SSE correctness | Multi-line SSE `data:` fields are joined without the spec-required newline. | Resolved | Was a correctness gap |
 
 ## Detailed Findings
 
@@ -168,25 +168,32 @@ Release decision: blocks release until fixed or the mode is disabled by default 
 
 ### P1-CR-005: Streaming Inspect Raw-Passes Non-JSON Frames
 
-Status: Open  
-Affected code: `packages/stream-filter/index.mjs`  
-Evidence:
+Status: Resolved (2026-06-16, toward 1.3.1)  
+Affected code: `packages/stream-filter/index.mjs`, `packages/core/index.mjs`  
+Evidence (was):
 
-- SSE parser returns non-JSON `data:` frames with `ok: false`.
-- Current inspect flow passes failed-parse frames through raw.
+- SSE parser returned non-JSON `data:` frames with `ok: false`.
+- The inspect flow passed failed-parse frames through raw (`if (!parsed.ok) { sink.write(frame.raw); return; }`).
 - A local repro with `data: minji.kim@example.com\n\n` produced `blocked: false` and leaked the email.
 
-Impact:
+Impact (was):
 
-When streaming inspection is enabled, plain-text SSE or NDJSON-like frames can bypass PII/secret protection. This weakens the value of streaming hardening because malformed, non-JSON, or provider-specific frames may carry sensitive text.
+When streaming inspection was enabled, plain-text SSE or NDJSON-like frames could bypass PII/secret protection. This weakened the value of streaming hardening because malformed, non-JSON, or provider-specific frames may carry sensitive text.
 
-Required remediation:
+Resolution:
 
-- Treat parse-failed content frames as inspectable text, not automatic raw pass-through.
-- Preserve protocol control frames such as `[DONE]` through an explicit allowlist.
-- Add tests for plain-text SSE, partial JSON, malformed JSON with PII, and provider control messages.
+- `parseFrame` (`packages/stream-filter/index.mjs`) now distinguishes a CONTROL frame from a non-JSON CONTENT frame. CONTROL is an explicit allowlist with no inspectable text: the SSE `[DONE]` sentinel, a comment-only frame (only `:`/field lines, no `data:`), and an empty/whitespace/keepalive frame. It returns `{ ok:false, control:true, text:null }` for those and `{ ok:false, control:false, text }` (the reconstructed `data:` payload) for a non-JSON CONTENT frame.
+- `handleFrame`'s parse-failed branch passes CONTROL frames through raw (unchanged), but INSPECTS a non-JSON CONTENT frame as text: it calls a new `protector.protectText(text)` (single-shot detect → decide → tally → transform), re-emits `data: <protected text>` via `serializeTextFrame` (preserving `event:`/`id:`/`:` lines and re-emitting a multi-line payload as multiple `data:` lines), and fails the stream closed (`blocked = true`) on a block-action detection.
+- `createStreamProtector` (`packages/core/index.mjs`) gains `protectText(text)`, which reuses the existing `transformSegment` logic. It is DISTINCT from the delta-channel `push`/`flush` cross-frame buffer — it never touches `pending` — so inspecting a non-JSON frame's text cannot corrupt the JSON delta sliding-buffer state. Per-frame text inspection closes the bypass; cross-frame buffering of arbitrary non-JSON frames is out of scope (the delta channel keeps its own buffer; noted in code).
+- The response-direction marker skip and the audit tally are preserved because `protectText` runs the same `transformSegment` with the protector's response-direction `context`, so a tokenized round-trip (`[REDACTED:…]`, `[TOKEN:…]`) echoed by the model is not re-flagged. The JSON path (delta channel, `protectFrameExtras`, cross-frame sliding buffer, `event:`-line preservation) is unchanged.
 
-Release decision: blocks release until fixed.
+Closure evidence:
+
+- `tests/stream-filter.test.mjs` adds: a plain-text SSE `data: <email>` frame is redacted (not leaked); a plain-text frame with a `card: block` action BLOCKS the stream; malformed/partial JSON with PII is inspected as text; an NDJSON non-JSON content frame with PII is inspected; comment-only/keepalive/`event:` control frames pass untouched; a tokenized-round-trip marker is not re-flagged. The existing within-frame and cross-frame JSON delta tests, `[DONE]`/keepalive pass-through, and report-only tests stay green.
+- `tests/proxy-streaming.test.mjs` adds an end-to-end repro: an upstream emitting `data: minji.kim@example.com\n\n` (plain text) is redacted to `[REDACTED:email]` through the proxy, `stream_inspected` is audited, and the audit chain verifies with no plaintext.
+- Follow-up (adversarial verify caught a residual leak in the first cut): a **trim-mismatch** let a leading-whitespace `data:` line (` data: <pii>`) be parsed+redacted but then re-emitted VERBATIM by the serializers (which used a stricter `startsWith("data:")` on the untrimmed raw line), leaking the original — and the same class affected the JSON `serializeFrame`. Fixed by a single shared lenient matcher `SSE_DATA_LINE` / `sseDataPayload` used by `parseFrame` AND both serializers, so a `  data:`/`\tdata:` line is always recognized and replaced, never emitted verbatim. Also hardened `handleFrame` to route a bare PRIMITIVE JSON frame (e.g. `data: "<pii>"`) to text inspection instead of the object delta path (which would throw an uncaught `setByPath`-on-string-root TypeError). Regression tests added in `tests/stream-filter.test.mjs` (leading-space/tab `data:` plaintext, leading-space JSON non-delta field, bare-primitive JSON).
+
+Release decision: blocks release until fixed. Resolved.
 
 ### P2-CR-006: MCP Wrap Inherits Child `stderr`
 
@@ -326,23 +333,26 @@ Release decision: resolved; the test gap is closed.
 
 ### P2-CR-013: SSE Multi-Line `data:` Join Semantics
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/stream-filter/index.mjs`  
-Evidence:
+Evidence (was):
 
-- The SSE parser joins multiple `data:` lines with `join("")`.
+- The SSE parser joined multiple `data:` lines with `join("")`.
 - The SSE processing model joins multiple data lines with newline separators.
 
-Impact:
+Impact (was):
 
-Valid multi-line SSE events can be mutated before parsing or inspection. This can cause false negatives, false positives, or malformed forwarded events.
+Valid multi-line SSE events could be mutated before parsing or inspection. This can cause false negatives, false positives, or malformed forwarded events.
 
-Required remediation:
+Resolution:
 
-- Join multi-line `data:` values with `\n`.
-- Add tests for multi-line JSON and multi-line plain-text events.
+- `parseFrame` now joins multiple `data:` lines with `join("\n")` (the SSE spec separator) and strips only the single spec-defined leading space per line (`replace(/^ /, "")` instead of `trim()`, so interior/trailing text whitespace is not corrupted). A multi-line JSON event still `JSON.parse`s because newlines are valid JSON whitespace between tokens / inside the reconstructed value; a multi-line plain-text event is reconstructed with its newlines before text inspection. The non-JSON CONTENT re-serializer (`serializeTextFrame`) re-emits a multi-line protected payload as multiple `data:` lines, so the newline survives the round-trip.
 
-Release decision: should be fixed with the streaming remediation group.
+Closure evidence:
+
+- `tests/stream-filter.test.mjs` adds a multi-line `data:` JSON event (split across two `data:` lines) that still parses and is protected, and a multi-line plain-text `data:` event whose PII (on the second line) is caught and re-emitted with two `data:` lines preserved.
+
+Release decision: should be fixed with the streaming remediation group. Resolved.
 
 ## Remediation Order
 

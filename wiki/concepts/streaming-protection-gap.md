@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-10
+updated: 2026-06-16
 tags: [concept, security, gap]
 ---
 
@@ -15,6 +15,10 @@ Through 0.4 Haechi could not inspect SSE/NDJSON streams, so streaming was treate
 ## How 0.5 inspection works
 
 `packages/stream-filter` parses SSE (`data: …\n\n`) and NDJSON (`{…}\n`) frames incrementally. Each adapter streaming route declares `{ format, deltaPath }` (the incremental-text channel). `core`'s `createStreamProtector` holds a bounded raw tail of the delta channel (`streaming.maxMatchBytes`, default 256): on each push it detects on the pending text, commits everything up to `len - maxMatchBytes` (pulled back before any straddling detection), transforms and emits the committed prefix, and holds the rest — so a match split across frames (even byte-by-byte) is caught before the leading part leaves. Non-delta string leaves (tool-call args) get within-frame protection; the stream is audited once (`stream_inspected`/`stream_blocked`).
+
+### Non-JSON CONTENT frames (P1-CR-005, toward 1.3.1)
+
+A frame whose `data:` payload does not `JSON.parse` is NOT raw-passed. `parseFrame` splits parse-failures into a **CONTROL allowlist** (the `[DONE]` sentinel, comment-only `:` frames, empty/whitespace/keepalive — no inspectable text, passed raw) and a **non-JSON CONTENT frame** (plain text, partial/malformed JSON, provider-specific text). A CONTENT frame is inspected as text via `protector.protectText` (a single-shot reuse of `transformSegment`, **distinct from** the `push`/`flush` cross-frame buffer so it never corrupts the JSON delta sliding-buffer state), re-emitted as `data: <protected text>` (`serializeTextFrame`, preserving `event:`/`id:`/`:` lines and multi-line `data:` shape), and fails the stream closed on a block-action detection. The response-direction marker skip is preserved, so a tokenized round-trip echoed by the model is not re-flagged. Per-frame text inspection closes the bypass; cross-frame buffering of *arbitrary* non-JSON frames is out of scope (the JSON delta channel keeps its own buffer). P2-CR-013 fixed the SSE multi-line `data:` join to `\n` (spec separator), so multi-line JSON still parses and multi-line text keeps its newlines.
 
 ## Remaining limits (documented exclusions)
 

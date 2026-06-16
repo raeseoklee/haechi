@@ -4,6 +4,12 @@
 // through a bounded sliding buffer (cross-frame matches caught up to
 // streaming.maxMatchBytes), and all other string leaves in a frame get
 // within-frame protection. The whole stream is audited once at the end.
+//
+// P1-CR-005 — a frame whose data: payload is not JSON is NOT raw-passed. A
+// CONTROL frame (the [DONE] sentinel, comment-only, empty/keepalive) has no
+// inspectable text and passes through; a non-JSON CONTENT frame is inspected as
+// text (single-shot protector.protectText, distinct from the delta buffer) so
+// plain-text PII/secrets cannot bypass protection in inspect mode.
 
 const SSE_DONE = "[DONE]";
 
@@ -49,13 +55,47 @@ export async function inspectResponseStream({ source, sink, streaming, protector
     const frame = { raw, body: raw.trim() };
     const parsed = parseFrame(frame, wireFormat);
     if (!parsed.ok) {
-      // Non-JSON frame (e.g. `data: [DONE]`, comments, keep-alives): pass
-      // through verbatim — there is nothing to inspect.
-      sink.write(frame.raw);
+      // P1-CR-005 — a parse-failed frame is one of two things:
+      //  (1) a CONTROL frame with no inspectable text (the SSE [DONE] sentinel,
+      //      a comment-only frame, an empty/whitespace/keepalive frame) — there
+      //      is genuinely nothing to protect, so pass it through verbatim; or
+      //  (2) a CONTENT frame whose data: payload is NOT JSON (plain text,
+      //      partial/malformed JSON, provider-specific text). That text CAN carry
+      //      PII/secrets, so it must be INSPECTED AS TEXT, not raw-passed.
+      if (parsed.control || parsed.text == null) {
+        sink.write(frame.raw);
+        return;
+      }
+      // Inspect the reconstructed data text as a single self-contained payload.
+      // protectText is DISTINCT from the delta-channel push/flush buffer, so a
+      // non-JSON frame's text never corrupts the JSON delta sliding buffer. A
+      // block-action detection fails the stream closed; otherwise re-emit the
+      // protected text (preserving the original wire wrapper / event: lines).
+      const protectedText = await protector.protectText(parsed.text);
+      if (protectedText.blocked) {
+        blocked = true;
+        return;
+      }
+      sink.write(serializeTextFrame(protectedText.text, wireFormat, frame));
       return;
     }
 
     const json = parsed.json;
+
+    // A bare PRIMITIVE JSON value (string/number/boolean/null) has no object
+    // structure for the delta/extras object path — a deltaPath setByPath on a
+    // string root would throw an uncaught TypeError on an attacker-influenceable
+    // frame. A JSON string can itself carry PII, so inspect the re-serialized
+    // value as text (same single-shot path as a non-JSON content frame).
+    if (json === null || typeof json !== "object") {
+      const protectedPrimitive = await protector.protectText(JSON.stringify(json));
+      if (protectedPrimitive.blocked) {
+        blocked = true;
+        return;
+      }
+      sink.write(serializeTextFrame(protectedPrimitive.text, wireFormat, frame));
+      return;
+    }
 
     // A delta-terminating frame: flush the held tail (as a valid delta frame)
     // before emitting it, so the residual is correctly ordered.
@@ -157,28 +197,64 @@ function createFrameSplitter(format) {
   };
 }
 
+// Parse a frame. On success: { ok:true, json }. On failure the caller needs to
+// know WHICH kind of failure it is (P1-CR-005):
+//   - { ok:false, control:true }          → a CONTROL frame (no inspectable
+//                                             text: [DONE], comment-only, empty/
+//                                             whitespace/keepalive) → pass raw.
+//   - { ok:false, control:false, text }   → a CONTENT frame whose data: payload
+//                                             is non-JSON → inspect `text` as text.
+// Recognize an SSE `data:` field line LENIENTLY — allowing (non-spec) leading
+// whitespace before the field name — and return its payload (one leading space
+// after the colon stripped per the SSE spec), or null if the line is not a data
+// field. SECURITY (P1-CR-005 follow-up): recognition MUST be identical in the
+// parser (which inspects/redacts) and the serializers (which re-emit). If the
+// serializer used a stricter `line.startsWith("data:")` it would fail to match a
+// `  data: <pii>` line, emit it VERBATIM, and leak the original plaintext while
+// separately appending the redacted copy. Both sides use this one helper.
+const SSE_DATA_LINE = /^[ \t]*data:/;
+function sseDataPayload(line) {
+  const match = /^[ \t]*data:(.*)$/.exec(line);
+  return match ? match[1].replace(/^ /, "") : null;
+}
+
 function parseFrame(frame, format) {
   if (!frame) {
-    return { ok: false };
+    return { ok: false, control: true, text: null };
   }
   let payload = frame.body;
   if (format === "sse") {
+    // An empty/whitespace/comment-only/keepalive frame has no data: line → a
+    // CONTROL frame with nothing to inspect.
+    if (payload === "") {
+      return { ok: false, control: true, text: null };
+    }
     const dataLines = payload
       .split("\n")
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim());
+      .map(sseDataPayload)
+      .filter((value) => value !== null);
     if (dataLines.length === 0) {
-      return { ok: false };
+      // Comment-only (`:` lines) or field-only (event:/id:/retry:) frame.
+      return { ok: false, control: true, text: null };
     }
-    payload = dataLines.join("");
+    // P2-CR-013 — the SSE model joins multiple data: lines with a NEWLINE, not
+    // "". Newlines are valid JSON whitespace between tokens / inside a string, so
+    // a multi-line JSON event still JSON.parses; a multi-line plain-text event is
+    // reconstructed with its newlines before text inspection.
+    payload = dataLines.join("\n");
     if (payload === SSE_DONE) {
-      return { ok: false };
+      // The [DONE] sentinel: a CONTROL frame, never inspected.
+      return { ok: false, control: true, text: null };
     }
+  } else if (payload === "") {
+    // NDJSON: an empty/whitespace line is a CONTROL/keepalive frame.
+    return { ok: false, control: true, text: null };
   }
   try {
     return { ok: true, json: JSON.parse(payload) };
   } catch {
-    return { ok: false };
+    // Non-JSON CONTENT: surface the reconstructed payload text for inspection.
+    return { ok: false, control: false, text: payload };
   }
 }
 
@@ -195,8 +271,10 @@ function serializeFrame(json, format, original) {
       const out = [];
       let dataWritten = false;
       for (const line of lines) {
-        if (line.startsWith("data:")) {
-          // Collapse any (multi-line) data payload into the single new body.
+        if (SSE_DATA_LINE.test(line)) {
+          // Collapse any (multi-line) data payload into the single new body. Use
+          // the SAME lenient match as the parser so a `  data:` line is replaced,
+          // never emitted verbatim (which would leak the original plaintext).
           if (!dataWritten) {
             out.push(`data: ${body}`);
             dataWritten = true;
@@ -214,6 +292,43 @@ function serializeFrame(json, format, original) {
   }
   // NDJSON: preserve the original trailing newline style when available.
   return original && original.raw.endsWith("\n") ? `${body}\n` : `${body}\n`;
+}
+
+// P1-CR-005 — re-serialize a parse-failed CONTENT frame after its data text has
+// been inspected/transformed. Unlike serializeFrame (which JSON.stringifies an
+// object), this carries through ARBITRARY text. For SSE it preserves the
+// original non-data field lines (event:/id:/retry:/`:` comments) and re-emits the
+// protected text as data: lines — one per text line, per the SSE spec, so a
+// multi-line payload round-trips correctly. For NDJSON the frame body IS the
+// text, so emit the protected text plus a newline.
+function serializeTextFrame(text, format, original) {
+  if (format !== "sse") {
+    return `${text}\n`;
+  }
+  const dataLines = text.split("\n").map((line) => `data: ${line}`);
+  if (original && typeof original.raw === "string") {
+    const lines = original.raw.replace(/\n+$/, "").split("\n");
+    const out = [];
+    let dataWritten = false;
+    for (const line of lines) {
+      if (SSE_DATA_LINE.test(line)) {
+        // Replace the (possibly multi-line) data block with the protected lines.
+        // Lenient match (same as the parser) so a `  data:` line is replaced, not
+        // emitted verbatim (which would leak the original plaintext PII).
+        if (!dataWritten) {
+          out.push(...dataLines);
+          dataWritten = true;
+        }
+      } else {
+        out.push(line);
+      }
+    }
+    if (!dataWritten) {
+      out.push(...dataLines);
+    }
+    return `${out.join("\n")}\n\n`;
+  }
+  return `${dataLines.join("\n")}\n\n`;
 }
 
 export function getByPath(value, path) {

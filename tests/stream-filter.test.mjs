@@ -167,3 +167,183 @@ test("report-only mode detects but does not transform the stream", async () => {
   assert.match(text, /minji\.kim@example\.com/);
   assert.ok(summary.byType.email >= 1);
 });
+
+// --- P1-CR-005: non-JSON CONTENT frames are inspected as text ---------------
+
+test("P1-CR-005: a plain-text SSE data frame with PII is redacted, not leaked", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-plaintext-"));
+  const runtime = await makeRuntime(dir);
+  const { text, blocked, summary } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    // The data: payload is NOT JSON — a bare email address.
+    chunks: ["data: minji.kim@example.com\n\n", "data: [DONE]\n\n"]
+  });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /minji\.kim@example\.com/);
+  assert.match(text, /data: \[REDACTED:email\]/);
+  assert.match(text, /data: \[DONE\]/);
+  assert.ok(summary.byType.email >= 1);
+});
+
+test("P1-CR-005: a plain-text SSE frame with a block action BLOCKS the stream", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-plaintext-block-"));
+  const runtime = await makeRuntime(dir, { defaultAction: "allow", actions: { card: "block" } });
+  const { text, blocked, summary } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    chunks: [
+      "data: safe so far\n\n",
+      "data: card 4242424242424242 leaked\n\n",
+      "data: trailing\n\n",
+      "data: [DONE]\n\n"
+    ]
+  });
+  assert.equal(blocked, true);
+  assert.doesNotMatch(text, /4242424242424242/);
+  assert.doesNotMatch(text, /trailing/);
+  assert.ok(summary.byAction.block >= 1);
+});
+
+test("P1-CR-005: malformed/partial JSON with PII is inspected as text", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-malformed-"));
+  const runtime = await makeRuntime(dir);
+  const { text, blocked } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    // A truncated JSON object (unterminated) carrying an email — JSON.parse fails.
+    chunks: [`data: {"partial": "reach minji.kim@example.com\n\n`, "data: [DONE]\n\n"]
+  });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /minji\.kim@example\.com/);
+  assert.match(text, /\[REDACTED:email\]/);
+});
+
+test("P1-CR-005: an NDJSON non-JSON content frame with PII is inspected as text", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-ndjson-text-"));
+  const runtime = await makeRuntime(dir);
+  const { text, blocked } = await runStream({
+    runtime,
+    streaming: NDJSON_CHAT,
+    // A bare non-JSON line (provider-specific text) carrying an email.
+    chunks: ["plain text minji.kim@example.com here\n"]
+  });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /minji\.kim@example\.com/);
+  assert.match(text, /\[REDACTED:email\]/);
+});
+
+test("P1-CR-005: comment-only and keepalive control frames pass untouched", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-control-"));
+  const runtime = await makeRuntime(dir);
+  const { text, blocked } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    chunks: [
+      ": this is a comment\n\n",
+      ": keep-alive ping\n\n",
+      "event: ping\n\n",
+      "data: [DONE]\n\n"
+    ]
+  });
+  assert.equal(blocked, false);
+  assert.match(text, /: this is a comment/);
+  assert.match(text, /: keep-alive ping/);
+  assert.match(text, /event: ping/);
+  assert.match(text, /data: \[DONE\]/);
+});
+
+test("P1-CR-005: a tokenized round-trip echoed by the model is not re-flagged", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-marker-"));
+  const runtime = await makeRuntime(dir);
+  // A response-direction marker (a prior redaction) echoed back as plain text.
+  const { text, blocked, summary } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    chunks: ["data: I sent it to [REDACTED:email] earlier\n\n", "data: [DONE]\n\n"]
+  });
+  assert.equal(blocked, false);
+  assert.match(text, /\[REDACTED:email\]/);
+  // The marker is skipped on the response direction — no email re-detection.
+  assert.equal(summary.byType.email ?? 0, 0);
+});
+
+// --- P2-CR-013: multi-line SSE data: join semantics -------------------------
+
+test("P2-CR-013: a multi-line data: JSON event still parses and is protected", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-multiline-json-"));
+  const runtime = await makeRuntime(dir);
+  // The JSON object is split across two data: lines (joined with \n by spec).
+  const frame = `data: {"choices": [{"delta":\ndata: {"content": "mail minji.kim@example.com"}}]}\n\n`;
+  const { text, blocked } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    chunks: [frame, "data: [DONE]\n\n"]
+  });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /minji\.kim@example\.com/);
+  assert.match(text, /\[REDACTED:email\]/);
+});
+
+test("P2-CR-013: a multi-line plain-text data: event with PII is caught", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-multiline-text-"));
+  const runtime = await makeRuntime(dir);
+  // Two data: lines of plain text; the email is on the second line. With join("")
+  // the two lines would merge ("line oneminji...") — with join("\n") the email
+  // stays a clean token and the newline is preserved on re-emit.
+  const frame = `data: first line of text\ndata: then minji.kim@example.com here\n\n`;
+  const { text, blocked } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    chunks: [frame, "data: [DONE]\n\n"]
+  });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /minji\.kim@example\.com/);
+  assert.match(text, /\[REDACTED:email\]/);
+  assert.match(text, /first line of text/);
+  // The re-emitted frame keeps two data: lines (the newline survives).
+  assert.match(text, /data: first line of text\ndata: then \[REDACTED:email\] here/);
+});
+
+test("P1-CR-005 follow-up: a leading-whitespace `data:` line is inspected, never emitted verbatim (no trim-mismatch leak)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-ws-"));
+  const runtime = await makeRuntime(dir);
+  // The parser trims the body so a `  data: <pii>` line IS recognized + redacted;
+  // the serializer must use the SAME lenient match or it emits the original line
+  // verbatim (leaking the plaintext) while appending the redacted copy.
+  for (const lead of [" ", "\t", "  \t"]) {
+    const { text, blocked } = await runStream({
+      runtime,
+      streaming: SSE_CHAT,
+      chunks: [`${lead}data: minji.kim@example.com\n\n`, "data: [DONE]\n\n"]
+    });
+    assert.equal(blocked, false);
+    assert.doesNotMatch(text, /minji\.kim@example\.com/, `leading ${JSON.stringify(lead)} must not leak`);
+    assert.match(text, /\[REDACTED:email\]/);
+  }
+});
+
+test("P1-CR-005 follow-up: a leading-whitespace JSON delta frame does not leak a non-delta PII field verbatim", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-ws-json-"));
+  const runtime = await makeRuntime(dir);
+  const frame = ` data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }], note: "reach me at boss@corp.com" })}\n\n`;
+  const { text, blocked } = await runStream({ runtime, streaming: SSE_CHAT, chunks: [frame] });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /boss@corp\.com/);
+  assert.match(text, /\[REDACTED:email\]/);
+});
+
+test("P1-CR-005 follow-up: a bare primitive JSON frame (string root) is inspected as text, not an uncaught throw", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-stream-prim-"));
+  const runtime = await makeRuntime(dir);
+  // A bare top-level JSON string under a configured deltaPath used to throw on
+  // setByPath(stringRoot); it must instead be inspected as text and redacted.
+  const { text, blocked } = await runStream({
+    runtime,
+    streaming: SSE_CHAT,
+    chunks: [`data: ${JSON.stringify("call me at jane@x.com")}\n\n`]
+  });
+  assert.equal(blocked, false);
+  assert.doesNotMatch(text, /jane@x\.com/);
+  assert.match(text, /\[REDACTED:email\]/);
+});
