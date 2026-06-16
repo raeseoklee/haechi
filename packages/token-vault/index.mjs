@@ -4,6 +4,12 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 const DETERMINISTIC_DOMAIN = "haechi:token-vault:deterministic:v1";
+const AUDIT_ID_DOMAIN = "haechi:token-vault:audit-id:v1";
+
+// Opaque vault token ids are `tok_<type>_<hexhash>` (random: 16 hex via
+// shortHash; deterministic: 32 hex from hmac). Anything that does not match
+// this shape is treated as a misused raw value and never written verbatim.
+const VAULT_TOKEN_SHAPE = /^tok_[a-z0-9_]+_[a-f0-9]{16,}$/;
 
 export function createLocalTokenVault({
   path,
@@ -41,6 +47,30 @@ export function createLocalTokenVault({
     return mutation;
   }
 
+  // The audit `token` field must never carry a raw secret. A legitimate token
+  // id is a non-sensitive opaque `tok_<type>_<hexhash>` — recorded verbatim for
+  // correlation. A caller who misuses the API and passes a raw value where a
+  // token id is expected would otherwise leak that value into the hash-chained
+  // log (sanitizeAudit strips by key name only). For non-matching inputs we
+  // record a keyed-HMAC under a dedicated domain, or a fixed redaction marker
+  // if no hmac is available — never the raw value.
+  async function safeAuditToken(token) {
+    if (token == null) {
+      return null;
+    }
+    if (typeof token === "string" && VAULT_TOKEN_SHAPE.test(token)) {
+      return token;
+    }
+    if (typeof cryptoProvider.hmac === "function") {
+      const digest = await cryptoProvider.hmac({
+        data: typeof token === "string" ? token : String(token),
+        domain: AUDIT_ID_DOMAIN
+      });
+      return `nontoken_${digest.slice(0, 32)}`;
+    }
+    return "[REDACTED:non-token]";
+  }
+
   // Reveal/purge governance events must be auditable. Events carry token ids
   // and decision metadata only — never plaintext values.
   async function recordVaultEvent({ operation, decision, token = null, tokenType = null, reason = null, count = null }) {
@@ -58,7 +88,7 @@ export function createLocalTokenVault({
       blocked: decision.endsWith("_denied"),
       decision,
       reason,
-      token,
+      token: await safeAuditToken(token),
       tokenType,
       count,
       revealPolicy,
@@ -132,17 +162,28 @@ export function createLocalTokenVault({
         });
         throw new Error("Token reveal is disabled by tokenVault.revealPolicy");
       }
+      // Failure branches carry a stable reasonCode (never error.message / raw
+      // token); the message itself never interpolates the token argument.
+      let reasonCode = "reveal_error";
       try {
         const vault = await readVault(path);
         const record = vault.tokens[token];
         if (!record) {
-          throw new Error(`Unknown token: ${token}`);
+          reasonCode = "unknown_token";
+          throw new Error("Unknown token");
         }
         if (record.expiresAt && Date.parse(record.expiresAt) < Date.now()) {
-          throw new Error(`Token expired: ${token}`);
+          reasonCode = "token_expired";
+          throw new Error("Token expired");
         }
         const aad = context ? { ...record.aad, context } : record.aad;
-        const plaintext = await cryptoProvider.decrypt({ envelope: record.envelope, aad });
+        let plaintext;
+        try {
+          plaintext = await cryptoProvider.decrypt({ envelope: record.envelope, aad });
+        } catch {
+          reasonCode = "decrypt_failed";
+          throw new Error("Token decrypt failed");
+        }
         await recordVaultEvent({
           operation: "token-vault:reveal",
           decision: "reveal_allowed",
@@ -159,7 +200,7 @@ export function createLocalTokenVault({
           operation: "token-vault:reveal",
           decision: "reveal_failed",
           token,
-          reason: error.message
+          reason: reasonCode
         });
         throw error;
       }
