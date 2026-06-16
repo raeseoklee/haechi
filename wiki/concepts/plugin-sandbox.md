@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-12
+updated: 2026-06-16
 tags: [concept, security, plugin, sandbox, auth]
 ---
 
@@ -72,7 +72,7 @@ A `worker-isolated` manifest is additionally shape-checked by `validateWorkerIso
 
 ## Lifecycle audit events
 
-A security product MUST record loading third-party code (§2.4). The sandbox emits PII-safe lifecycle events through the injected `auditSink` (fire-and-forget — auditing never makes the auth path throw): `plugin.load.refused{reason}` (the reason is the `PluginLoadError` enum or `conformance-failed`), `plugin.load.accepted` (with `version`, `entrySha256`, `signerKeyId`, and the granted capability list), `plugin.authenticate.deny{reason}` (`over-capacity`/`oversized`/`timeout`/`deny`/`invalid-claims`), and `plugin.worker.terminated{cause}` (`timeout`/`crash`). [[audit-integrity]]'s `FORBIDDEN_KEYS` is extended (1.0) to also strip `claims`/`subject`/`issuer`/`credential`/`authorization`/`signature`/`entry` **and** `scopes`/`labels`. The audit-event identity is **projected** to the frozen 5 keys `{id, type, subjectHash, issuerHash, provider}` — scopes/labels (which can carry attacker-controlled plugin output) are NOT persisted.
+A security product MUST record loading third-party code (§2.4). The sandbox emits PII-safe lifecycle events through the injected `auditSink` (fire-and-forget — auditing never makes the auth path throw): `plugin.load.refused{reason}` (the reason is the `PluginLoadError` enum or `conformance-failed`), `plugin.load.accepted` (with `version`, `entrySha256`, `signerKeyId`, and the granted capability list), `plugin.authenticate.deny{reason}` (`over-capacity`/`oversized`/`timeout`/`deny`/`invalid-claims`), and `plugin.worker.terminated{cause}` (`timeout`/`crash`). [[audit-integrity]]'s `FORBIDDEN_KEYS` is extended (1.0) to also strip `claims`/`subject`/`issuer`/`credential`/`authorization`/`signature`/`entry` **and** `scopes`/`labels`. The audit-event identity is **projected** to the frozen 5 keys `{id, type, subjectHash, issuerHash, provider}` — scopes/labels (which can carry attacker-controlled plugin output) are NOT persisted. The DoS-control branches (`oversized` result, `over-capacity` queue, `timeout`, child `crash`) now have **process-isolated** test parity with the worker sandbox (P2-CR-010, `tests/plugin-process-sandbox.test.mjs` + the crash fixture), mutation-verified against the real `process-sandbox.mjs`.
 
 ## Conformance as a correctness gate (not a malice screen)
 

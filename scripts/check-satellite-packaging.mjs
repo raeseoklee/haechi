@@ -70,6 +70,18 @@ export function evaluateSatellitePackaging({ name, files, manifest }) {
     if (!present.has(norm(t))) problems.push(`${label}: exports target missing from tarball: ${t}`);
   }
 
+  // bin can be a STRING (single bin) or an OBJECT map (name -> path); a bin
+  // pointing at a file not in the tarball ships a broken CLI entrypoint.
+  const binTargets = [];
+  const collectBin = (v) => {
+    if (typeof v === "string") binTargets.push(v);
+    else if (v && typeof v === "object") Object.values(v).forEach(collectBin);
+  };
+  collectBin(manifest.bin);
+  for (const t of binTargets) {
+    if (!present.has(norm(t))) problems.push(`${label}: bin target missing from tarball: ${t}`);
+  }
+
   const leakedTests = files.map(norm).filter((p) => /\.test\.mjs$/.test(p));
   if (leakedTests.length > 0) {
     problems.push(`${label}: test files leaked into the tarball: ${leakedTests.join(", ")}`);

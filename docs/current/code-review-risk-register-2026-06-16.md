@@ -1,6 +1,6 @@
 # 2026-06-16 Full Code Review Risk Register
 
-Status: open remediation register  
+Status: remediation complete (all 13 findings Resolved; G9 clears at the 1.3.1 cut)  
 Scope: `main` at `a47a6a79c380db412b6a464a2798b7df61f3b68d`  
 Review date: 2026-06-16  
 Source: full repository code review with focused security, protocol, packaging, and regression-test passes
@@ -11,7 +11,7 @@ This register captures risks discovered after the 0.3.2 and 1.3.x hardening work
 
 Until the P0/P1 items below are fixed or explicitly accepted with a documented owner decision, new release tags and npm publishes should be blocked.
 
-Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The streaming-inspection bypass (P1-CR-005) and the SSE multi-line `data:` correctness gap (P2-CR-013) are also now Resolved — a parse-failed non-JSON CONTENT frame is inspected as text and multi-line `data:` lines are joined with the spec-required newline. The remaining open items below (the remaining P2s) still gate new release tags / npm publishes.
+Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The hex IPv4-mapped IPv6 SSRF gap (P1-CR-002) and its vault test gap (P2-CR-012) are also now Resolved — every `isBlockedAddress` copy normalizes an IPv4-mapped IPv6 address to its embedded IPv4 before the private-range check. The streaming-inspection bypass (P1-CR-005) and the SSE multi-line `data:` correctness gap (P2-CR-013) are also now Resolved — a parse-failed non-JSON CONTENT frame is inspected as text and multi-line `data:` lines are joined with the spec-required newline. The final six P2s (P2-CR-006 mcp-wrap stderr, P2-CR-007 init key-file validation, P2-CR-008 satellite `manifest.bin` check, P2-CR-009 auth-throw test, P2-CR-010 process-sandbox quota tests, P2-CR-011 audit middle-tamper tests) are now Resolved as well. **All 13 findings are Resolved.** No remediation item now blocks release; the G9 release-block gate clears at the 1.3.1 cut (the version bump + formal gate flip).
 
 ## Severity Policy
 
@@ -28,12 +28,12 @@ Public source availability can continue because the repository is already public
 | P1-CR-003 | P1 | Proxy responses | Auto-decompressed upstream bodies can be returned with original compressed `content-encoding` / `content-length` headers. | Resolved | Was blocking release |
 | P1-CR-004 | P1 | Streaming | `streaming.requestMode: "pass-through"` buffers the full upstream body and has no response-size cap. | Resolved | Was blocking release |
 | P1-CR-005 | P1 | Streaming inspection | Non-JSON SSE/NDJSON frames are passed raw, so plain-text PII can bypass protection. | Resolved | Was blocking release |
-| P2-CR-006 | P2 | MCP wrap | Child process `stderr` is inherited and unfiltered. | Open | Requires remediation or explicit boundary documentation |
-| P2-CR-007 | P2 | Key custody | `initLocalKeyFile()` reports success for existing files without validating key-file shape. | Open | Should fix before next publish |
-| P2-CR-008 | P2 | Satellite packaging | Satellite packaging checks do not validate `manifest.bin` targets. | Open | Should fix before next publish |
-| P2-CR-009 | P2 | Auth tests | `authProvider.authenticate()` throw path lacks a focused regression test. | Open | Test gap |
-| P2-CR-010 | P2 | Plugin sandbox tests | Process-isolated quota and oversize branches lack parity with worker sandbox tests. | Open | Test gap |
-| P2-CR-011 | P2 | Audit tests | Middle-record audit-chain tamper paths lack focused regression coverage. | Open | Test gap |
+| P2-CR-006 | P2 | MCP wrap | Child process `stderr` is inherited and unfiltered. | Resolved | Was a hardening gap |
+| P2-CR-007 | P2 | Key custody | `initLocalKeyFile()` reports success for existing files without validating key-file shape. | Resolved | Was a hardening gap |
+| P2-CR-008 | P2 | Satellite packaging | Satellite packaging checks do not validate `manifest.bin` targets. | Resolved | Was a hardening gap |
+| P2-CR-009 | P2 | Auth tests | `authProvider.authenticate()` throw path lacks a focused regression test. | Resolved | Was a test gap |
+| P2-CR-010 | P2 | Plugin sandbox tests | Process-isolated quota and oversize branches lack parity with worker sandbox tests. | Resolved | Was a test gap |
+| P2-CR-011 | P2 | Audit tests | Middle-record audit-chain tamper paths lack focused regression coverage. | Resolved | Was a test gap |
 | P2-CR-012 | P2 | Vault tests | KMS vault IPv6 loopback carve-out has only IPv4 coverage. | Resolved | Was a test gap |
 | P2-CR-013 | P2 | SSE correctness | Multi-line SSE `data:` fields are joined without the spec-required newline. | Resolved | Was a correctness gap |
 
@@ -197,7 +197,7 @@ Release decision: blocks release until fixed. Resolved.
 
 ### P2-CR-006: MCP Wrap Inherits Child `stderr`
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/cli/bin/haechi.mjs` `mcpWrapCommand()`  
 Evidence:
 
@@ -208,17 +208,16 @@ Impact:
 
 Sensitive values printed by an MCP server can bypass Haechi controls and appear in the parent terminal, editor logs, or process supervisor logs. This may be acceptable as an explicit local-process boundary, but it is currently not called out strongly enough.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Prefer piping child `stderr` through the same protection path, or provide an explicit `--stderr=inherit|filter|drop` mode with safe default.
-- Document the boundary if inherit remains available.
-- Add tests for stderr filtering or explicit default behavior.
+- `haechi mcp-wrap` gains an explicit `--stderr filter|drop|inherit` flag (default `filter`). `filter` pipes the child's stderr and runs each complete line through the same protection (`runtime.haechi.createStreamProtector().protectText`) before re-emitting to the parent's stderr — redact/mask detected secrets/PII in place, drop a line entirely on a block-action detection — with partial lines buffered across chunk boundaries (split on `\n`, trailing partial flushed on end) and re-emitted in source order. `drop` discards child stderr (consumed via `resume()` so the child never stalls); `inherit` keeps the prior raw passthrough as an explicit, documented opt-in local-process boundary; an unknown `--stderr` value throws a clear fail-closed error before any child is spawned. The stderr filter path records nothing to the audit sink (no plaintext reaches the audit log), and the stdin/stdout JSON-RPC wrap behavior is byte-identical. `COMMAND_HELP` documents the flag, including that `filter` follows the configured policy mode (dry-run/report-only detects but does not transform).
+- `tests/mcp-wrap.test.mjs` adds four cases (filter redacts/masks/drops so the parent never sees a raw secret/PII/card/phone value; drop emits nothing; inherit passes raw; unknown value exits non-zero). Adversarial verify confirmed the default is now `filter` (was the vulnerable `inherit`), chunk-split secrets are reassembled and protected, and block-action lines are dropped not leaked.
 
-Release decision: should be fixed or documented before the next publish.
+Release decision: resolved.
 
 ### P2-CR-007: Existing Key File Not Validated During Init
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/crypto/index.mjs` `initLocalKeyFile()`  
 Evidence:
 
@@ -228,17 +227,16 @@ Impact:
 
 `haechi init` can report success for corrupted-but-parseable key material. Users discover the problem later when encryption, decryption, token vault, or bundle verification fails.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Validate existing key file shape and active key usability before returning success.
-- Preserve the non-destructive behavior for existing valid keys.
-- Add tests for corrupted JSON, missing active key, wrong key length, and valid retired-key migration.
+- The provider's existing key-load/validation logic (JSON parse, per-key base64url + 32-byte check, active-key resolution) was extracted into a shared module-level `loadKeyFile(keyFile, { requireActive })` that the private `loadKeys()` now delegates to (preserving its historical `keys[0]` fallback). `initLocalKeyFile`'s existing-file non-force path now calls `loadKeyFile` with `requireActive: true` before returning, throwing a specific error per defect (corrupted JSON; "No active key found in local key file"; "AES-256-GCM local key must be 32 bytes" for an active or retired key). A valid existing file stays non-destructive and returns the same `{ created: false, keyFile }` shape; `--force` rotation (retire-not-delete) is unchanged.
+- `tests/crypto.test.mjs` adds four cases: corrupted JSON throws; missing active key throws; wrong-length active key throws; a valid file with retired keys succeeds byte-for-byte unchanged. Adversarial verify confirmed each defect is caught and the valid path is non-destructive.
 
-Release decision: should be fixed before the next publish.
+Release decision: resolved.
 
 ### P2-CR-008: Satellite Packaging Check Misses `manifest.bin`
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `scripts/check-satellite-packaging.mjs`  
 Evidence:
 
@@ -248,16 +246,16 @@ Impact:
 
 A satellite package can pass the local packaging check while shipping a broken CLI entrypoint. This is a release quality risk, especially as auth/KMS/dashboard satellites expand.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Validate every `manifest.bin` value against the packed file list.
-- Add negative fixture coverage for missing bin targets.
+- `evaluateSatellitePackaging()` in `scripts/check-satellite-packaging.mjs` now validates every `manifest.bin` target against the packed-file set: both the string form (`bin: "bin/x.mjs"`) and the object-map form (`bin: { name: "bin/x.mjs" }`) are normalized the same way as `files`/`exports`, and a clear problem is reported for any bin target not present in the tarball. Existing checks are unchanged.
+- `tests/satellite-packaging-gate.test.mjs` adds positive (present bin → no problem) and negative (missing bin, string + object-map forms → bin-specific problem) cases. Adversarial verify confirmed a mutation removing the bin-check block fails the negative test.
 
-Release decision: should be fixed before the next publish.
+Release decision: resolved.
 
 ### P2-CR-009: Auth Provider Throw Path Test Gap
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/proxy/index.mjs` auth handling, `tests/proxy-auth.test.mjs`  
 Evidence:
 
@@ -268,16 +266,15 @@ Impact:
 
 Future auth-provider changes can accidentally leak raw errors, fail open, or return inconsistent audit status without tests catching it.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Add a provider exception regression test.
-- Assert fail-closed status, generic client response, and audit event shape.
+- `tests/proxy-auth.test.mjs` adds a regression test that injects an `authProvider` whose `authenticate()` throws and asserts the proxy fails closed: the request is rejected (not forwarded upstream) with a generic client error, the audit event records the fail-closed status `haechi_auth_provider_error`, and no raw error/stack and no raw subject/issuer leak into the audit event. Adversarial verify confirmed a fail-open mutant (forwards upstream / returns 200) and an audit-leak mutant both make the test fail.
 
-Release decision: test gap, not a standalone release blocker after P0/P1 fixes.
+Release decision: resolved.
 
 ### P2-CR-010: Process-Isolated Sandbox Quota Test Gap
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/plugin/process-sandbox.mjs`  
 Evidence:
 
@@ -287,15 +284,15 @@ Impact:
 
 Process isolation is a security boundary for future plugin work. Missing parity tests increase the chance of regressions in denial-of-service controls.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Add isolated-process tests for result-size excess, queue capacity, timeout, and worker exit behavior.
+- `tests/plugin-process-sandbox.test.mjs` (with a crash fixture added to `tests/helpers/sandbox-fixtures.mjs`) adds isolated-process parity tests mirroring the worker-sandbox DoS-control coverage: oversized result denied, queue/over-capacity rejected, timeout terminated, and child-crash fail-closed (a crash mid-call surfaces as a `crash`-caused denial without killing sibling calls). Adversarial verify confirmed mutations disabling the oversize / capacity / timeout / crash guards each fail the corresponding test (the crash boundary is pinned by the mid-call crash test).
 
-Release decision: test gap.
+Release decision: resolved.
 
 ### P2-CR-011: Audit Chain Middle-Tamper Test Gap
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/audit/index.mjs` `verifyAuditChain()`  
 Evidence:
 
@@ -305,12 +302,11 @@ Impact:
 
 Audit integrity is a core claim. The chain-verification code is present, but branch-specific tests should prove it rejects middle-record tampering, missing previous hashes, and hash mismatches.
 
-Required remediation:
+Resolution / closure evidence:
 
-- Add tests for middle-record content mutation, missing `prev`, wrong `prev`, and wrong `integrity.hash`.
-- Keep the documented tail-truncation limitation explicit.
+- `tests/audit-chain-tamper.test.mjs` writes a real multi-record audit log via the sink, then tampers a MIDDLE record and asserts `verifyAuditChain` returns `{ valid: false }` with the correct reason for each branch: middle-record content mutation (stale `eventHash`), missing `previousHash`, wrong `previousHash`, and wrong `integrity` hash. The known tail-truncation limitation (trailing-record removal is detectable only via the separate append-only anchor stream, not the chain alone) is kept explicit. Adversarial verify confirmed the logs are produced by the real sink and the assertions pin each tamper branch.
 
-Release decision: test gap.
+Release decision: resolved.
 
 ### P2-CR-012: KMS Vault IPv6 Loopback Test Gap
 

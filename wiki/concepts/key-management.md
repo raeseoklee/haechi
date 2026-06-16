@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-10
+updated: 2026-06-16
 tags: [concept, security, crypto]
 ---
 
@@ -15,6 +15,10 @@ Local software keys only (`packages/crypto/index.mjs`); production KMS/HSM/Vault
 
 - `initLocalKeyFile --force` **retires** prior keys instead of overwriting them — before this fix, `npm run demo:init` run twice permanently orphaned every envelope and vault record.
 - `encrypt` uses the active key and stamps `kid` into the envelope; `decrypt` selects by `envelope.kid` so retired-key data stays readable.
+
+## Init validates an existing key file (P2-CR-007, toward 1.3.1)
+
+`initLocalKeyFile` no longer reports success for a present-but-corrupt key file. On the existing-file (non-`--force`) path it now validates via a shared `loadKeyFile(keyFile, { requireActive: true })` (the same loader `loadKeys()` delegates to): corrupted JSON, a missing active key, or a wrong-length (non-32-byte) active **or retired** key all **throw** before success is reported. A valid file stays non-destructive (not rewritten/rotated). Without this, a corrupted file passed `init` and only failed later during encrypt/decrypt/token/bundle ops.
 
 ## Domain separation (one stored key, many derived keys)
 

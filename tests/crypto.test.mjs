@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { createLocalCryptoProvider, initLocalKeyFile } from "../packages/crypto/index.mjs";
 import { createRuntime } from "../packages/cli/runtime.mjs";
 
@@ -89,4 +90,72 @@ test("external key provider fails closed without injected crypto provider", () =
     }),
     /requires createRuntime/
   );
+});
+
+async function writeKeyFile(contents) {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-keyinit-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  await mkdir(dirname(keyFile), { recursive: true });
+  await writeFile(keyFile, contents);
+  return keyFile;
+}
+
+test("init rejects a corrupted (non-JSON) existing key file", async () => {
+  const keyFile = await writeKeyFile("{ not json ::::");
+  await assert.rejects(() => initLocalKeyFile(keyFile, { force: false }));
+});
+
+test("init rejects an existing key file with no active key", async () => {
+  const keyFile = await writeKeyFile(JSON.stringify({
+    version: 1,
+    keys: [
+      {
+        kid: "local-retired",
+        kty: "oct",
+        alg: "AES-256-GCM",
+        status: "retired",
+        k: randomBytes(32).toString("base64url")
+      }
+    ]
+  }, null, 2));
+  await assert.rejects(
+    () => initLocalKeyFile(keyFile, { force: false }),
+    /active key/
+  );
+});
+
+test("init rejects an existing key file whose active key is the wrong length", async () => {
+  const keyFile = await writeKeyFile(JSON.stringify({
+    version: 1,
+    keys: [
+      {
+        kid: "local-short",
+        kty: "oct",
+        alg: "AES-256-GCM",
+        status: "active",
+        k: randomBytes(16).toString("base64url")
+      }
+    ]
+  }, null, 2));
+  await assert.rejects(
+    () => initLocalKeyFile(keyFile, { force: false }),
+    /32 bytes/
+  );
+});
+
+test("init succeeds non-destructively on a valid file with retired keys", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-keyinit-valid-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  // First init creates an active key; a forced rotation retires it and adds a
+  // new active key, yielding a valid file that carries a retired key.
+  await initLocalKeyFile(keyFile, { force: true });
+  const rotated = await initLocalKeyFile(keyFile, { force: true });
+  assert.equal(rotated.rotated, true);
+
+  const before = await readFile(keyFile);
+  const result = await initLocalKeyFile(keyFile, { force: false });
+  assert.deepEqual(result, { created: false, keyFile });
+
+  const after = await readFile(keyFile);
+  assert.deepEqual(after, before, "init must not rewrite a valid existing key file");
 });
