@@ -118,7 +118,7 @@ Haechi includes protocol adapter presets for OpenAI-compatible servers, vLLM, Ol
 }
 ```
 
-Then point an OpenAI-compatible client at `http://127.0.0.1:11016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy. For Claude, set `target.type: "anthropic"` and call `/v1/messages` (or `/v1/messages/count_tokens`, `/v1/complete`); the client's `x-api-key`/`anthropic-version` headers are forwarded to the upstream unchanged. For Gemini, set `target.type: "gemini"` and call the model-in-path endpoints `/v1beta/models/{model}:generateContent` (or `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`); the client's `x-goog-api-key` (or `?key=`) is forwarded to the upstream unchanged.
+Then point an OpenAI-compatible client at `http://127.0.0.1:11016/v1`. For Ollama native APIs, use `target.adapter: "ollama"` and call `/api/chat` or `/api/generate` through the proxy. For Claude, set `target.type: "anthropic"` and call `/v1/messages` (or `/v1/messages/count_tokens`, `/v1/complete`); the client's `x-api-key`/`anthropic-version` headers are forwarded to the upstream (they are on the upstream header allowlist). For Gemini, set `target.type: "gemini"` and call the model-in-path endpoints `/v1beta/models/{model}:generateContent` (or `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`); the client's `x-goog-api-key` (or `?key=`) is forwarded to the upstream. The proxy forwards only an explicit allowlist of headers and never forwards ambient client credentials — see [Gateway auth vs upstream auth](#gateway-auth-vs-upstream-auth-header-forwarding).
 
 ## Token Round-Trip
 
@@ -195,6 +195,16 @@ haechi auth revoke <id>
 - **Rate limit**: per-identity requests-per-minute → `429` (in-memory, per-process).
 - Audit events carry the **PII-safe** `identity` (keyed-HMAC subject/issuer, never raw values) and the resolved `profile`; `auth_denied` / `model_not_allowed` / `rate_limited` decisions never include credentials. `/__haechi/health` stays unauthenticated.
 
+### Gateway auth vs upstream auth (header forwarding)
+
+Haechi separates **gateway-client authentication** from **upstream-provider authentication**, and does **not** blindly forward your request headers to the model upstream. The proxy applies a **default-drop allowlist**: only a known-safe set of headers crosses the trust boundary into the model provider, and ambient client credentials are dropped.
+
+- **`auth.provider: bearer` / `external` / `plugin` (the gateway authenticates the client).** The client's `Authorization` header is the **gateway credential** Haechi consumed to authenticate the client, so it is **dropped** — it is never forwarded to the upstream. This prevents leaking a gateway token across the trust boundary into the model provider.
+- **`auth.provider: none` (no gateway auth).** The client's `Authorization` header is treated as the **upstream provider key** and **is forwarded** (the OpenAI-compatible pass-through pattern, where the client puts the model API key in `Authorization`).
+- **Always dropped, regardless of mode:** `Cookie`, `Set-Cookie`, `Proxy-Authorization`, and hop-by-hop headers (`Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`), plus any header not on the allowlist.
+- **Always forwarded (the provider/adapter headers):** `x-api-key`, `anthropic-version`, `anthropic-beta`, `x-goog-api-key`, `openai-organization`, `openai-beta`, `accept`, `accept-language`, `user-agent`, and `content-type` (rewritten to `application/json`).
+- **Escape hatch:** if an unusual upstream needs an extra header, list its lowercase name in `target.forwardHeaders` (e.g. `"forwardHeaders": ["x-tenant-id"]`). This can only **widen** the allowlist additively — it can never re-enable an always-dropped credential or hop-by-hop header (those names are rejected fail-closed at config time).
+
 JWT/JWKS auth and KMS-backed key custody (and other optional capabilities) ship as the **`haechi-*` satellite packages** — see [Satellite packages](#satellite-packages) below.
 
 ## Satellite packages
@@ -226,6 +236,7 @@ Each package's README covers its usage and exact peer requirements. The satellit
 | `mode` / `policy.mode` | `dry-run` | `dry-run` and `report-only` detect + audit only; `enforce` transforms/blocks. `policy.mode` wins over `mode` |
 | `target.type` / `target.adapter` | `llm-http` / `openai-compatible` | Upstream protocol: `openai-compatible`, `vllm-openai`, `ollama`, `llama-cpp`, `anthropic`, `gemini`. Unknown types fail closed |
 | `target.upstream` | `http://127.0.0.1:9999` | The only upstream the proxy will forward to (absolute-URL request targets are rejected) |
+| `target.forwardHeaders` | `[]` (unset) | Extra lowercase header names to forward upstream, beyond the built-in allowlist. Additive only; cannot re-enable always-dropped credential/hop-by-hop headers |
 | `proxy.host` / `proxy.port` | `127.0.0.1` / `11016` | Proxy bind address. See remote binding below |
 | `responseProtection.enabled` | `false` | Inspect upstream JSON responses. `failureMode: fail-closed` rejects non-JSON/compressed/oversized responses |
 | `responseProtection.maxBytes` | `1048576` | Hard response size cap — enforced even in `failureMode: allow` |

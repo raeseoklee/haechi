@@ -9,7 +9,7 @@
 |---|---|---|
 | Local development | CLI, default config, dev key generation | Do not reuse dev keys in production or shared environments |
 | Policy enforcement | redact/mask/tokenize/encrypt/block pipeline | Select actions appropriate to regulatory and organizational policy |
-| HTTP proxy | Loopback default, remote bind guard, body/response limits | Authentication, TLS termination, firewall, upstream auth |
+| HTTP proxy | Loopback default, remote bind guard, body/response limits, default-drop upstream header allowlist (gateway-client auth separated from upstream-provider auth) | Authentication, TLS termination, firewall, upstream auth; supply the upstream provider key intentionally (client `Authorization` is forwarded only with `auth.provider: none`; otherwise set provider key headers like `x-api-key` or list extras in `target.forwardHeaders`) |
 | Streaming | Blocked by default | Accept the risk of no protection when using pass-through |
 | TokenVault | Encrypted storage, reveal blocked by default, purge | Reveal approval workflow, DSAR/retention operations |
 | Audit | Plaintext removal, hash chain | Append-only storage, backup, retention period, external signing |
@@ -45,3 +45,12 @@ Haechi's stateful controls are single-process by design. Running 2+ replicas beh
 - **Audit hash chain + anchor** are single-writer. Give each replica its **own** `audit.path` (and anchor path); never share one audit file across replicas, or the chain forks into an unverifiable state.
 - **TokenVault and the auth store** are whole-file local stores — correct for one host, but not a shared multi-writer store. For multi-replica tokenization, inject a shared `tokenVault`.
 - File locking relies on `O_EXCL` + atomic rename, which do not hold on NFS / shared filesystems — keep these stores on local disk.
+
+## 5. Gateway auth vs upstream auth (header forwarding)
+
+Haechi keeps **gateway-client authentication** and **upstream-provider authentication** separate. The proxy does NOT forward arbitrary client headers to the model upstream; it applies a default-drop allowlist (P0-CR-001):
+
+- When `auth.provider` is `bearer`/`external`/`plugin`, the client's `Authorization` is the **gateway credential** Haechi consumed and is **never forwarded** upstream. Supply the upstream provider key out-of-band — set the provider key header (`x-api-key`, `x-goog-api-key`, etc., all on the allowlist) on the client request, or front the upstream with your own credential injection.
+- When `auth.provider` is `none`, the client's `Authorization` is treated as the **upstream provider key** and is forwarded (the OpenAI-compatible pass-through pattern).
+- `Cookie`, `Set-Cookie`, `Proxy-Authorization`, and hop-by-hop headers are always dropped; any non-allowlisted header is dropped by default. Use `target.forwardHeaders` (lowercase names) to widen the allowlist for an unusual upstream — it cannot re-enable an always-dropped credential/hop-by-hop header.
+- **Operator responsibility:** confirm your upstream actually receives the credential header it needs (the gateway no longer relays the client `Authorization` under gateway auth), and treat `target.forwardHeaders` as a reviewed allowlist, not a catch-all.

@@ -133,14 +133,14 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 
 ## 5.7 2026-06-16 전체 코드리뷰 Open 리스크 상태
 
-권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16.ko.md`입니다. 이 절은 릴리스 게이트 요약입니다. `P0-CR-001` 및 `P1-CR-002`부터 `P1-CR-005`까지는 해결되거나 책임자 근거와 함께 명시 수용되기 전까지 새 GitHub release tag와 npm publish를 차단합니다.
+권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16.ko.md`입니다. 이 절은 릴리스 게이트 요약입니다. `P0-CR-001`, `P1-CR-003`, `P1-CR-004`는 **Resolved**입니다(1.3.1 대상 프록시 보안 패치). `P1-CR-002`, `P1-CR-005`, 그리고 남은 P2 항목은 해결되거나 책임자 근거와 함께 명시 수용되기 전까지 새 GitHub release tag와 npm publish를 차단합니다.
 
 | ID | 리스크 | 상태 | 종료에 필요한 증거 |
 |---|---|---|---|
-| P0-CR-001 | 프록시가 클라이언트 `Authorization`, `Cookie`, proxy-auth 등 주변 자격증명을 모델 업스트림으로 전달 | Open | 명시적 업스트림 헤더 allowlist; 게이트웨이 클라이언트 인증과 업스트림 공급자 인증 분리; Haechi bearer token이 로컬 업스트림에서 보이지 않는 회귀 테스트; 공급자 credential은 명시 config/adapter 규칙으로만 전달 |
+| P0-CR-001 | 프록시가 클라이언트 `Authorization`, `Cookie`, proxy-auth 등 주변 자격증명을 모델 업스트림으로 전달 | Resolved | `filteredHeaders()`의 기본 차단 업스트림 헤더 허용목록 + `createHaechiProxy`에서 전달되는 `forwardPolicy`(게이트웨이 클라이언트 인증과 업스트림 공급자 인증 분리: `auth.provider !== none`이면 클라이언트 `Authorization` 폐기, `none`이면 전달); cookie/proxy-auth/hop-by-hop 항상 폐기; 추가 fail-closed `target.forwardHeaders`; `tests/proxy-header-allowlist.test.mjs`가 게이트웨이 bearer는 업스트림에 안 보이고 공급자 헤더(`x-api-key`/`anthropic-version`/`x-goog-api-key`)는 보임을 증명; README/threat-model/shared-responsibility/configuration(+ko) 갱신 |
 | P1-CR-002 | SSRF 가드가 `::ffff:7f00:1` 같은 hex IPv4-mapped IPv6 private 주소를 놓침 | Open | core SSRF, auth-jwt, KMS vault 경로에서 공유 normalization/checker 사용; dotted/hex mapped IPv6 private/public 테스트 |
-| P1-CR-003 | 자동 압축 해제된 업스트림 본문이 기존 압축 응답 헤더와 함께 반환될 수 있음 | Open | 모든 read/transformed-body 경로의 response-header sanitation 중앙화; gzip/br protected/unprotected 응답 테스트 |
-| P1-CR-004 | `streaming.requestMode: "pass-through"`가 response-size cap 없이 전체 업스트림 본문을 버퍼링 | Open | 진짜 bounded streaming 또는 fail-closed/disabled mode; 모든 raw response read에 byte/duration limit 적용; long-lived stream 및 client-disconnect 테스트 |
+| P1-CR-003 | 자동 압축 해제된 업스트림 본문이 기존 압축 응답 헤더와 함께 반환될 수 있음 | Resolved | 중앙화 `sanitizeResponseHeaders()`(content-encoding/content-length/transfer-encoding/hop-by-hop 제거)를 모든 응답 경로(pass-through, 전달/미보호, 보호, streaming)에 적용; 올바른 content-length는 버퍼링된 바디에만 재설정; `tests/proxy-header-allowlist.test.mjs` gzip pass-through + 미보호 응답 테스트가 잔존 content-encoding 없음과 downstream 읽기 가능을 증명 |
+| P1-CR-004 | `streaming.requestMode: "pass-through"`가 response-size cap 없이 전체 업스트림 본문을 버퍼링 | Resolved | 실행 바이트 한도(`responseProtection.maxBytes`)를 가진 진정한 경계 streaming pass-through(`pipeUpstreamBodyBounded`); 초과 시 업스트림 취소 + 클라이언트 쓰기 종료; 미보호/전달 raw read도 한도 적용(초과 시 502); `tests/proxy-header-allowlist.test.mjs`가 oversize pass-through 스트림이 경계/중단됨을 증명 |
 | P1-CR-005 | streaming inspection이 non-JSON SSE/NDJSON 프레임을 원문 통과시켜 plain-text PII 우회 가능 | Open | parse 실패 content frame을 텍스트로 검사; protocol-control allowlist; plain-text SSE, PII 포함 malformed JSON, provider control frame 테스트 |
 | P2-CR-006 | `mcp-wrap`이 child `stderr`를 filtering/audit 없이 상속 | Open | 안전한 기본값을 갖춘 filter/drop/inherit mode 또는 명시적 경계 문서화; stderr 동작 테스트 |
 | P2-CR-007 | 기존 key file을 `initLocalKeyFile()`이 검증하지 않음 | Open | active/retired key 기존 파일 검증; malformed 및 valid migration 테스트 |

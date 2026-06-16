@@ -11,7 +11,7 @@ This register captures risks discovered after the 0.3.2 and 1.3.x hardening work
 
 Until the P0/P1 items below are fixed or explicitly accepted with a documented owner decision, new release tags and npm publishes should be blocked.
 
-Public source availability can continue because the repository is already public and these findings are tracked openly. Sensitive production use should not route third-party upstream traffic through the proxy until the client-credential forwarding risk is resolved.
+Public source availability can continue because the repository is already public and these findings are tracked openly. The client-credential forwarding risk (P0-CR-001) is now Resolved — the proxy applies a default-drop upstream header allowlist and never forwards the gateway `Authorization`/`Cookie`/`Proxy-Authorization` to the model upstream. The remaining open items below (P1-CR-002, P1-CR-005, and the P2s) still gate new release tags / npm publishes.
 
 ## Severity Policy
 
@@ -23,10 +23,10 @@ Public source availability can continue because the repository is already public
 
 | ID | Severity | Area | Risk | Status | Release impact |
 | --- | --- | --- | --- | --- | --- |
-| P0-CR-001 | P0 | Proxy headers | Client `Authorization`, `Cookie`, proxy-auth, and similar ambient credentials can be forwarded to the model upstream. | Open | Blocks release |
+| P0-CR-001 | P0 | Proxy headers | Client `Authorization`, `Cookie`, proxy-auth, and similar ambient credentials can be forwarded to the model upstream. | Resolved | Was blocking release |
 | P1-CR-002 | P1 | SSRF guard | Hex-form IPv4-mapped IPv6 addresses such as `::ffff:7f00:1` are not classified as private loopback. | Open | Blocks release |
-| P1-CR-003 | P1 | Proxy responses | Auto-decompressed upstream bodies can be returned with original compressed `content-encoding` / `content-length` headers. | Open | Blocks release |
-| P1-CR-004 | P1 | Streaming | `streaming.requestMode: "pass-through"` buffers the full upstream body and has no response-size cap. | Open | Blocks release |
+| P1-CR-003 | P1 | Proxy responses | Auto-decompressed upstream bodies can be returned with original compressed `content-encoding` / `content-length` headers. | Resolved | Was blocking release |
+| P1-CR-004 | P1 | Streaming | `streaming.requestMode: "pass-through"` buffers the full upstream body and has no response-size cap. | Resolved | Was blocking release |
 | P1-CR-005 | P1 | Streaming inspection | Non-JSON SSE/NDJSON frames are passed raw, so plain-text PII can bypass protection. | Open | Blocks release |
 | P2-CR-006 | P2 | MCP wrap | Child process `stderr` is inherited and unfiltered. | Open | Requires remediation or explicit boundary documentation |
 | P2-CR-007 | P2 | Key custody | `initLocalKeyFile()` reports success for existing files without validating key-file shape. | Open | Should fix before next publish |
@@ -41,7 +41,7 @@ Public source availability can continue because the repository is already public
 
 ### P0-CR-001: Proxy Forwards Client Credentials Upstream
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/proxy/index.mjs` `forward()` and `filteredHeaders()`  
 Evidence:
 
@@ -66,7 +66,15 @@ Minimum verification:
 - Regression test for intentionally configured upstream credentials.
 - README and release-process wording updated so users do not assume client auth is forwarded safely.
 
-Release decision: blocks any new release or npm publish until fixed or formally accepted.
+Resolution evidence:
+
+- `filteredHeaders()` (`packages/proxy/index.mjs`) is now a DEFAULT-DROP allowlist: a `FORWARD_HEADER_ALLOWLIST` (provider/adapter headers `x-api-key`, `anthropic-version`, `anthropic-beta`, `x-goog-api-key`, `openai-organization`, `openai-beta`, `accept`, `accept-language`, `user-agent`; `content-type` rewritten to `application/json`), an always-drop `FORWARD_HEADER_DENYLIST` (`host`, `content-length`, `cookie`, `set-cookie`, `proxy-authorization`, and hop-by-hop `connection`/`keep-alive`/`te`/`trailer`/`transfer-encoding`/`upgrade`), and a conditional `authorization` rule.
+- `createHaechiProxy` derives a `forwardPolicy` once and threads it through every `forward()` callsite (protected path, streaming pass-through, inspected stream). `gatewayConsumedAuthorization` is `auth.provider !== "none"`: when the gateway authenticated the client the request `Authorization` (the gateway credential) is DROPPED; with `auth.provider: none` it is FORWARDED (the upstream provider key, OpenAI-compatible pass-through pattern).
+- Additive config escape hatch `target.forwardHeaders` (array of lowercase header names), validated fail-closed in `normalizeConfig` (`validateForwardHeaders`): non-array, non-lowercase, or always-dropped credential/hop-by-hop names throw at load; it can only widen, never re-enable a dropped header.
+- Regression tests in `tests/proxy-header-allowlist.test.mjs`: a gateway bearer token (`auth.provider: bearer`) is NOT in the headers a stub upstream receives while provider headers ARE; cookie/proxy-authorization/hop-by-hop and unlisted headers are dropped; `auth.provider: none` forwards the client `Authorization`; `target.forwardHeaders` widens additively; the config validator is fail-closed. The existing `tests/proxy-auth.test.mjs` 401/profile/rate suites stay green.
+- Docs: README.md(+ko) "Gateway auth vs upstream auth (header forwarding)" + config-table row; `threat-model.md`(+ko) "Gateway credential forwarded upstream" control row; `shared-responsibility.md`(+ko) §5 + matrix row; `configuration.md`(+ko) `target.forwardHeaders` + the fail-closed throws list.
+
+Release decision: blocks any new release or npm publish until fixed or formally accepted. Resolved.
 
 ### P1-CR-002: SSRF Guard Misses Hex IPv4-Mapped IPv6
 
@@ -98,7 +106,7 @@ Release decision: blocks release until fixed.
 
 ### P1-CR-003: Decompressed Body Returned With Compressed Headers
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/proxy/index.mjs` unprotected response paths  
 Evidence:
 
@@ -116,11 +124,16 @@ Required remediation:
 - Centralize response-header sanitation so protected, unprotected, and allow paths share the same invariant.
 - Add gzip/br response tests for protected and unprotected paths.
 
-Release decision: blocks release until fixed.
+Resolution evidence:
+
+- A single centralized `sanitizeResponseHeaders(upstreamResponse)` (`packages/proxy/index.mjs`, generalizing the former `streamingResponseHeaders`) strips `content-encoding`, `content-length`, `transfer-encoding`, and hop-by-hop headers (`connection`/`keep-alive`/`te`/`trailer`/`upgrade`/`proxy-authenticate`). It is applied on EVERY response path: streaming pass-through, the inspected-stream `writeHead`, the unprotected/forwarded path, the protected JSON path (`transformedJsonHeaders` now strips the full set), and the `failureMode: allow` path. A correct `content-length` is re-set only for a fully-buffered body.
+- Regression tests in `tests/proxy-header-allowlist.test.mjs`: a gzip upstream response (Node fetch auto-decompresses) returns with no `content-encoding` and a downstream fetch reads the plain body on BOTH the pass-through and the unprotected/forwarded paths.
+
+Release decision: blocks release until fixed. Resolved.
 
 ### P1-CR-004: Streaming Pass-Through Is Buffered And Unbounded
 
-Status: Open  
+Status: Resolved (2026-06-16, toward 1.3.1)  
 Affected code: `packages/proxy/index.mjs` streaming `pass-through` branch  
 Evidence:
 
@@ -138,7 +151,13 @@ Required remediation:
 - Apply byte and duration limits to all raw upstream-body reads.
 - Add tests for long-lived stream behavior, response-size overrun, and cancellation on client disconnect.
 
-Release decision: blocks release until fixed or the mode is disabled by default and documented as unavailable.
+Resolution evidence:
+
+- The pass-through branch now does TRUE bounded streaming (`pipeUpstreamBodyBounded` in `packages/proxy/index.mjs`): the upstream body is piped to the client response as it arrives, with a running byte count against `streamingPassThroughMaxBytes(config)` (reuses `responseProtection.maxBytes`). Exceeding the cap cancels the upstream reader and destroys the client response (fail-closed on size); downstream backpressure is respected via `response.write` + `drain`. The former `readUpstreamBody(...)` + `response.end(rawBody)` full-buffering is removed from this path.
+- The unprotected/forwarded raw-body read in `maybeProtectResponse` now also passes the same byte cap to `readUpstreamBody({ maxBytes })` and fails closed (502 `haechi_response_too_large`) on `tooLarge`, so no raw upstream-body read lacks a cap.
+- Regression tests in `tests/proxy-header-allowlist.test.mjs`: an oversize pass-through stream (no content-length, > 8× the cap) is bounded/aborted near the cap and never delivers the full stream; the unprotected/forwarded path returns 502 `response_body_too_large` on an oversize buffered body.
+
+Release decision: blocks release until fixed or the mode is disabled by default and documented as unavailable. Resolved.
 
 ### P1-CR-005: Streaming Inspect Raw-Passes Non-JSON Frames
 

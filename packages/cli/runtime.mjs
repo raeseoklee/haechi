@@ -598,6 +598,7 @@ export function normalizeConfig(config) {
   if (merged.auth.provider === "plugin") {
     validatePluginAuthConfig(merged);
   }
+  validateForwardHeaders(merged.target);
   createProtocolAdapter(merged.target);
   return merged;
 }
@@ -934,6 +935,54 @@ function validatePluginAuthConfig(merged) {
       }
     }
   }
+}
+
+// P0-CR-001 — additive escape hatch for an unusual upstream that needs a header
+// the built-in allowlist does not cover. `target.forwardHeaders` is an OPTIONAL
+// array of extra lowercase header NAMES to forward to the upstream. Fail-closed:
+// it must be an array of non-empty strings, and it may NOT name a header that the
+// proxy always drops (ambient client credentials + hop-by-hop control headers) —
+// an operator cannot re-enable a gateway-credential leak through it. Absent =
+// the built-in default-drop allowlist alone (byte-identical to prior behavior).
+const FORWARD_HEADERS_FORBIDDEN = new Set([
+  "host",
+  "content-length",
+  "content-type",
+  "authorization",
+  "cookie",
+  "set-cookie",
+  "proxy-authorization",
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade"
+]);
+
+function validateForwardHeaders(target) {
+  if (target.forwardHeaders === undefined || target.forwardHeaders === null) {
+    return;
+  }
+  if (!Array.isArray(target.forwardHeaders)) {
+    throw new Error("target.forwardHeaders must be an array of lowercase header names");
+  }
+  const normalized = [];
+  for (const name of target.forwardHeaders) {
+    if (typeof name !== "string" || !name.trim()) {
+      throw new Error("target.forwardHeaders entries must be non-empty strings");
+    }
+    const lower = name.trim().toLowerCase();
+    if (lower !== name) {
+      throw new Error(`target.forwardHeaders entries must be lowercase header names (got: ${JSON.stringify(name)})`);
+    }
+    if (FORWARD_HEADERS_FORBIDDEN.has(lower)) {
+      throw new Error(`target.forwardHeaders may not include the always-dropped header ${JSON.stringify(lower)} (ambient credentials and hop-by-hop headers are never forwarded)`);
+    }
+    normalized.push(lower);
+  }
+  // Persist the validated, de-duplicated list back onto the normalized target.
+  target.forwardHeaders = [...new Set(normalized)];
 }
 
 function resolveAuthProvider(config, providers, cryptoProvider, auditSink) {
