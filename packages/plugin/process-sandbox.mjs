@@ -44,7 +44,18 @@ import {
 // The child flags. `--permission` enables the deny-by-default Node permission
 // model; we pass NO --allow-* grant, so fs/child-process/worker/addons/wasi/net
 // are all kernel-denied. `--disable-proto=delete` removes Object.prototype.__proto__.
+// A `--max-old-space-size=<mb>` heap cap is appended PER-SPAWN (see spawnAndLoad):
+// unlike the worker (resourceLimits OOMs a runaway), a process child has NO heap
+// cap by default, so a hostile/buggy signed plugin could build a reply up to the
+// child's default V8 heap. The cap bounds the child; the host-side reply-size bound
+// (CR2-003) bounds the host regardless.
 const CHILD_FLAGS = Object.freeze(["--permission", "--disable-proto=delete"]);
+
+// Default child heap cap (MB) when a process-runtime config does not supply
+// resourceLimits.maxOldGenerationSizeMb. Non-breaking: the worker REQUIRES the
+// knob, but the process runtime defaults rather than throwing so an isolation:
+// process config without resourceLimits keeps working.
+const DEFAULT_MAX_OLD_GEN_MB = 128;
 
 // A CONSTANT bootstrap harness, passed via `node -e`. It is identical for every
 // plugin (the plugin bytes arrive over IPC, NOT on the command line — so there is
@@ -155,6 +166,10 @@ function createProcessIsolatedAuthProviderHandle({
   timeoutMs,
   maxPendingCalls = 8,
   maxMessageBytes = 16384,
+  // Child V8 heap cap. Reuses the worker's resourceLimits.maxOldGenerationSizeMb
+  // knob (CR2-003). Optional for the process runtime: a config that omits it falls
+  // back to DEFAULT_MAX_OLD_GEN_MB rather than throwing (non-breaking).
+  resourceLimits = null,
   coreVersion = null,
   now = Date.now,
   allowedLabelKeys,
@@ -200,6 +215,21 @@ function createProcessIsolatedAuthProviderHandle({
   }
   if (!Number.isInteger(maxMessageBytes) || maxMessageBytes < 1) {
     throw new Error("maxMessageBytes must be a positive integer");
+  }
+  // Resolve the child heap cap (MB). Optional for the process runtime; if supplied
+  // it must be a positive-integer maxOldGenerationSizeMb (same shape as the worker),
+  // else default to DEFAULT_MAX_OLD_GEN_MB (non-breaking — never throws on absence).
+  let maxOldGenerationSizeMb = DEFAULT_MAX_OLD_GEN_MB;
+  if (resourceLimits !== null && resourceLimits !== undefined) {
+    if (typeof resourceLimits !== "object" || Array.isArray(resourceLimits)) {
+      throw new Error("createProcessIsolatedAuthProvider resourceLimits must be an object");
+    }
+    if (resourceLimits.maxOldGenerationSizeMb !== undefined) {
+      if (!Number.isInteger(resourceLimits.maxOldGenerationSizeMb) || resourceLimits.maxOldGenerationSizeMb <= 0) {
+        throw new Error("createProcessIsolatedAuthProvider resourceLimits.maxOldGenerationSizeMb must be a positive integer");
+      }
+      maxOldGenerationSizeMb = resourceLimits.maxOldGenerationSizeMb;
+    }
   }
   // Fail-closed network containment. PR1 supports only the "require-permission"
   // mode; if this Node cannot enforce --allow-net, refuse to construct rather than
@@ -273,7 +303,11 @@ function createProcessIsolatedAuthProviderHandle({
   // any failure kills the child and throws → fail closed. NOTE the plugin source
   // crosses over IPC (not the command line) so there is no ARG_MAX limit.
   async function spawnAndLoad({ entrySource, pluginId: pid }) {
-    const c = spawn(execPath, [...CHILD_FLAGS, "-e", PROCESS_HARNESS], {
+    // Build the spawn args by spreading the frozen base flags + the per-spawn heap
+    // cap. `--max-old-space-size` composes with `--permission`/`--disable-proto=
+    // delete` and the data:-URL load (verified). The cap bounds a runaway child;
+    // the host-side reply-size bound bounds the host regardless of the child heap.
+    const c = spawn(execPath, [...CHILD_FLAGS, `--max-old-space-size=${maxOldGenerationSizeMb}`, "-e", PROCESS_HARNESS], {
       stdio: ["ignore", "ignore", "ignore", "ipc"],
       serialization: "json",
       env: scrubbedEnv(),
@@ -291,6 +325,27 @@ function createProcessIsolatedAuthProviderHandle({
     const failed = new Promise((_, reject) => { onFail = reject; });
 
     c.on("message", (raw) => {
+      // REPLY SIZE BOUND (CR2-003): bound host-side work BEFORE JSON.parse. Unlike
+      // the worker (resourceLimits OOMs a runaway), the child has only the
+      // --max-old-space-size cap, so it can still build a reply up to that heap and
+      // process.send it; a synchronous JSON.parse of a multi-MB string stalls the
+      // host event loop (the per-call timeout cannot fire mid-parse). The reply is a
+      // STRING (serialization:'json'); measure its byte length and, if it exceeds the
+      // SAME maxMessageBytes ceiling the outbound credential obeys, drop the frame as
+      // an oversized DENY WITHOUT parsing. The auth reply is the only attacker-sized
+      // frame (claims come from the plugin); the tiny ready/loaded/load-error control
+      // frames are always far under the ceiling, so the uniform bound never harms the
+      // handshake. Single-occupancy: settle the one live pending call as oversized.
+      const replyBytes = typeof raw === "string"
+        ? Buffer.byteLength(raw, "utf8")
+        : Buffer.byteLength(String(raw), "utf8");
+      if (replyBytes > maxMessageBytes) {
+        for (const [cid, settle] of pending) {
+          pending.delete(cid);
+          settle({ __oversized: true });
+        }
+        return;
+      }
       let parsed;
       try {
         parsed = JSON.parse(typeof raw === "string" ? raw : String(raw));

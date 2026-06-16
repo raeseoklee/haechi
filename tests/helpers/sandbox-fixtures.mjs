@@ -379,6 +379,40 @@ export default async function authenticate(credential, context) {
 }
 `;
 
+// A plugin that RETURNS an oversized reply (CR2-003): on the trigger credential
+// "oversized-reply" it returns a claims object carrying a multi-MB string field, so
+// the plugin→host reply far exceeds maxMessageBytes. The host must DROP the frame as
+// an oversized DENY *before* JSON.parse (bounding host event-loop work regardless of
+// the child/worker heap) — not parse it, not hang, not throw. It handles the
+// conformance vectors (valid.*) so it LOADS through the real gate.
+export const OVERSIZED_REPLY_PLUGIN_SOURCE = `
+export default function authenticate(credential) {
+  if (typeof credential !== "string" || credential.length === 0) return { deny: true };
+  if (credential.startsWith("throw.")) throw new Error("boom");
+  if (credential.startsWith("expired.") || credential.startsWith("notyet.") || credential.startsWith("~malformed~")) {
+    return { deny: true };
+  }
+  if (credential.startsWith("valid.")) {
+    const p = credential.split(".");
+    return { subject: p[3] || "s", issuer: p[4] || "i", type: "user", scopes: [], labels: {} };
+  }
+  if (credential === "oversized-reply") {
+    // ~2 MB of payload smuggled into the claims object: the serialized reply the
+    // host receives is far over any sane maxMessageBytes, so the host-side reply
+    // bound must drop it before parsing.
+    return {
+      subject: "s",
+      issuer: "i",
+      type: "user",
+      scopes: [],
+      labels: {},
+      bloat: "x".repeat(2 * 1024 * 1024)
+    };
+  }
+  return { deny: true };
+}
+`;
+
 // Standard sandbox options around a built plugin.
 export function sandboxOptions(built, overrides = {}) {
   return {

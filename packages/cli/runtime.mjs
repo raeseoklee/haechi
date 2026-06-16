@@ -1022,7 +1022,11 @@ function resolveAuthProvider(config, providers, cryptoProvider, auditSink) {
       return createProcessIsolatedAuthProviderSync({
         ...common,
         netEnforcement: plugin.netEnforcement ?? "require-permission",
-        keyMaterial: plugin.keyMaterial ?? null
+        keyMaterial: plugin.keyMaterial ?? null,
+        // CR2-003: reuse the worker's resourceLimits.maxOldGenerationSizeMb knob to
+        // cap the child heap. Optional for the process runtime (the sandbox defaults
+        // when absent), so pass it through whether or not the config supplied it.
+        resourceLimits: plugin.resourceLimits ?? null
       });
     }
     return createSandboxedAuthProviderSync({ ...common, resourceLimits: plugin.resourceLimits });
