@@ -1,20 +1,22 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
 - 문서 상태: Living document(core 1.3.x 추적)
-- 작성일: 2026-06-11
+- 작성일: 2026-06-16
 - 기준 버전: 1.3.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
 
-Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트(G2, `haechi@0.3.2`)부터 G6(1.1.0 plugin capability 강제)까지 모든 게이트가 통과되었으며, 아래 게이트 이력은 감사 추적으로 보존합니다. 1.0.0은 strict semver 하의 frozen API 계약을 선언하고(문서화된 deprecation 정책과 freeze 가드 `tests/api-contract.test.mjs` 포함), signed·sandboxed `authProvider` plugin에 한해 dynamic-loading 금지를 좁게 해제했습니다. 1.1.0은 커널 수준 capability 거부를 갖춘 opt-in `process-isolated` plugin 런타임을 추가했습니다. stable 표현을 막던 조건 — 1.0 API 안정성, 외부 `cryptoProvider`/KMS reference adapter(`haechi-crypto-kms`), stream-aware enforcement(`streaming.requestMode: "inspect"`) — 은 모두 갖춰졌습니다. Haechi는 여전히 컴플라이언스를 보장하지 않는 self-hosted 보안 toolkit이며, 운영 배포는 네트워크 접근 통제, upstream 인증, key custody를 직접 책임집니다(threat model §5 참고).
+Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트(G2, `haechi@0.3.2`)부터 G8(1.3.0 backend + detection coverage expansion)까지 모든 게이트가 통과되었으며, 아래 게이트 이력은 감사 추적으로 보존합니다. 1.0.0은 strict semver 하의 frozen API 계약을 선언하고(문서화된 deprecation 정책과 freeze 가드 `tests/api-contract.test.mjs` 포함), signed·sandboxed `authProvider` plugin에 한해 dynamic-loading 금지를 좁게 해제했습니다. 1.1.0은 커널 수준 capability 거부를 갖춘 opt-in `process-isolated` plugin 런타임을 추가했습니다. stable 표현을 막던 조건 — 1.0 API 안정성, 외부 `cryptoProvider`/KMS reference adapter(`haechi-crypto-kms`), stream-aware enforcement(`streaming.requestMode: "inspect"`) — 은 모두 갖춰졌습니다. Haechi는 여전히 컴플라이언스를 보장하지 않는 self-hosted 보안 toolkit이며, 운영 배포는 네트워크 접근 통제, upstream 인증, key custody를 직접 책임집니다(threat model §5 참고).
+
+**2026-06-16 현재 게이트 오버레이:** 전체 코드리뷰 결과를 `docs/current/code-review-risk-register-2026-06-16.ko.md`에 새 등록부로 열었습니다. 이 리뷰에서 P0 credential-boundary leak 1건과 P1 릴리스 차단 이슈 4건이 확인됐습니다. 과거 게이트 통과 기록은 유지하되, §5.7의 P0/P1 `P*-CR-*` 항목이 해결되거나 책임자 판단으로 명시 수용되기 전까지 새 release tag와 npm publish를 차단합니다.
 
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
-| GitHub release/tag | 허용 | stable `1.x` 라인; 릴리스 노트가 각 게이트(G0–G6)를 추적 |
-| npm stable | 허용 | 1.0 stable 라벨 조건 — frozen API 계약, 외부 KMS reference adapter, stream-aware enforcement — 충족; core는 provenance와 함께 발행 |
-| production use | 운영자 게이트 | 운영자가 네트워크 접근 통제, 인증/인가, 운영 key custody를 앞단에 두면 self-hosted 게이트웨이로 지원; Haechi는 컴플라이언스 보장이 아님 |
+| GitHub release/tag | 새 태그 차단 | 기존 릴리스는 과거 기록으로 유지하되, 새 태그는 §5.7 P0/P1 항목 해결 또는 명시 수용 전까지 차단 |
+| npm stable | 다음 publish 차단 | stable-line 기준은 충족했지만 현재 P0/P1 코드리뷰 오버레이가 다음 npm publish를 차단 |
+| production use | 현재 경고가 붙은 운영자 게이트 | 운영자 네트워크 통제, 인증/인가, key custody가 있을 때만 지원; P0-CR-001 해결 또는 수용 전까지 민감한 제3자 업스트림 트래픽을 현재 프록시에 통과시키지 않음 |
 
 ## 2. 릴리스 게이트
 
@@ -29,6 +31,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G6 | 1.1.0 plugin capability 강제 (`process-isolated`) | P1-SEC-027 / P1-SEC-028 mitigated; `process-isolated` 런타임(`--permission` 하 자식, 부여 0, `data:` URL 로드, stdio 무시, JSON-string IPC) + fail-closed `--allow-net` 기능 탐지(`netEnforcement:"require-permission"`) + 코어 `haechi/ssrf` 가드 + 호스트 중개 키 자료 + spawn-storm 서킷 브레이커; fs/net/stdio 레드팀 + SSRF + config 테스트 통과(행동 스위트는 `--allow-net` Node에서 실행, 아니면 fail-closed로 skip); API freeze 통과 유지(additive `./ssrf` export + additive config 키); core는 zero runtime dependency 유지; core 1.1.0 bump(additive + opt-in 마이너) | Pass |
 | G7 | 1.2.0 신뢰성 강화 트랙 (WS1–WS6) | 탐지 품질 측정+강화(WS2: 라벨 코퍼스 precision/recall `bench:detection` 게이트, 자격증명+국제 PII 커버리지, 하드블록 타입 불변식이 적용된 `filters.minConfidence` / `filters.allowlist`, offset 무결성을 갖춘 NFKC 유니코드 회피 폴딩); WS3 주입 가능한 `rateLimiter` 시임 + bounded fixed-window map; WS4 운영성(`/__haechi/live`+`/ready` 분리, 주입 가능한 `/metrics`, 구조적 로그 + 요청별 `correlationId`, graceful drain, max-in-flight backpressure, env overlay, 하드닝 Dockerfile/compose/runbook, `configVersion`); WS6 proxy TLS / remote-bind 하드닝(`proxy.tls` / `proxy.trustForwardedProto`, fail-closed `assertSafeProxyTransport`) + OWASP-LLM/NIST 컨트롤 매핑 백서 + RFC 9116 `security.txt` + 취약점 공개 경로. 모든 변경은 1.1 동작을 보존하는 기본값 뒤의 additive(`tests/api-contract.test.mjs` 통과); no-plaintext-in-audit 불변식이 텔레메트리까지 확장; core는 zero runtime dependency 유지; core 1.2.0 bump(additive 마이너) | Pass |
 | G8 | 1.3.0 백엔드 + 탐지 커버리지 확장 | **Anthropic Messages API**(`/v1/messages`, content-block + SSE `delta.text`, `event:` 라인 보존 재직렬화)와 **Google Gemini API**(model-in-path `:generateContent`/`:streamGenerateContent`, 기존 정확-매칭 어댑터를 바이트 동일하게 두는 additive `:method`-suffix 라우트 매처) 프로토콜 어댑터 추가; 탐지 커버리지 확장 — 클라우드/SaaS provider 키(OpenAI/Anthropic/Google-OAuth/SendGrid/Twilio/npm/Azure, anchored)와 국제 PII(FR/ES/JP + IT/SG/IN/DE/NL 국가 ID, 체크섬 validator), 각 하드블록-대-dial-eligible 결정은 측정된 충돌률 기반(하드블록은 비숫자 앵커 또는 비현실적으로 드문 형태가 필요; 흔한 길이의 bare-digit run은 allowlist로 정리 가능 유지); `bench:throughput` proxy 부하 벤치; `haechi-ratelimit-redis` 공유 저장소 rate-limiter 위성(WS3 시임의 운영 소비자; proxy가 이제 `rateLimiter.allow`를 `await`); `haechi-dashboard`가 요청별 `correlationId` 노출. 모든 변경은 additive — 새 `target.type`/탐지타입/`privacy.profile` *값*이며 새 config 키가 아님(`configVersion`은 `1` 유지); `tests/api-contract.test.mjs` 통과; core는 zero runtime dependency 유지; core 1.3.0 bump(additive 마이너) | Pass |
+| G9 | 2026-06-16 전체 코드리뷰 보완 게이트 | `P0-CR-001` 및 `P1-CR-002`부터 `P1-CR-005`까지 해결 또는 책임자 명시 수용; P2 항목은 해결 또는 명시적 non-blocking 근거와 일정 기록; 연결된 등록부 갱신 | Blocked |
 
 ## 3. P0 배포 차단 리스크 상태
 
@@ -128,6 +131,26 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 | P1-SEC-027 | Plugin capability *강제*: 1.0 `worker_threads` sandbox는 memory/crash 격리뿐이라 악의적 signed plugin이 `fs`/`net`을 써서 credential을 exfiltrate할 수 있음. **P1-SEC-024의 수용된 worker 잔여를 강화** — 1.1이 새 opt-in 런타임에 실제 강제 추가 | Mitigated | `packages/plugin/process-sandbox.mjs` `createProcessIsolatedAuthProvider`/`…Sync`(PR #54): signed `authProvider`가 `--permission` 하 자식 `node`에서 **부여 0**(fs/child-process/worker/addons/wasi 없음, `--allow-net` 없음)으로, `data:` URL 로드(fs 권한 없음 → TOCTOU/symlink 표면 없음), `stdio:['ignore','ignore','ignore','ipc']`(stdout/stderr/fd 유출 채널 없음), 정화 env, JSON-string 전용 IPC + 공유 null-proto sanitizer + 호스트측 keyed-HMAC identity로 실행됩니다. **Node 26 실측 검증**: plugin의 `fs`/`net`/`fetch`/`dns`/`child_process`/`worker`와 `process.binding('tcp_wrap')` 우회가 모두 `ERR_ACCESS_DENIED`. 네트워크 봉쇄는 **커널 `--allow-net` 거부**(삭제 가능한 JS 하니스가 아님); 기본값 `netEnforcement:"require-permission"`은 강제 못 하는 Node에서 **fail closed**(동작 probe 기능 탐지; PR #54). spawn-storm 서킷 브레이커(PR #56)가 재spawn 제한. lifecycle audit에 호스트 계산/enum 전용 `isolation`/`grants`/`netEnforcement` 추가(PR #56). config: `auth.plugin.isolation:"process"` fail-closed 배선(PR #56). 테스트: fs/net/stdio 레드팀(`--allow-net` 없는 Node에선 fail-closed라 skip) + 상시 실행 fail-closed 계약 + config 매트릭스. **잔여:** `--allow-net` 없는 Node(fail-closed, 미봉쇄); `networkEgress` 부여 plugin; 자식 메모리의 credential/키 자료(core-dump/swap); V8/Node 탈출(런타임 통제일 뿐 OS 샌드박스 아님) |
 | P1-SEC-028 | 호스트 중개 키 자료 + SSRF: 키 자료가 필요한 커스텀 자격증명 plugin이 plugin 주도 SSRF 벡터가 될 수 있고, 코어엔 SSRF 가드가 없었음(위성 복사본은 코어에서 도달 불가) | Mitigated | 새 node:-only, 의존성 0 **`haechi/ssrf`** 코어 모듈(PR #55): `isBlockedAddress`(private/loopback/link-local/metadata), `guardedFetch`(https 전용, DNS 후 재확인, `redirect:"error"`, 본문 제한 + timeout), `createGuardedKeyFetcher`(TTL 캐시 + cooldown). `process-isolated` 런타임의 선택적 `keyMaterial:{url}`은 **호스트**가 **운영자 선언** URL에서 이 가드로 가져와 IPC로 주입하므로, plugin은 URL을 명명하지 않습니다(plugin 주도 SSRF 없음). kid-refetch cooldown이 아웃바운드 비율을 제한하고, blocked-address URL은 fail closed됩니다. 테스트: 표준 `isBlockedAddress` 벡터 테이블 + 코어-대-`auth-jwt` parity 가드, `guardedFetch` SSRF 거부/제한, cooldown fail-closed, 런타임 키 주입 + no-SSRF. **잔여:** 위성은 의도적으로 로컬 복사본을 유지함(crypto/auth 패키지는 core-ssrf에 런타임 의존 금지; `crypto-kms/ssrf-parity.test.mjs`) — 코어 재import는 연기하며, drift는 제거가 아니라 parity로 가드; 가드의 DNS-rebinding 창(resolve-then-connect)은 운영자 선언 URL에 대해 수용 |
 
+## 5.7 2026-06-16 전체 코드리뷰 Open 리스크 상태
+
+권위 있는 항목별 등록부는 `docs/current/code-review-risk-register-2026-06-16.ko.md`입니다. 이 절은 릴리스 게이트 요약입니다. `P0-CR-001` 및 `P1-CR-002`부터 `P1-CR-005`까지는 해결되거나 책임자 근거와 함께 명시 수용되기 전까지 새 GitHub release tag와 npm publish를 차단합니다.
+
+| ID | 리스크 | 상태 | 종료에 필요한 증거 |
+|---|---|---|---|
+| P0-CR-001 | 프록시가 클라이언트 `Authorization`, `Cookie`, proxy-auth 등 주변 자격증명을 모델 업스트림으로 전달 | Open | 명시적 업스트림 헤더 allowlist; 게이트웨이 클라이언트 인증과 업스트림 공급자 인증 분리; Haechi bearer token이 로컬 업스트림에서 보이지 않는 회귀 테스트; 공급자 credential은 명시 config/adapter 규칙으로만 전달 |
+| P1-CR-002 | SSRF 가드가 `::ffff:7f00:1` 같은 hex IPv4-mapped IPv6 private 주소를 놓침 | Open | core SSRF, auth-jwt, KMS vault 경로에서 공유 normalization/checker 사용; dotted/hex mapped IPv6 private/public 테스트 |
+| P1-CR-003 | 자동 압축 해제된 업스트림 본문이 기존 압축 응답 헤더와 함께 반환될 수 있음 | Open | 모든 read/transformed-body 경로의 response-header sanitation 중앙화; gzip/br protected/unprotected 응답 테스트 |
+| P1-CR-004 | `streaming.requestMode: "pass-through"`가 response-size cap 없이 전체 업스트림 본문을 버퍼링 | Open | 진짜 bounded streaming 또는 fail-closed/disabled mode; 모든 raw response read에 byte/duration limit 적용; long-lived stream 및 client-disconnect 테스트 |
+| P1-CR-005 | streaming inspection이 non-JSON SSE/NDJSON 프레임을 원문 통과시켜 plain-text PII 우회 가능 | Open | parse 실패 content frame을 텍스트로 검사; protocol-control allowlist; plain-text SSE, PII 포함 malformed JSON, provider control frame 테스트 |
+| P2-CR-006 | `mcp-wrap`이 child `stderr`를 filtering/audit 없이 상속 | Open | 안전한 기본값을 갖춘 filter/drop/inherit mode 또는 명시적 경계 문서화; stderr 동작 테스트 |
+| P2-CR-007 | 기존 key file을 `initLocalKeyFile()`이 검증하지 않음 | Open | active/retired key 기존 파일 검증; malformed 및 valid migration 테스트 |
+| P2-CR-008 | satellite packaging check가 `manifest.bin` target file을 검증하지 않음 | Open | 모든 bin target을 packed-file list와 대조; negative fixture |
+| P2-CR-009 | `authProvider.authenticate()` 예외 경로 회귀 테스트 부재 | Open | generic fail-closed client response, audit shape, raw provider error 미노출 테스트 |
+| P2-CR-010 | process-isolated sandbox quota 분기 parity 테스트 부족 | Open | result-size, queue-capacity, timeout, child-exit 테스트 |
+| P2-CR-011 | audit chain 중간 변조 분기 집중 테스트 부족 | Open | middle mutation, missing/wrong `prev`, wrong `integrity.hash` 테스트; tail truncation은 계속 한계로 문서화 |
+| P2-CR-012 | KMS vault IPv6 loopback carve-out의 IPv6 테스트 부족 | Open | 의도된 정책에 맞춰 `::1`, `[::1]`, dotted mapped IPv6, hex mapped IPv6 테스트 |
+| P2-CR-013 | SSE multi-line `data:` 필드를 newline separator 없이 합침 | Open | `\n` join으로 parser 수정; multi-line JSON/plain-text SSE 테스트 |
+
 ## 6. P2 제품/문서 리스크 상태
 
 | ID | 기존 리스크 | 상태 | 해소 증거 |
@@ -140,6 +163,8 @@ base64/인코딩 값 디코딩 검사, query string 검사, audit tail truncatio
 ## 7. npm 릴리스 배포 전 체크리스트
 
 이 체크리스트는 `1.x` stable 라인의 모든 릴리스에 대한 상시 배포 전 템플릿이며, `0.3.2` developer preview에서 처음 적용되었습니다. 그 결과를 아래에 참조 기록으로 보존합니다.
+
+2026-06-16 현재 상태: G9이 `Blocked`가 아닌 상태가 되기 전까지 새 publish용 체크리스트를 시작하지 않습니다.
 
 외부 npm 게이트 확인 결과(`0.3.2` developer preview, 2026-06-10, 배포 후)는 다음과 같습니다.
 
