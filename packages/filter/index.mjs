@@ -540,12 +540,15 @@ function scanEntry(entry, rules, context = {}) {
   // own token. This is response-only on purpose: a REQUEST that contains a
   // marker-shaped string is NOT Haechi output (Haechi hasn't transformed it yet),
   // so it is scanned normally — otherwise an attacker could wrap a real secret in
-  // a fake `[TOKEN:…]` to evade request-side detection.
+  // a fake `[TOKEN:…]` to evade request-side detection. On the RESPONSE side the
+  // same wrap-a-secret risk is closed by haechiMarkerSpans recording a span only
+  // when the inner content matches a GENUINE emitted format — a fake marker
+  // wrapping a real secret stays in the scan and is detected/blocked.
   // Markers are pure ASCII and NFKC-stable, so their spans are computed on the
   // ORIGINAL value exactly as before — they line up with the same-length
   // normalized scan (Case 2 below) and are irrelevant to the whole-leaf scan
   // (Case 3).
-  const markerSpans = context?.direction === "response" ? haechiMarkerSpans(entry.value) : [];
+  const markerSpans = context?.direction === "response" ? haechiMarkerSpans(entry.value, rules, context) : [];
 
   // WS2d — Unicode evasion via NFKC normalization. A client can defeat every
   // regex rule by sending PII/secrets in a Unicode form that folds to ASCII
@@ -824,12 +827,157 @@ function isPositionStableNfkc(value, normalized) {
   return rebuilt === normalized;
 }
 
-// Spans of Haechi's own transform markers in a string, so detection can skip
-// them: `[TOKEN:…]`, `[HAECHI_ENC:…]`, `[REDACTED:…]`.
-function haechiMarkerSpans(text) {
+// Spans of Haechi's own transform markers in a string, so RESPONSE-direction
+// detection can skip them: `[TOKEN:…]`, `[HAECHI_ENC:…]`, `[REDACTED:…]`. A
+// tokenized round-trip echoed by the model would otherwise be re-flagged as a
+// secret (Haechi blocking its own output).
+//
+// CR-???: a span is recorded ONLY when its inner content matches a GENUINE
+// format actually emitted by core's transform (packages/core/index.mjs
+// replacementFor). Without this check the marker frame `[(?:TOKEN|…):[^\]]*]`
+// would skip ANY inner content, so a hostile model could exfiltrate a real
+// secret by wrapping it in a FAKE marker — `[TOKEN:sk-ant-api03-<secret>]`,
+// `[HAECHI_ENC:<secret>]`, `[REDACTED:<secret>]` — and that span would be
+// dropped from the scan. A marker-SHAPED string whose inner content is not
+// genuine is left in the scan, so the wrapped secret is detected/blocked.
+// Genuine inner formats:
+//   [REDACTED:<type>]            <type> is a detection type name (lowercase
+//                                identifier: [a-z][a-z0-9_]*).
+//   [TOKEN:<vaultTokenId>]       vault id shape `tok_<type>_<hexhash>`
+//                                (matches token-vault VAULT_TOKEN_SHAPE).
+//   [TOKEN:<type>:<shortHash>]   non-vault deterministic token: type name + hex.
+//   [HAECHI_ENC:<base64url>]     base64url that decodes to a VALID envelope
+//                                JSON object (cryptoProvider.encrypt envelope:
+//                                has `kid`+`aadHash`). A real secret string will
+//                                not base64url-decode to such an object.
+// Markers are pure ASCII / NFKC-stable and spans are computed on the ORIGINAL
+// entry.value, so offset integrity is unchanged.
+
+// Detection-type name shape (the `detection.type` written by core into REDACTED
+// and the type segment of a non-vault TOKEN). Built-in rule types and custom
+// rule types are lowercase identifiers; a real secret (hyphens, uppercase,
+// length) does not match, so a wrapped secret stays in the scan.
+const MARKER_TYPE_NAME = /^[a-z][a-z0-9_]*$/;
+// Vault token id shape — mirrors token-vault VAULT_TOKEN_SHAPE
+// (`tok_<type>_<hexhash>`, random: 16 hex, deterministic: 32 hex). Kept in sync
+// with packages/token-vault/index.mjs (not exported from there).
+const MARKER_VAULT_TOKEN = /^tok_[a-z0-9_]+_[a-f0-9]{16,}$/;
+// Non-vault deterministic token: `<type>:<hex>` (core shortHash → 12 hex; allow
+// any reasonable hex run so the check does not over-fit a single length).
+const MARKER_NONVAULT_TOKEN = /^[a-z][a-z0-9_]*:[a-f0-9]{8,}$/;
+// base64url alphabet only (core emits base64url with no padding).
+const MARKER_BASE64URL = /^[A-Za-z0-9_-]+$/;
+
+function isGenuineTokenInner(inner) {
+  return MARKER_VAULT_TOKEN.test(inner) || MARKER_NONVAULT_TOKEN.test(inner);
+}
+
+function isGenuineRedactedInner(inner) {
+  return MARKER_TYPE_NAME.test(inner);
+}
+
+// True only when `inner` base64url-decodes to a valid UTF-8 JSON object that
+// carries the encrypt-envelope signature (`kid` + `aadHash` — the contract keys
+// asserted by assertCryptoProviderConformance, present in the local AES-GCM
+// envelope and any conformant external provider). Any decode/parse failure or a
+// non-envelope shape → NOT a genuine marker (so a wrapped secret is scanned).
+function isGenuineEncInner(inner) {
+  if (!MARKER_BASE64URL.test(inner)) {
+    return false;
+  }
+  try {
+    const bytes = Buffer.from(inner, "base64url");
+    // Reject inputs that do not round-trip through base64url (e.g. an invalid
+    // tail that Buffer silently truncates): a genuine marker always round-trips.
+    if (bytes.toString("base64url") !== inner) {
+      return false;
+    }
+    if (!isUtf8(bytes)) {
+      return false;
+    }
+    const parsed = JSON.parse(bytes.toString("utf8"));
+    return (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      typeof parsed.kid === "string" &&
+      typeof parsed.aadHash === "string"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Belt-and-suspenders for the genuine-marker shapes: even a correctly-SHAPED
+// TOKEN/REDACTED inner must not itself carry a detectable secret. The lowercase-
+// identifier classes (MARKER_TYPE_NAME, the type segments of the token shapes)
+// overlap the body of real lowercase-bodied secrets (notably GitHub `gh[pousr]_`
+// tokens), so a hostile model could smuggle such a secret as the `<type>` segment
+// of an otherwise genuine-shaped marker. Re-scan the inner with the SAME rules and
+// refuse to treat it as genuine if anything detectable is inside — this un-skips a
+// marker exactly when skipping it would hide a leak.
+function textHasDetection(text, rules, context) {
+  for (const rule of rules) {
+    if (rule.direction && rule.direction !== context?.direction) {
+      continue;
+    }
+    const regex = new RegExp(rule.pattern, rule.flags.includes("g") ? rule.flags : `${rule.flags}g`);
+    for (const match of text.matchAll(regex)) {
+      if (!rule.validate || rule.validate(match[0])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// The attacker-controllable segment(s) of a genuine-shaped marker inner — i.e. the
+// `<type>` position(s) a hostile model could smuggle a secret into. For TOKEN we
+// peel off the structural framing (`tok_<type>_<hex>` → `<type>`, `<type>:<hex>` →
+// `<type>`) and scan the segment IN ISOLATION as well as the whole inner: a `\b`-
+// anchored rule (e.g. GitHub `\bghp_…`) misses a token glued to the `tok_` prefix
+// (no word boundary after `_`), but matches the segment scanned on its own.
+function markerSecretSurfaces(kind, inner) {
+  const surfaces = [inner];
+  if (kind === "TOKEN") {
+    const vault = /^tok_(.+)_[a-f0-9]{16,}$/.exec(inner);
+    if (vault) {
+      surfaces.push(vault[1]);
+    }
+    const nonVault = /^(.+):[a-f0-9]{8,}$/.exec(inner);
+    if (nonVault) {
+      surfaces.push(nonVault[1]);
+    }
+  }
+  return surfaces;
+}
+
+function innerContainsDetection(kind, inner, rules, context) {
+  return markerSecretSurfaces(kind, inner).some((surface) => textHasDetection(surface, rules, context));
+}
+
+function haechiMarkerSpans(text, rules = [], context = {}) {
   const spans = [];
-  for (const m of text.matchAll(/\[(?:TOKEN|HAECHI_ENC|REDACTED):[^\]]*\]/g)) {
-    spans.push([m.index, m.index + m[0].length]);
+  for (const m of text.matchAll(/\[(TOKEN|HAECHI_ENC|REDACTED):([^\]]*)\]/g)) {
+    const kind = m[1];
+    const inner = m[2];
+    let genuine = false;
+    if (kind === "TOKEN") {
+      genuine = isGenuineTokenInner(inner);
+    } else if (kind === "REDACTED") {
+      genuine = isGenuineRedactedInner(inner);
+    } else {
+      genuine = isGenuineEncInner(inner);
+    }
+    // HAECHI_ENC is exempt from the inner re-scan: its inner is an opaque base64url
+    // envelope validated by decode above (a raw secret cannot forge a valid
+    // envelope, and the envelope's base64url body is not a detectable leaf).
+    if (genuine && kind !== "HAECHI_ENC" && innerContainsDetection(kind, inner, rules, context)) {
+      genuine = false;
+    }
+    if (genuine) {
+      spans.push([m.index, m.index + m[0].length]);
+    }
   }
   return spans;
 }

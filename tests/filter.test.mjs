@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createDefaultFilterEngine, HARD_BLOCK_TYPES } from "../packages/filter/index.mjs";
 import { collectStringEntries } from "../packages/core/index.mjs";
+import { initLocalKeyFile, createLocalCryptoProvider } from "../packages/crypto/index.mjs";
 
 test("default filter detects common PII and secrets", async () => {
   const filter = createDefaultFilterEngine();
@@ -56,7 +60,10 @@ test("Haechi's own transform markers are never re-detected (no self-flagging)", 
   const detections = await filter.detect({
     entries: collectStringEntries({
       tokenized: "please email [TOKEN:tok_email_a6d376389bb21964] today",
-      encrypted: "value [HAECHI_ENC:eyJhbGciOiJBMjU2R0NNIn0] here",
+      // base64url of a faithful encrypt envelope ({v,alg,kid,iv,ct,tag,aadHash}) —
+      // a GENUINE HAECHI_ENC marker. Markers are recognized by inner shape now, so
+      // this must decode to a real envelope (kid+aadHash) to be skipped.
+      encrypted: "value [HAECHI_ENC:eyJ2IjoxLCJhbGciOiJBMjU2R0NNIiwia2lkIjoiazEiLCJpdiI6IkFBQUFBQUFBQUFBQUFBQUEiLCJjdCI6IlpIVnRiWGsiLCJ0YWciOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwiYWFkSGFzaCI6ImFiYzEyMyJ9] here",
       redacted: "value [REDACTED:email] here"
     }),
     context: { direction: "response" }
@@ -88,6 +95,140 @@ test("marker exclusion is positional: a real secret ADJACENT to a marker is stil
     context: { direction: "response" }
   });
   assert.equal(detections.filter((d) => d.type === "api_key").length, 2);
+});
+
+// CR-???: the response-direction marker skip records a span only when the inner
+// content matches a GENUINE format emitted by core (replacementFor). Before the
+// tightening, the marker FRAME `[(?:TOKEN|…):[^\]]*]` skipped ANY inner content,
+// so a hostile model could exfiltrate a real secret by wrapping it in a FAKE
+// marker. All secrets below are SYNTHETIC (documented-shape fabrications).
+const SYNTH_SECRET = "sk-ant-api03-EXAMPLE0123456789abcdefABCDEF"; // matches the anthropic-api-key rule (type secret)
+
+test("response marker skip: a FAKE marker wrapping a real secret is NOW scanned (no exfiltration)", async () => {
+  const filter = createDefaultFilterEngine();
+  // A model can emit a marker-SHAPED string whose inner content is not a genuine
+  // token/redaction/envelope. Each of these wraps a synthetic secret in an inner
+  // form that fails the genuine check, so the span is NOT skipped and the secret
+  // is detected.
+  const cases = {
+    fakeToken: `here is [TOKEN:${SYNTH_SECRET}] ok`,        // inner is neither a vault id nor <type>:<hex>
+    fakeEnc: `here is [HAECHI_ENC:${SYNTH_SECRET}] ok`,     // inner is not base64url-of-envelope
+    fakeRedacted: `here is [REDACTED:${SYNTH_SECRET}] ok`,  // inner is not a type-name
+    fakeTokenTypeColon: `here is [TOKEN:secret:${SYNTH_SECRET}] ok` // <type>: prefix but inner is not pure hex
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    const detections = await filter.detect({
+      entries: collectStringEntries({ leaked: text }),
+      context: { direction: "response" }
+    });
+    assert.ok(
+      detections.some((d) => d.type === "secret"),
+      `fake marker (${name}) must be scanned and the wrapped secret detected`
+    );
+  }
+});
+
+test("response marker skip: a LOWERCASE-identifier-shaped secret can't hide in a genuine-shaped marker", async () => {
+  // Regression for the residual the first tightening missed: a secret whose body
+  // is a lowercase identifier (e.g. a GitHub gh[pousr]_ token) fits the genuine
+  // type-name / token-type shapes, so a hostile model could smuggle it as the
+  // <type> segment of an otherwise genuine-shaped marker. We use a CUSTOM `\b`-
+  // anchored rule (no real provider token in the test) — the \b case also proves
+  // the segment-isolation scan: in the vault form `tok_<secret>_<hex>` the secret
+  // is glued to `tok_` (no word boundary), so it is only caught when the <type>
+  // segment is scanned on its own.
+  const filter = createDefaultFilterEngine({
+    customRules: [{ id: "demo-secret", type: "secret", pattern: "\\bdemo_[a-z0-9]{20,}\\b", flags: "", confidence: 0.99 }]
+  });
+  const LOWER_SECRET = "demo_0123456789abcdefghij0"; // demo_ + 21 [a-z0-9]; fits ^[a-z][a-z0-9_]*$
+  const cases = {
+    redacted: `[REDACTED:${LOWER_SECRET}]`,
+    nonVaultTokenType: `[TOKEN:${LOWER_SECRET}:deadbeef12]`,
+    vaultTokenTypeSlot: `[TOKEN:tok_${LOWER_SECRET}_0123456789abcdef]` // smuggled as the vault <type> (glued to tok_)
+  };
+  for (const [name, text] of Object.entries(cases)) {
+    const detections = await filter.detect({
+      entries: collectStringEntries({ leaked: text }),
+      context: { direction: "response" }
+    });
+    assert.ok(
+      detections.some((d) => d.type === "secret"),
+      `lowercase-identifier secret in a genuine-shaped marker (${name}) must still be detected on the response`
+    );
+  }
+  // And a GENUINE marker with the same custom rule active is still skipped.
+  const genuine = await filter.detect({
+    entries: collectStringEntries({ ok: "[TOKEN:tok_email_a6d376389bb21964] and [REDACTED:email]" }),
+    context: { direction: "response" }
+  });
+  assert.deepEqual(genuine, [], "genuine markers stay skipped even with a lowercase-identifier custom rule active");
+});
+
+test("response marker skip: a FAKE base64url HAECHI_ENC that is NOT a valid envelope is scanned", async () => {
+  const filter = createDefaultFilterEngine();
+  // base64url-shaped inner that decodes to JSON WITHOUT the envelope signature
+  // (no kid/aadHash) is not a genuine marker — and a wrapped secret inside a
+  // base64url-shaped-but-not-envelope frame stays scanned.
+  const notEnvelope = Buffer.from(JSON.stringify({ alg: "A256GCM" }), "utf8").toString("base64url");
+  const decoyDetections = await filter.detect({
+    entries: collectStringEntries({ decoy: `value [HAECHI_ENC:${notEnvelope}] here` }),
+    context: { direction: "response" }
+  });
+  // The decoy base64url itself is not a credential, so no detection from it — but
+  // the point is the span is NOT excluded (verified by the wrapped-secret case
+  // above); here we assert a non-envelope base64url does not get treated as a
+  // genuine marker by smuggling a secret through it.
+  assert.ok(!decoyDetections.some((d) => d.type === "secret"), "the decoy base64url alone is not a secret");
+  const wrapped = Buffer.from(SYNTH_SECRET, "utf8").toString("base64url"); // base64url-shaped, decodes to a bare string, not an object
+  const wrappedDetections = await filter.detect({
+    entries: collectStringEntries({ leaked: `value [HAECHI_ENC:${wrapped}] here` }),
+    context: { direction: "response" }
+  });
+  // The base64url ENCODING of the secret hides it from the regex (it is opt-in
+  // decode-and-rescan territory), so we instead assert the marker span did not
+  // suppress a clear-text secret placed next to a non-envelope marker:
+  const adjacent = await filter.detect({
+    entries: collectStringEntries({ leaked: `[HAECHI_ENC:${notEnvelope}]${SYNTH_SECRET}` }),
+    context: { direction: "response" }
+  });
+  assert.ok(adjacent.some((d) => d.type === "secret"), "a secret glued to a non-genuine HAECHI_ENC marker is detected");
+  assert.ok(!wrappedDetections.some((d) => d.type === "secret"), "base64url-encoded secret is not regex-detectable (documented residual)");
+});
+
+test("response marker skip: GENUINE markers are STILL skipped (no self-flagging)", async () => {
+  const filter = createDefaultFilterEngine();
+  // A real vault token id, a non-vault <type>:<hex> token, and a real REDACTED
+  // type-name marker are recognized as genuine and excluded — no extra detection.
+  const detections = await filter.detect({
+    entries: collectStringEntries({
+      vaultToken: "email [TOKEN:tok_email_a6d376389bb21964] ok",     // tok_<type>_<16hex>
+      nonVaultToken: "card [TOKEN:card:0123456789ab] ok",            // <type>:<12hex> (core shortHash)
+      redacted: "value [REDACTED:email] ok"                          // type-name
+    }),
+    context: { direction: "response" }
+  });
+  assert.deepEqual(detections, [], "genuine token/redaction markers are not re-flagged");
+});
+
+test("response marker skip: a GENUINE HAECHI_ENC envelope (real encrypt) is STILL skipped", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-marker-"));
+  try {
+    const keyFile = join(dir, "dev.keys.json");
+    await initLocalKeyFile(keyFile, { force: true });
+    const crypto = createLocalCryptoProvider({ keyFile });
+    // Encrypt a SYNTHETIC value through the real provider, then base64url the
+    // envelope exactly as core's replacementFor does — a genuine HAECHI_ENC body.
+    const envelope = await crypto.encrypt({ plaintext: SYNTH_SECRET, aad: { context: {}, type: "secret" } });
+    const body = Buffer.from(JSON.stringify(envelope), "utf8").toString("base64url");
+    const filter = createDefaultFilterEngine();
+    const detections = await filter.detect({
+      entries: collectStringEntries({ encrypted: `value [HAECHI_ENC:${body}] here` }),
+      context: { direction: "response" }
+    });
+    assert.deepEqual(detections, [], "a genuine encrypt-envelope marker is not re-flagged");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("response-direction skips bare number leaves (metadata) but keeps strings and request numbers", async () => {
