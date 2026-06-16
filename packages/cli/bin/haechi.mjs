@@ -549,6 +549,8 @@ async function mcpStdioCommand(argv) {
   await runMcpStdioFilter({ runtime });
 }
 
+const STDERR_MODES = new Set(["filter", "drop", "inherit"]);
+
 async function mcpWrapCommand(argv) {
   const separator = argv.indexOf("--");
   if (separator === -1 || !argv[separator + 1]) {
@@ -558,19 +560,106 @@ async function mcpWrapCommand(argv) {
   const command = argv[separator + 1];
   const commandArgs = argv.slice(separator + 2);
 
+  // --stderr controls how the child's stderr crosses the local-process boundary.
+  // filter (default) runs each line through the same Haechi protection as MCP
+  // traffic before re-emitting; drop discards it; inherit is the raw passthrough
+  // (an explicit, opt-in local-process boundary). Unknown values fail closed.
+  const stderrMode = options.stderr === undefined ? "filter" : options.stderr;
+  if (!STDERR_MODES.has(stderrMode)) {
+    throw new Error(`mcp-wrap --stderr must be one of: filter | drop | inherit (got ${JSON.stringify(stderrMode)})`);
+  }
+
   const config = await loadConfig(options.config ?? DEFAULT_CONFIG_PATH);
   const runtime = createRuntime(config);
 
+  // "inherit" hands the child's stderr straight to the terminal (raw, unfiltered);
+  // filter/drop pipe it so the wrapper can inspect or discard each line.
   const child = spawn(command, commandArgs, {
-    stdio: ["pipe", "pipe", "inherit"]
+    stdio: ["pipe", "pipe", stderrMode === "inherit" ? "inherit" : "pipe"]
   });
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => child.kill(signal));
   }
 
+  if (stderrMode === "filter") {
+    pipeFilteredStderr({ runtime, child });
+  } else if (stderrMode === "drop") {
+    // Consume so the child's stderr pipe never fills and stalls the child, but
+    // re-emit nothing.
+    child.stderr?.resume();
+  }
+
   const { code } = await wrapMcpChild({ runtime, child });
   process.exitCode = code;
+}
+
+// Filter the child's stderr through the SAME protection the wrapper applies to
+// MCP traffic, then re-emit each safe line to the parent process.stderr. Each
+// complete line is protected as text via the runtime's haechi instance (redact/
+// mask rewrite detected secrets/PII in place); a block-action detection drops the
+// line entirely. Partial lines are buffered across chunk boundaries (split on \n;
+// hold the trailing partial, flushed on stream end).
+function pipeFilteredStderr({ runtime, child, stderr = process.stderr }) {
+  const source = child.stderr;
+  if (!source) {
+    return;
+  }
+  source.setEncoding("utf8");
+  let buffer = "";
+  // Serialize async protection so lines re-emit in source order even though
+  // protectStderrLine is async.
+  let queue = Promise.resolve();
+
+  function enqueue(line) {
+    queue = queue.then(async () => {
+      const safe = await protectStderrLine(runtime, line);
+      if (safe !== null) {
+        stderr.write(`${safe}\n`);
+      }
+    });
+  }
+
+  source.on("data", (chunk) => {
+    buffer += chunk;
+    let index;
+    while ((index = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, index);
+      buffer = buffer.slice(index + 1);
+      enqueue(line);
+    }
+  });
+  source.on("end", () => {
+    // Flush any trailing partial line (no terminating newline).
+    if (buffer.length > 0) {
+      enqueue(buffer);
+      buffer = "";
+    }
+  });
+}
+
+// Protect one stderr line as text. Returns the protected line (detected secrets/
+// PII redacted/masked in place), or null when a block-action detection means the
+// line must be dropped (not emitted). Uses the runtime's haechi stream/text
+// protector — the clean single-shot text entrypoint (protectText) that detects,
+// decides, and transforms a complete, self-contained text segment by offset, the
+// same logic the streaming delta channel commits with. A fresh protector per line
+// keeps no cross-line state (we already split on \n and buffer partials above).
+async function protectStderrLine(runtime, line) {
+  if (line.length === 0) {
+    return line;
+  }
+  const protector = runtime.haechi.createStreamProtector({
+    protocol: "mcp-stdio",
+    operation: "stderr",
+    direction: "response",
+    mode: runtime.config.policy.mode ?? runtime.config.mode
+  });
+  const result = await protector.protectText(line);
+  if (result.blocked) {
+    return null;
+  }
+  return result.text;
 }
 
 function parseOptions(argv) {
@@ -675,9 +764,9 @@ const COMMAND_HELP = {
     summary: "Filter MCP JSON-RPC traffic on stdin/stdout (one direction)."
   },
   "mcp-wrap": {
-    usage: "haechi mcp-wrap [--config haechi.config.json] -- <command> [args...]",
+    usage: "haechi mcp-wrap [--config haechi.config.json] [--stderr filter|drop|inherit] -- <command> [args...]",
     summary: "Wrap an MCP server with bidirectional stdio protection.",
-    detail: "Spawns <command>, applies the method allowlist + params protection client→server, and result protection + injection heuristics server→client. Drop-in for MCP client configs."
+    detail: "Spawns <command>, applies the method allowlist + params protection client→server, and result protection + injection heuristics server→client. Drop-in for MCP client configs. --stderr controls the child's stderr: filter (default) protects each line with the same policy before re-emitting, drop discards it, inherit passes it through raw (an explicit, opt-in local-process boundary). filter follows the configured policy mode — in dry-run/report-only it detects but does not transform (like the rest of the pipeline), so set policy.mode=enforce for stderr redaction to take effect."
   },
   auth: {
     usage: "haechi auth add --type user|service|agent [--scope k:v ...] [--label k=v ...]\n  haechi auth list [--config haechi.config.json]\n  haechi auth revoke <id> [--config haechi.config.json]",

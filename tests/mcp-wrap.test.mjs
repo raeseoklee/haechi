@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
-import { mkdtemp } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createRuntime } from "../packages/cli/runtime.mjs";
 import { initLocalKeyFile } from "../packages/crypto/index.mjs";
 import { wrapMcpChild } from "../packages/mcp-stdio/index.mjs";
+
+const CLI = resolve("packages/cli/bin/haechi.mjs");
 
 // A minimal MCP-ish server: answers tools/call with a result containing PII,
 // and proactively sends a server-initiated request (sampling/createMessage,
@@ -141,4 +143,154 @@ test("mcp-wrap propagates the child exit code", async () => {
   const exit = await wrapMcpChild({ runtime, child, input, output });
   assert.equal(exit.code, 3);
   input.end();
+});
+
+// --- mcp-wrap --stderr: child stderr boundary (P2-CR-006) -------------------
+// These exercise the CLI command (bin/haechi.mjs), which owns the stderr policy,
+// via a real subprocess so the child→parent stderr boundary is tested end-to-end
+// (the in-process wrapMcpChild tests above don't cover the CLI's stdio wiring).
+
+// A tiny fake MCP child (CommonJS .cjs so it can require node:readline). It emits
+// diagnostic lines on STDERR (the channel under test): a synthetic secret and a
+// card number (both hard-block → the line is dropped), a synthetic email (PII →
+// redacted in place), a synthetic phone (masked in place), and a clean line
+// (passthrough). It also answers requests on stdout so the bidirectional wrap
+// settles, but the assertions here only concern the stderr boundary. All values
+// are synthetic, never real secrets.
+const STDERR_SECRET = `sk-ant-api03-${"A".repeat(88)}`;
+const STDERR_CHILD_SCRIPT = `
+process.stderr.write("boot token ${STDERR_SECRET}\\n");
+process.stderr.write("contact minji.kim@example.com for help\\n");
+process.stderr.write("charged card 4242424242424242 today\\n");
+process.stderr.write("call me at 010-1234-5678 now\\n");
+process.stderr.write("server ready on stdio\\n");
+const readline = require("node:readline");
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } }) + "\\n");
+});
+lines.on("close", () => process.exit(0));
+`;
+
+// Enforce-mode config so detections actually transform/block (dry-run only
+// detects). card → block via the default policy.actions.
+async function writeStderrEnforceConfig(dir) {
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  const init = spawn(process.execPath, [CLI, "init", "--force"], { cwd: dir });
+  await new Promise((resolveExit, rejectExit) => {
+    init.once("error", rejectExit);
+    init.once("exit", (code) => (code === 0 ? resolveExit() : rejectExit(new Error(`init exit ${code}`))));
+  });
+  const configPath = join(dir, "haechi.config.json");
+  await writeFile(configPath, JSON.stringify({
+    mode: "enforce",
+    policy: {
+      mode: "enforce",
+      presets: ["korean-pii", "secrets-only", "llm-redact"],
+      defaultAction: "redact",
+      actions: { card: "block" }
+    },
+    keys: { provider: "local", keyFile },
+    audit: { path: join(dir, ".haechi", "audit.jsonl") }
+  }, null, 2), "utf8");
+  return configPath;
+}
+
+// Run `haechi mcp-wrap [--stderr <mode>]` against the fake child, drive one
+// stdin line, and capture the wrapper's own stderr (the filtered/dropped/raw
+// re-emission of the child's stderr).
+function runStderrWrap({ dir, stderrFlag, childScriptPath }) {
+  const flags = stderrFlag ? ["--stderr", stderrFlag] : [];
+  const args = [CLI, "mcp-wrap", ...flags, "--", process.execPath, childScriptPath];
+  const proc = spawn(process.execPath, args, { cwd: dir });
+  let stderr = "";
+  let stdout = "";
+  proc.stderr.setEncoding("utf8");
+  proc.stdout.setEncoding("utf8");
+  proc.stderr.on("data", (chunk) => { stderr += chunk; });
+  proc.stdout.on("data", (chunk) => { stdout += chunk; });
+  // Send one allowed request so the child responds and the wrap settles.
+  proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })}\n`);
+  proc.stdin.end();
+  return new Promise((resolveRun, rejectRun) => {
+    proc.once("error", rejectRun);
+    proc.once("exit", (code) => resolveRun({ code, stderr, stdout }));
+  });
+}
+
+async function makeStderrChildScript(dir) {
+  // .cjs so node runs it as CommonJS (the script uses require()).
+  const path = join(dir, "fake-mcp-child.cjs");
+  await writeFile(path, STDERR_CHILD_SCRIPT, "utf8");
+  return path;
+}
+
+test("mcp-wrap --stderr filter (default) redacts secrets/PII on the child's stderr", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-wrap-stderr-filter-"));
+  await writeStderrEnforceConfig(dir);
+  const childScriptPath = await makeStderrChildScript(dir);
+
+  // No --stderr flag → default is "filter".
+  const { stderr } = await runStderrWrap({ dir, stderrFlag: null, childScriptPath });
+
+  // No raw sensitive value crosses the boundary. The secret and the card are
+  // hard-block types → those lines are dropped entirely; the email is redacted
+  // and the phone is masked in place. The parent NEVER sees a raw value.
+  assert.doesNotMatch(stderr, /sk-ant-api03/);
+  assert.doesNotMatch(stderr, /minji\.kim@example\.com/);
+  assert.doesNotMatch(stderr, /4242424242424242/);
+  assert.doesNotMatch(stderr, /010-1234-5678/);
+  // The transform markers prove the lines were inspected and rewritten in place:
+  // email → [REDACTED:email], phone → masked. The clean line still passes through.
+  assert.match(stderr, /contact \[REDACTED:email\] for help/);
+  assert.match(stderr, /call me at 01\*+78 now/);
+  assert.match(stderr, /server ready on stdio/);
+  // The two hard-block lines were dropped, not emitted in any form.
+  assert.doesNotMatch(stderr, /boot token/);
+  assert.doesNotMatch(stderr, /charged card/);
+});
+
+test("mcp-wrap --stderr drop emits nothing from the child's stderr", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-wrap-stderr-drop-"));
+  await writeStderrEnforceConfig(dir);
+  const childScriptPath = await makeStderrChildScript(dir);
+
+  const { stderr } = await runStderrWrap({ dir, stderrFlag: "drop", childScriptPath });
+
+  // Nothing from the child's stderr (clean or sensitive) is re-emitted.
+  assert.doesNotMatch(stderr, /server ready on stdio/);
+  assert.doesNotMatch(stderr, /minji\.kim@example\.com/);
+  assert.doesNotMatch(stderr, /\[REDACTED:email\]/);
+  assert.doesNotMatch(stderr, /4242424242424242/);
+  assert.doesNotMatch(stderr, /sk-ant-api03/);
+  assert.doesNotMatch(stderr, /010-1234-5678/);
+});
+
+test("mcp-wrap --stderr inherit passes the child's stderr through raw", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-wrap-stderr-inherit-"));
+  await writeStderrEnforceConfig(dir);
+  const childScriptPath = await makeStderrChildScript(dir);
+
+  const { stderr } = await runStderrWrap({ dir, stderrFlag: "inherit", childScriptPath });
+
+  // inherit is the explicit, opt-in raw boundary: every value passes through
+  // unfiltered (secret, PII, card, phone, and the clean line).
+  assert.match(stderr, /sk-ant-api03/);
+  assert.match(stderr, /minji\.kim@example\.com/);
+  assert.match(stderr, /4242424242424242/);
+  assert.match(stderr, /010-1234-5678/);
+  assert.match(stderr, /server ready on stdio/);
+});
+
+test("mcp-wrap --stderr with an unknown value fails closed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-wrap-stderr-bad-"));
+  await writeStderrEnforceConfig(dir);
+  const childScriptPath = await makeStderrChildScript(dir);
+
+  const { code, stderr } = await runStderrWrap({ dir, stderrFlag: "bogus", childScriptPath });
+
+  // Unknown --stderr value throws a clear fail-closed error and a non-zero exit.
+  assert.notEqual(code, 0);
+  assert.match(stderr, /--stderr must be one of: filter \| drop \| inherit/);
 });

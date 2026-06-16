@@ -44,6 +44,38 @@ test("FAILS when a declared file is missing from the tarball", () => {
   assert.match(r.problems.join("\n"), /declared file missing.*README/);
 });
 
+test("passes when a bin target is present (string and object-map forms)", () => {
+  const stringForm = evaluateSatellitePackaging({
+    ...CLEAN,
+    manifest: { ...CLEAN.manifest, bin: "./index.mjs" }
+  });
+  assert.equal(stringForm.ok, true, stringForm.problems.join("; "));
+
+  const objectForm = evaluateSatellitePackaging({
+    ...CLEAN,
+    manifest: { ...CLEAN.manifest, bin: { "haechi-crypto-kms": "./index.mjs", "kms-aws": "./aws.mjs" } }
+  });
+  assert.equal(objectForm.ok, true, objectForm.problems.join("; "));
+});
+
+test("FAILS when a bin target is missing from the tarball (string form)", () => {
+  const r = evaluateSatellitePackaging({
+    ...CLEAN,
+    manifest: { ...CLEAN.manifest, bin: "./cli.mjs" } // cli.mjs not in files
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.problems.join("\n"), /bin target missing.*cli\.mjs/);
+});
+
+test("FAILS when a bin target is missing from the tarball (object-map form)", () => {
+  const r = evaluateSatellitePackaging({
+    ...CLEAN,
+    manifest: { ...CLEAN.manifest, bin: { "haechi-kms": "./index.mjs", "haechi-kms-cli": "./cli.mjs" } }
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.problems.join("\n"), /bin target missing.*cli\.mjs/);
+});
+
 test("FAILS when a test file leaks into the tarball", () => {
   const r = evaluateSatellitePackaging({
     ...CLEAN,

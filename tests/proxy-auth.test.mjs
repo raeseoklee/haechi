@@ -253,6 +253,86 @@ test("rate limit returns 429 after the per-minute budget and isolates identities
   }
 });
 
+test("auth provider that throws fails closed: 401, no upstream, no exception/stack leak, audit records provider_error", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-pthrow-"));
+  const { keyFile, auditPath, cryptoProvider } = await project(dir);
+
+  // The throw carries a secret-shaped message + stack we can grep for to prove
+  // neither the client body nor the audit event echoes the raw exception.
+  const secretInError = "boom-aws-AKIAIOSFODNN7EXAMPLE-subject=alice@corp.example";
+  const failingAuthProvider = {
+    async authenticate() {
+      throw new Error(secretInError);
+    }
+  };
+
+  let upstreamHits = 0;
+  const upstream = createServer((request, response) => {
+    upstreamHits += 1;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+
+  // Inline the startup (mirrors startProxy) so the throwing authProvider can be
+  // injected via createRuntime's providers argument; auth.provider "external"
+  // requires an injected authProvider.
+  const upstreamAddress = await listen(upstream);
+  const runtime = createRuntime({
+    mode: "enforce",
+    auth: { provider: "external" },
+    policy: { mode: "enforce", presets: [], defaultAction: "allow" },
+    keys: { keyFile }, audit: { path: auditPath },
+    target: { type: "vllm-openai", upstream: `http://127.0.0.1:${upstreamAddress.port}` }
+  }, { authProvider: failingAuthProvider, cryptoProvider });
+  const proxy = createHaechiProxy({ runtime, port: 0 });
+  const proxyAddress = await proxy.listen();
+  const base = `http://${proxyAddress.host}:${proxyAddress.port}`;
+
+  try {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer hae_anything" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] })
+    });
+
+    // (a) fail closed: rejected, generic client error, never forwarded upstream.
+    assert.equal(res.status, 401);
+    const bodyText = await res.text();
+    const body = JSON.parse(bodyText);
+    assert.equal(body.error, "haechi_auth_denied");
+    assert.equal(body.message, "Authentication failed");
+    assert.equal(upstreamHits, 0);
+    // No raw exception text/stack in the client body.
+    assert.doesNotMatch(bodyText, /boom-aws/);
+    assert.doesNotMatch(bodyText, /AKIA/);
+    assert.doesNotMatch(bodyText, /alice@corp\.example/);
+    assert.doesNotMatch(bodyText, /\bat \w/); // stack-frame shape ("at fn (file:line)")
+
+    // (b) audit records the fail-closed status (decision auth_denied / reason provider_error).
+    const audit = await readFile(auditPath, "utf8");
+    const lines = audit.trim().split("\n").map((l) => JSON.parse(l));
+    const denied = lines.find((l) => l.decision === "auth_denied");
+    assert.ok(denied, "expected an auth_denied audit event");
+    assert.equal(denied.reason, "provider_error");
+    assert.equal(denied.enforced, true);
+    assert.equal(denied.blocked, true);
+
+    // (c) no raw error message/stack and no raw subject/issuer leak into the audit;
+    // identity is null on the provider-error path (no keyed-hash subject/issuer either).
+    assert.equal(denied.identity, null);
+    assert.equal(denied.profile, null);
+    assert.doesNotMatch(audit, /boom-aws/);
+    assert.doesNotMatch(audit, /AKIA/);
+    assert.doesNotMatch(audit, /alice@corp\.example/);
+    assert.doesNotMatch(audit, /\bat \w/);
+
+    assert.equal((await verifyAuditChain(auditPath)).valid, true);
+  } finally {
+    await proxy.close();
+    upstream.close();
+  }
+});
+
 test("provider none keeps identity null and audit unchanged", async () => {
   const dir = await mkdtemp(join(tmpdir(), "haechi-pnone-"));
   const { keyFile, auditPath } = await project(dir);

@@ -4,6 +4,37 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const ALG = "AES-256-GCM";
 
+// Single source of truth for parsing + validating an on-disk local key file.
+// Both the provider's loadKeys() and initLocalKeyFile() (existing-file path)
+// go through here so the 32-byte key invariant is enforced once. Throws a
+// specific error per defect so a corrupted-but-present file is caught at init
+// time instead of failing later during encrypt/decrypt/token/bundle.
+//
+// requireActive: init demands an explicit status:"active" key; the provider
+// keeps its historical fallback to keys[0] when none is marked active.
+async function loadKeyFile(keyFile, { requireActive = false } = {}) {
+  const raw = JSON.parse(await readFile(keyFile, "utf8"));
+  if (!raw.keys?.length) {
+    throw new Error(`No keys found in ${keyFile}`);
+  }
+  const byKid = new Map();
+  for (const entry of raw.keys) {
+    const key = Buffer.from(entry.k, "base64url");
+    if (key.length !== 32) {
+      throw new Error("AES-256-GCM local key must be 32 bytes");
+    }
+    byKid.set(entry.kid, { kid: entry.kid, key });
+  }
+  const activeEntry = raw.keys.find((key) => key.status === "active") ?? (requireActive ? null : raw.keys[0]);
+  if (!activeEntry) {
+    throw new Error("No active key found in local key file");
+  }
+  return {
+    active: byKid.get(activeEntry.kid),
+    byKid
+  };
+}
+
 export function createLocalCryptoProvider({ keyFile }) {
   if (!keyFile) {
     throw new Error("Local crypto provider requires keyFile");
@@ -15,23 +46,7 @@ export function createLocalCryptoProvider({ keyFile }) {
     if (cachedKeys) {
       return cachedKeys;
     }
-    const raw = JSON.parse(await readFile(keyFile, "utf8"));
-    if (!raw.keys?.length) {
-      throw new Error(`No keys found in ${keyFile}`);
-    }
-    const byKid = new Map();
-    for (const entry of raw.keys) {
-      const key = Buffer.from(entry.k, "base64url");
-      if (key.length !== 32) {
-        throw new Error("AES-256-GCM local key must be 32 bytes");
-      }
-      byKid.set(entry.kid, { kid: entry.kid, key });
-    }
-    const activeEntry = raw.keys.find((key) => key.status === "active") ?? raw.keys[0];
-    cachedKeys = {
-      active: byKid.get(activeEntry.kid),
-      byKid
-    };
+    cachedKeys = await loadKeyFile(keyFile);
     return cachedKeys;
   }
 
@@ -102,15 +117,22 @@ export async function initLocalKeyFile(keyFile, { force = false } = {}) {
   await mkdir(dirname(keyFile), { recursive: true });
 
   let existing = null;
+  let fileExists = true;
   try {
     existing = JSON.parse(await readFile(keyFile, "utf8"));
-    if (!force) {
-      return { created: false, keyFile };
-    }
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw error;
     }
+    fileExists = false;
+  }
+
+  if (fileExists && !force) {
+    // A present key file must be usable, not merely present: validate the
+    // active key (base64url, 32 bytes) and every retired key before reporting
+    // success, so a corrupted file is rejected here rather than at first use.
+    await loadKeyFile(keyFile, { requireActive: true });
+    return { created: false, keyFile };
   }
 
   // Rotating with --force must not orphan existing envelopes/token vault

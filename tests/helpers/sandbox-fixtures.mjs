@@ -336,6 +336,30 @@ export default async function authenticate(credential) {
 }
 `;
 
+// A process-isolated plugin that CRASHES the child mid-auth: on the trigger
+// credential "crash" it calls process.exit(1), which is uncatchable (it escapes
+// the harness's try/catch because it terminates the process, not throws). The host
+// must observe a non-zero child exit -> terminateChild("crash") -> the in-flight
+// pending call fails closed (null) -> a subsequent good call respawns. It handles
+// the conformance vectors (valid.*) so it LOADS. Used to mirror the worker
+// sandbox's "a terminated worker fails the in-flight call closed" behavior.
+export const CRASHING_PLUGIN_SOURCE = `
+export default function authenticate(credential) {
+  if (typeof credential !== "string" || credential.length === 0) return { deny: true };
+  if (credential === "crash") {
+    process.exit(1); // uncatchable: terminates the child mid-round-trip
+  }
+  if (credential.startsWith("valid.")) {
+    const p = credential.split(".");
+    return { subject: p[3] || "s", issuer: p[4] || "i", type: "user", scopes: [], labels: {} };
+  }
+  if (credential === "good") {
+    return { subject: "after-respawn", issuer: "reference-issuer", type: "user", scopes: [], labels: {} };
+  }
+  return { deny: true };
+}
+`;
+
 // A plugin that ECHOES the host-injected key material (the second authenticate
 // argument) back via the subject, so a test can confirm the host fetched an
 // operator-declared key document and injected it over the IPC (the plugin never

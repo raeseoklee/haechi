@@ -14,6 +14,7 @@ import {
   PROCESS_PROBE_PLUGIN_SOURCE,
   POLLUTING_PLUGIN_SOURCE,
   HANGING_PLUGIN_SOURCE,
+  CRASHING_PLUGIN_SOURCE,
   NONDETERMINISTIC_PLUGIN_SOURCE,
   KEYMATERIAL_PLUGIN_SOURCE
 } from "./helpers/sandbox-fixtures.mjs";
@@ -373,4 +374,89 @@ itNet("kill-switch: closing the provider terminates the child and subsequent cal
   await provider.close();
   const after = await provider.authenticate(bearer("good-token-y"));
   assert.equal(after, null, "after close, authenticate fails closed (null)");
+});
+
+// ---------------------------------------------------------------------------
+// DoS-control parity with the worker sandbox (tests/plugin-sandbox.test.mjs):
+// (a) oversized wire, (b) over-capacity queue, (c) timeout (covered above),
+// (d) child crash/exit fails the in-flight call closed + the sandbox recovers.
+// Same option names + deny reasons as the worker, so the two boundaries match.
+// ---------------------------------------------------------------------------
+
+itNet("maxMessageBytes bounds the wire (oversized credential -> deny with reason oversized)", async () => {
+  const built = buildProcessPlugin();
+  const audit = createRecordingAuditSink();
+  // 256 bytes is enough for the conformance vectors (uuid + ~80-char token) but
+  // far below the 500-char credential below.
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit, maxMessageBytes: 256 }));
+  try {
+    const huge = "good-token-" + "x".repeat(500);
+    const result = await provider.authenticate(bearer(huge));
+    assert.equal(result, null, "an oversized message must deny");
+    // The emitted reason must be "oversized", not the generic "deny".
+    const denied = audit.eventsOfType("plugin.authenticate.deny");
+    assert.ok(denied.some((e) => e.reason === "oversized"),
+      `oversized path must emit reason "oversized" (got: ${JSON.stringify(denied.map((e) => e.reason))})`);
+  } finally {
+    await provider.close();
+  }
+});
+
+itNet("maxPendingCalls bounds concurrency (excess -> deny with reason over-capacity)", async () => {
+  const built = buildProcessPlugin({ entrySource: HANGING_PLUGIN_SOURCE });
+  const audit = createRecordingAuditSink();
+  // maxPendingCalls=1: while one call is in flight (hanging), a second is denied.
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit, timeoutMs: 1500, maxPendingCalls: 1 }));
+  try {
+    const first = provider.authenticate(bearer("hang")); // occupies the single slot
+    // Give the first a tick to enter the queue.
+    await new Promise((r) => setTimeout(r, 30));
+    const second = await provider.authenticate(bearer("good-token-x"));
+    assert.equal(second, null, "excess over maxPendingCalls must deny");
+    // The over-capacity path must emit reason "over-capacity", not the generic "deny".
+    const denied = audit.eventsOfType("plugin.authenticate.deny");
+    assert.ok(denied.some((e) => e.reason === "over-capacity"),
+      `over-capacity path must emit reason "over-capacity" (got: ${JSON.stringify(denied.map((e) => e.reason))})`);
+    await first; // let the first finish (times out)
+  } finally {
+    await provider.close();
+  }
+});
+
+itNet("a child crash mid-auth fails the in-flight call closed + child terminated{crash} + respawn", async () => {
+  const built = buildProcessPlugin({ entrySource: CRASHING_PLUGIN_SOURCE });
+  const audit = createRecordingAuditSink();
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built, { auditSink: audit }));
+  try {
+    // The plugin calls process.exit(1) on "crash": the child dies mid-round-trip,
+    // the exit handler runs terminateChild("crash"), and the pending call settles
+    // null -> authenticate fails closed.
+    const result = await provider.authenticate(bearer("crash"));
+    assert.equal(result, null, "a child crash must deny with null");
+    const terminated = audit.eventsOfType("plugin.worker.terminated");
+    assert.ok(terminated.some((e) => e.cause === "crash"),
+      `expected a terminated{crash} lifecycle event (got: ${JSON.stringify(terminated.map((e) => e.cause))})`);
+    // The sandbox stays consistent: the child respawns lazily (re-running the gate)
+    // and a subsequent good call works.
+    const after = await provider.authenticate(bearer("good"));
+    assert.ok(after, "the child respawns after a crash-terminate");
+  } finally {
+    await provider.close();
+  }
+});
+
+itNet("a child crash on one call cannot kill a sibling (single-occupancy serialization)", async () => {
+  const built = buildProcessPlugin({ entrySource: CRASHING_PLUGIN_SOURCE });
+  const provider = await createProcessIsolatedAuthProvider(sandboxOptions(built));
+  try {
+    // First call crashes the child; the second is a valid call that runs after the
+    // child respawns. Single-occupancy means the second never shared the dead child.
+    const crashed = provider.authenticate(bearer("crash"));
+    const ok = provider.authenticate(bearer("good"));
+    const [crashResult, okResult] = await Promise.all([crashed, ok]);
+    assert.equal(crashResult, null, "the crashing call denies");
+    assert.ok(okResult, "the sibling call survives and authenticates after respawn");
+  } finally {
+    await provider.close();
+  }
 });
