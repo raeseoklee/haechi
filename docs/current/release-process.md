@@ -74,6 +74,7 @@ npm audit signatures
 | `.github/workflows/dashboard-publish.yml` | `haechi-dashboard` | `dashboard-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/auth-oidc-publish.yml` | `haechi-auth-oidc` | `auth-oidc-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/ratelimit-redis-publish.yml` | `haechi-ratelimit-redis` | `ratelimit-redis-v<semver>` | satellite publish, same signed-artifacts path |
+| `.github/workflows/store-redis-publish.yml` | `haechi-store-redis` | `store-redis-v<semver>` | satellite publish, same signed-artifacts path |
 
 Each publish workflow triggers on `release: published` but is **guarded** so the two never cross-fire: the core job runs only for tags starting `v` (and re-validates `^v[0-9]+\.[0-9]+\.[0-9]+$`); the satellite job runs only for `crypto-kms-v…` (and re-validates `^crypto-kms-v[0-9]+\.[0-9]+\.[0-9]+$` **and** that the tag version equals the satellite's `package.json` version). The npmjs.com Trusted Publisher for each package is bound to its **specific workflow filename** — renaming a workflow file breaks its OIDC publish until the npm config is updated.
 
@@ -103,6 +104,7 @@ A Trusted Publisher **cannot** be configured for a name that does not exist yet 
 | `haechi-dashboard` | `dashboard-v<semver>` | `dashboard-publish.yml` | `satellites/dashboard/package.json` |
 | `haechi-auth-oidc` | `auth-oidc-v<semver>` | `auth-oidc-publish.yml` | `satellites/auth-oidc/package.json` |
 | `haechi-ratelimit-redis` | `ratelimit-redis-v<semver>` | `ratelimit-redis-publish.yml` | `satellites/ratelimit-redis/package.json` |
+| `haechi-store-redis` | `store-redis-v<semver>` | `store-redis-publish.yml` | `satellites/store-redis/package.json` |
 
 **Verify a satellite release** (same anchors as core):
 
@@ -116,6 +118,15 @@ npm view haechi-crypto-kms --json   # dist.attestations present; access "public"
 **0.9 satellites (new unscoped names):** `haechi-dashboard` and `haechi-auth-oidc` were first-published in 0.9 via the two-phase bootstrap above — a manual first publish to claim each name, then the Trusted Publisher, after which their tagged releases (`dashboard-v<semver>`, `auth-oidc-v<semver>`) publish via OIDC. The two 0.8 satellites already exist and ride their already-bootstrapped tags/workflows: `haechi-auth-jwt` on `auth-jwt-v<semver>` (`auth-jwt-publish.yml`) and `haechi-crypto-kms` on `crypto-kms-v<semver>` (`crypto-kms-publish.yml`) — no new Trusted Publisher configuration is required for those two.
 
 **`haechi-ratelimit-redis` (bootstrapped 2026-06-16):** the shared-store rate-limiter satellite followed the two-phase bootstrap above. `0.1.0` was the **manual first publish** (local passkey web auth, `--provenance=false`) that claimed the name — so it is **unattested** (recorded in §2). The Trusted Publisher (`ratelimit-redis-publish.yml`) was then configured, and every version from `0.1.1` on is published via the `ratelimit-redis-v<semver>` tag → workflow with provenance. The `redis` client is an **optional peer dependency**, imported only by consumers using the bundled Redis adapter (the store/client is injected), so core stays zero-dependency.
+
+**`haechi-store-redis` (new unscoped name — bootstrap pending):** the shared-store audit-sink + token-vault satellite (the 1.5.0 store-seam consumer) follows the same two-phase bootstrap. The publish workflow `store-redis-publish.yml` (tag `store-redis-v<semver>`) is already in place, but the name has not been claimed yet, so the FIRST publish must be the maintainer's manual `--provenance=false` bootstrap that creates `0.1.0`:
+
+```bash
+npm login --auth-type=web
+cd satellites/store-redis && npm publish --auth-type=web --provenance=false
+```
+
+Then configure the Trusted Publisher on npmjs.com (link `raeseoklee/haechi` + the workflow filename `store-redis-publish.yml`), and every version from `0.1.1` on publishes via the `store-redis-v<semver>` tag → workflow with provenance. `redis` is an **optional peer dependency** (the client is injected), so core stays zero-dependency. Until `0.1.0` is bootstrapped, the satellite lives in the repo as source only.
 
 ## 6. Deployment block conditions
 
