@@ -1,6 +1,6 @@
 # Haechi Risk Register and Release Gates
 
-- Status: Living document (tracks core 1.3.x)
+- Status: Living document (tracks core 1.4.x)
 - Date: 2026-06-16
 - Target version: 1.3.x
 - Branch: `main`
@@ -14,9 +14,9 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | Category | Judgment | Rationale |
 |---|---|---|
 | GitHub public | Allowed | Security limitations, threat model, and shared responsibility are documented |
-| GitHub release/tag | Allowed (`v1.3.3` released) | `v1.3.3` is the current release (a proactive-hardening patch over the CR2 cut `1.3.2`); all §5.7 and §5.8 (`CR2-001..008`) findings remain Resolved and G9/G10 are Pass |
-| npm stable | `haechi@1.3.3` published | `1.3.3` is an attested OIDC publish adding the response-direction marker-skip tightening + a cosign-signed GHCR container image, over the CR2-remediated `1.3.2` baseline |
-| Production use | Operator-gated; upgrade to `1.3.3` | Supported only with operator network controls, authz/authn, and key custody; operators should run the latest `haechi@1.3.3` (it carries the CR2 fixes from `1.3.2` plus the marker-skip hardening) before routing sensitive third-party upstream traffic through the proxy |
+| GitHub release/tag | Allowed (`v1.4.0` released) | `v1.4.0` is the current release (additive minor — the signed-plugin authoring CLI); all §5.7 / §5.8 findings remain Resolved and G9/G10/G11 are Pass |
+| npm stable | `haechi@1.4.0` published | `1.4.0` is an attested OIDC publish adding the `plugin-keygen`/`plugin-sign`/`plugin-verify` CLI over the security-remediated `1.3.x` baseline; no config/API break (`configVersion` stays `1`) |
+| Production use | Operator-gated; upgrade to `1.4.0` | Supported only with operator network controls, authz/authn, and key custody; operators should run the latest `haechi@1.4.0` (it carries every `1.3.x` security fix plus the plugin authoring CLI) before routing sensitive third-party upstream traffic through the proxy |
 
 ## 2. Release Gates
 
@@ -33,6 +33,7 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | G8 | 1.3.0 backend + detection coverage expansion | New protocol adapters for the **Anthropic Messages API** (`/v1/messages`, content-block + SSE `delta.text` with `event:`-line-preserving re-serialize) and the **Google Gemini API** (model-in-path `:generateContent`/`:streamGenerateContent` via an additive `:method`-suffix route matcher that leaves the exact-match adapters byte-identical); detection coverage expansion — cloud/SaaS provider keys (OpenAI/Anthropic/Google-OAuth/SendGrid/Twilio/npm/Azure, anchored) and international PII (FR/ES/JP + IT/SG/IN/DE/NL national IDs with checksum validators), each hard-block-vs-dial-eligible decision driven by measured collision rates (a non-numeric anchor or implausibly-rare shape is required for hard-block; a bare-digit run over a common length stays allowlist-clearable); a `bench:throughput` proxy load benchmark; the `haechi-ratelimit-redis` shared-store rate-limiter satellite (the WS3 seam's production consumer; the proxy now `await`s `rateLimiter.allow`); `haechi-dashboard` surfaces the per-request `correlationId`. Every change is additive — new `target.type`/detection-type/`privacy.profile` *values*, not new config keys (`configVersion` stays `1`); `tests/api-contract.test.mjs` green; core stays zero runtime dependency; core bumped to 1.3.0 (additive minor) | Pass |
 | G9 | 2026-06-16 full code-review remediation gate (shipped in 1.3.1) | `P0-CR-001` and `P1-CR-002` through `P1-CR-005` resolved or formally accepted; P2 items either resolved or scheduled with explicit non-blocking rationale; linked register updated. **All 13 `P*-CR-*` findings are Resolved (§5.7) and shipped in `haechi@1.3.1` (2026-06-16, attested OIDC publish); core bumped 1.3.0 → 1.3.1 (patch, remediation-only — no API/config surface change, `configVersion` stays `1`).** | Pass (`haechi@1.3.1`, 2026-06-16) |
 | G10 | 2026-06-16 code-review round 2 (CR2) remediation gate | The CR2 register (`code-review-risk-register-2026-06-16-round2.md`, §5.8) found **no P0/P1**; its three P2s (`CR2-001` proxy upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply bound) plus the P3 cluster (`CR2-004..008`) are all **Resolved and shipped in `haechi@1.3.2`** (`CR2-009` won't-fix, `CR2-010` accepted) and the linked register is updated. | Pass (`haechi@1.3.2`, 2026-06-16) |
+| G11 | 1.4.0 signed-plugin authoring CLI | First-party CLI for the 1.0 Ed25519 trust gate — `plugin-keygen` (private key `0600`, public key = trust anchor), `plugin-sign` (binds the exact entry bytes), `plugin-verify` (runtime-equivalent verification, fail-closed, `--allow-capability`); no private-key leak to stdout/audit; adversarially verified; the `plugin-signing-and-trust.md` curation runbook closes the P1-SEC-025 "operator must curate anchors" residual. Additive CLI surface (no config/API break, `configVersion` stays `1`); `tests/api-contract.test.mjs` green; core stays zero runtime dependency; core bumped 1.3.3 → 1.4.0 (additive minor). | Pass (`haechi@1.4.0`, 2026-06-17) |
 
 ## 3. P0 Distribution-Blocking Risk Status
 

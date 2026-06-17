@@ -8,7 +8,7 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.3-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.4-brightgreen)](docs/current/api-stability.md)
 
 **English** | [한국어](README.ko.md)
 
@@ -377,3 +377,5 @@ Haechi is deliberately scoped. These are real, current limitations — listed op
 1.3.0 expands backends and detection: protocol adapters for the **Anthropic Messages API** and **Google Gemini API**; cloud/SaaS provider-key detection and international PII (FR/ES/JP/IT/SG/IN/DE/NL national IDs, checksum-validated, each hard-block-vs-allowlist-clearable decision driven by measured collision rates); a proxy throughput benchmark; and the `haechi-ratelimit-redis` shared-store rate-limiter satellite. All additive (new `target.type`/detection-type/profile *values*, `configVersion` stays `1`).
 
 1.3.1 → 1.3.3 are security-remediation and hardening **patches** (no API/config change). 1.3.1 and 1.3.2 close two external code-review rounds — proxy header-boundary credential leak, hex IPv4-mapped IPv6 SSRF, response-header/streaming bounds, and non-JSON streaming inspection (1.3.1); proxy upstream-reader cancel-on-disconnect, token-vault audit-log hygiene, and plugin IPC reply bounds (1.3.2). 1.3.3 tightens the response-direction marker skip (a model can't wrap a secret in a fake `[TOKEN:…]` to evade scanning) and adds the cosign-signed GHCR container image.
+
+1.4.0 adds the first-party authoring CLI for the signed-plugin trust gate: `haechi plugin-keygen` (Ed25519 keypair — private key `0600`, public key is the trust anchor), `plugin-sign` (signs the exact entry-file bytes; `authProvider` must declare `readsCredentials`), and `plugin-verify` (runs the runtime's verification, fail-closed, with `--allow-capability`). A new [`plugin-signing-and-trust.md`](docs/current/plugin-signing-and-trust.md) runbook covers the keygen → sign → wire `auth.plugin.trustAnchors` → verify → rotate/pin/revoke lifecycle. Additive CLI surface (a **minor** under strict semver); no config change (`configVersion` stays `1`).

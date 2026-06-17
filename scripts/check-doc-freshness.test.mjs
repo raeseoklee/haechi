@@ -53,11 +53,11 @@ test("flags stale FRONT-MATTER banners on a living doc (EN + KO)", () => {
   assert.ok(koIds.includes("target-version-0.6.0"));
 });
 
-test("does NOT flag a fresh living-doc banner (1.3.x is current)", () => {
+test("does NOT flag a fresh living-doc banner (1.4.x is current)", () => {
   const fresh = [
     "# Haechi Risk Register and Release Gates",
-    "- Status: Living document (tracks core 1.3.x)",
-    "- Target version: 1.3.x"
+    "- Status: Living document (tracks core 1.4.x)",
+    "- Target version: 1.4.x"
   ].join("\n");
   assert.deepEqual(scanDoc("docs/current/risk-register-release-gate.md", fresh), []);
 });

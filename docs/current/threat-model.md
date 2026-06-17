@@ -1,6 +1,6 @@
 # Haechi Threat Model
 
-- Status: Living document (tracks core 1.3.x)
+- Status: Living document (tracks core 1.4.x)
 - Date: 2026-06-10
 
 ## 1. Assets Under Protection
