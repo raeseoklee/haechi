@@ -11,7 +11,12 @@ Haechi's audit log and token vault are **file-backed and single-writer** by defa
 - The **audit log** is a sha256 **hash chain**: each record links to the previous one's hash. Behind a load balancer with N replicas, each replica writing its own file produces N independent chains — there is no single tamper-evident history of the fleet.
 - The **token vault** is a whole-file vault rewritten on every mutation. That is **not safe with multiple writers**: concurrent replicas racing the read-modify-write lose tokens.
 
-A shared store (Redis) gives every replica **one authoritative chain** and **one vault**, serialized by a distributed lock so the chain never forks and no token is lost. The crypto, chain math, reveal governance, retention, and audit stay **core-owned** — the store only supplies the exclusive read-previous+persist (audit) and read-all+mutate+persist (token) primitives.
+A shared store (Redis) gives every replica **one authoritative chain** and **one vault**. Correctness is enforced by **server-side fences**, not by the lock:
+
+- The audit chain appends with a **compare-and-append fenced on the head `eventHash`** (one Lua script): a record commits only if the head still equals the `previousHash` it was built on. A stale or concurrent writer is **rejected**, and `transaction()` re-reads the new head and rebuilds the record on the true tail (bounded retry, fail-closed on exhaustion). The chain **cannot fork** even if two writers run at once.
+- The token vault applies its diff with a **compare-and-apply fenced on a version counter** (one Lua script): the diff commits only if the version is unchanged. A concurrent writer that bumped the version is **rejected**, and `mutate()` re-snapshots and re-runs over fresh state (bounded retry, fail-closed on exhaustion). No token write is **lost** and no partial diff lands.
+
+The Redis distributed lock is a **contention-reduction optimization** — it lowers how often those fences conflict-and-retry under load. It is **not** the safety mechanism: correctness holds even if the lock's TTL lapses mid-operation and two writers enter concurrently. The crypto, chain math, reveal governance, retention, and audit stay **core-owned** — the store only supplies the read-previous+fenced-append (audit) and the version-fenced diff-apply (token) primitives.
 
 ## Install
 
@@ -37,7 +42,7 @@ npm install haechi haechi-store-redis        # peer: haechi >=1.5.0 <2.0.0
 }
 ```
 
-The store knows **nothing** about the chain math, sanitization, or anchoring — `createAuditSink` owns those. The store only makes the read-previous+persist atomic across replicas (via a Redis lock) so the shared chain never forks.
+The store knows **nothing** about the chain math, sanitization, or anchoring — `createAuditSink` owns those. The store makes the read-previous+persist fork-proof across replicas via a **server-side compare-and-append fenced on the head `eventHash`** (not the lock): a record commits only if the head still equals the `previousHash` it was built on, so a stale writer is rejected and `transaction()` retries onto the true tail. `ready()` does a PING liveness check **and** a server-side write probe, so an ACL/readonly/quota-denied Redis (which still answers reads) reports `{ ok: false, reason: "redis_not_writable" }`.
 
 ### Token store (`haechi-store-redis/token-vault`)
 
@@ -55,7 +60,7 @@ The store knows **nothing** about the chain math, sanitization, or anchoring —
 
 > **The view is synchronous.** Core calls the view methods without `await` (it loads the whole map inside the lock and operates on the in-memory snapshot, then the store persists the diff — exactly like the built-in file store). The Redis adapter therefore `HGETALL`s the hash up front, hands a sync view over the snapshot, and writes the diff back with `hSet` / `hDel`.
 
-The store knows **nothing** about crypto, reveal governance, retention, or audit — `createTokenVault` owns those.
+The store knows **nothing** about crypto, reveal governance, retention, or audit — `createTokenVault` owns those. The store makes the read-all+mutate+persist lost-update-proof across replicas via a **server-side compare-and-apply fenced on a version counter** (not the lock): the diff commits only if the version is unchanged, so a concurrent writer is rejected and `mutate()` re-snapshots and retries over fresh state.
 
 ## Usage (Redis)
 
@@ -75,7 +80,7 @@ const auditSink = createAuditSink({
   store: createRedisAuditStore({ client })                   // keyPrefix defaults to "haechi:audit:"
 });
 
-// Shared, multi-writer-safe token vault across replicas.
+// Shared token vault across replicas (lost-update-proof via a version fence).
 await initLocalKeyFile("./.haechi/dev.keys.json");
 const cryptoProvider = createLocalCryptoProvider({ keyFile: "./.haechi/dev.keys.json" });
 const tokenVault = createTokenVault({
@@ -90,14 +95,14 @@ Wire `auditSink` / `tokenVault` into `createRuntime(config, { auditSink, tokenVa
 
 ### The Redis adapters
 
-`createRedisAuditStore({ client, keyPrefix = "haechi:audit:" })` stores the chain as a Redis **LIST** (`${keyPrefix}chain`, one JSON record per element) plus a **head** key (`${keyPrefix}head`, the last record's `auditIntegrity` for the cheap tail-read). `transaction()` wraps the read-previous+persist in a distributed lock (`${keyPrefix}lock`). It also exports a helper:
+`createRedisAuditStore({ client, keyPrefix = "haechi:audit:" })` stores the chain as a Redis **LIST** (`${keyPrefix}chain`, one JSON record per element) plus a **head** key (`${keyPrefix}head`, the last record's `auditIntegrity` for the cheap tail-read) and a **head-hash** key (`${keyPrefix}head:hash`, the last record's `eventHash`, the fence the compare-and-append guards on). `transaction()` re-reads the head, builds the record, and commits it with the fenced compare-and-append; on a conflict it retries onto the new tail (bounded, fail-closed). The distributed lock (`${keyPrefix}lock`) wraps the body only to reduce fence conflicts under contention. It also exports a helper:
 
 ```js
 import { readChain } from "haechi-store-redis/audit";
 const records = await readChain(client);   // the full ordered chain, parsed
 ```
 
-`createRedisTokenStore({ client, keyPrefix = "haechi:tv:" })` stores the vault as a single Redis **HASH** (`${keyPrefix}tokens`, field = token id, value = JSON record). `mutate()` loads the whole hash inside the lock (`${keyPrefix}lock`), runs the sync view, and persists the diff; `read()` is lock-free.
+`createRedisTokenStore({ client, keyPrefix = "haechi:tv:" })` stores the vault as a single Redis **HASH** (`${keyPrefix}tokens`, field = token id, value = JSON record) plus a **version** counter (`${keyPrefix}version`, the fence the compare-and-apply guards on). `mutate()` snapshots the version and the whole hash, runs the sync view to compute a diff, and applies it with the fenced compare-and-apply; on a version conflict it re-snapshots and retries (bounded, fail-closed). The distributed lock (`${keyPrefix}lock`) wraps the body only to reduce fence conflicts under contention. `read()` is lock-free.
 
 **`redis` is an optional peer dependency.** The client is injected, so these modules never import `redis` at the top level — install it only if you use the Redis path:
 
@@ -105,7 +110,7 @@ const records = await readChain(client);   // the full ordered chain, parsed
 npm install haechi-store-redis redis
 ```
 
-The distributed lock (`haechi-store-redis` `withRedisLock`) acquires via `SET key <token> NX PX ttlMs`, spins until acquired or it times out (fail-closed), and releases via a Lua compare-and-delete so it never deletes another holder's lock.
+The distributed lock (`haechi-store-redis` `withRedisLock`) acquires via `SET key <token> NX PX ttlMs`, spins until acquired or it times out (fail-closed), and releases via a Lua compare-and-delete so it never deletes another holder's lock. It is a **TTL lock with no fencing renewal**, so it is treated purely as a **contention-reduction optimization**: correctness comes from the audit compare-and-append and the token version compare-and-apply, which reject a stale writer even if the lock's TTL lapses mid-operation.
 
 For tests, inject a fake client exposing `set` / `get` / `del` / `eval` / `rPush` / `lRange` / `hSet` / `hGet` / `hDel` / `hGetAll` / `ping` — no SDK or live Redis required.
 
