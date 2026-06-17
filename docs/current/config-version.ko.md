@@ -1,6 +1,6 @@
 # Haechi `configVersion` & 업그레이드 노트
 
-- 상태: Living document (코어 1.3.x 추적)
+- 상태: Living document (코어 1.5.x 추적)
 
 `configVersion`는 `haechi.config.json`(및 `haechi.config.example.json`) 최상위에 찍히는 단일 정수입니다. 향후 호환성을 깨는 설정 스키마 변경이 구체적으로 게이트할 수 있는 **버전 앵커**로서, 다른 Haechi 빌드가 쓴 설정을 조용히 잘못 읽는 일을 막습니다.
 

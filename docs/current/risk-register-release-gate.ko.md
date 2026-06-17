@@ -1,8 +1,8 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Living document(core 1.4.x 추적)
+- 문서 상태: Living document(core 1.5.x 추적)
 - 작성일: 2026-06-16
-- 기준 버전: 1.4.x
+- 기준 버전: 1.5.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -14,9 +14,9 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
-| GitHub release/tag | 허용 (`v1.4.0` 릴리스됨) | `v1.4.0`이 현재 릴리스(additive minor — signed-plugin 저작 CLI); §5.7 / §5.8 항목은 모두 Resolved 유지, G9/G10/G11은 Pass |
-| npm stable | `haechi@1.4.0` publish됨 | `1.4.0`은 보안 교정된 `1.3.x` 기준 위에 `plugin-keygen`/`plugin-sign`/`plugin-verify` CLI를 더한 attested OIDC publish; config/API 파괴 없음(`configVersion`은 `1` 유지) |
-| production use | 운영자 게이트; `1.4.0`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 최신 `haechi@1.4.0`(모든 `1.3.x` 보안 수정 + 플러그인 저작 CLI 포함)을 실행해야 함 |
+| GitHub release/tag | 허용 (`v1.5.0` 릴리스됨) | `v1.5.0`이 현재 릴리스(additive minor — 수평 확장을 위한 주입 가능한 audit/token-vault 저장소 시임); §5.7 / §5.8 항목은 모두 Resolved 유지, G9–G12는 Pass |
+| npm stable | `haechi@1.5.0` publish됨 | `1.5.0`은 `1.4.x` 기준 위에 `createAuditSink`/`createTokenVault` 저장소 시임(파일 기본값 바이트 동일)을 더한 attested OIDC publish; config/API 파괴 없음(`configVersion`은 `1` 유지) |
+| production use | 운영자 게이트; `1.5.0`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 여러 replica를 운영하는 운영자는 공유 저장소(`haechi-store-redis` 위성)를 주입해 audit 해시 체인과 token vault가 플릿 전체에서 유지되도록 해야 함 |
 
 ## 2. 릴리스 게이트
 
@@ -34,6 +34,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G9 | 2026-06-16 전체 코드리뷰 보완 게이트 (1.3.1로 발행) | `P0-CR-001` 및 `P1-CR-002`부터 `P1-CR-005`까지 해결 또는 책임자 명시 수용; P2 항목은 해결 또는 명시적 non-blocking 근거와 일정 기록; 연결된 등록부 갱신. **13개 `P*-CR-*` 항목이 모두 Resolved이며(§5.7) `haechi@1.3.1`(2026-06-16, attested OIDC publish)로 발행되었습니다; core가 1.3.0 → 1.3.1로 bump(patch, 보완 전용 — API/config 표면 변경 없음, `configVersion`은 `1` 유지)되었습니다.** | Pass (`haechi@1.3.1`, 2026-06-16) |
 | G10 | 2026-06-16 코드리뷰 round 2 (CR2) 보완 게이트 | CR2 등록부(`code-review-risk-register-2026-06-16-round2.md`, §5.8)는 **P0/P1을 발견하지 못했습니다**; 세 개의 P2(`CR2-001` 프록시 upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply 경계)와 P3 묶음(`CR2-004..008`)이 모두 **Resolved이며 `haechi@1.3.2`로 발행되었고**(`CR2-009` won't-fix, `CR2-010` accepted) 연결된 등록부가 갱신되었습니다. | Pass (`haechi@1.3.2`, 2026-06-16) |
 | G11 | 1.4.0 signed-plugin 저작 CLI | 1.0 Ed25519 trust gate를 위한 1차 저작 CLI — `plugin-keygen`(개인키 `0600`, 공개키 = trust anchor), `plugin-sign`(정확한 entry 바이트 바인딩), `plugin-verify`(런타임 동등 검증, fail-closed, `--allow-capability`); 개인키가 stdout/audit로 유출되지 않음; 적대적 검증 완료; `plugin-signing-and-trust.md` 큐레이션 런북이 P1-SEC-025 "운영자가 앵커를 큐레이션해야 함" 잔여를 해소. additive CLI 표면(config/API 파괴 없음, `configVersion`은 `1` 유지); `tests/api-contract.test.mjs` green; 코어는 zero runtime dependency 유지; 코어 1.3.3 → 1.4.0(additive minor)로 bump. | Pass (`haechi@1.4.0`, 2026-06-17) |
+| G12 | 1.5.0 수평 확장 저장소 시임 | audit sink와 token vault가 주입 가능한 **store**를 갖게 되어, 공유 저장소가 sha256 해시 체인 + token vault를 replica 전반에서 뒷받침할 수 있음(프로세스별 / 단일 writer 플릿 한계를 해소). `createAuditSink({store})` / `createTokenVault({store})` + 기본 `createFileAuditStore`/`createFileTokenStore`; 보안에 결정적인 chaining / `sanitizeAudit` / reveal governance / retention은 코어에 남고, store는 배타적 read-previous+persist(audit) / mutate+read(vault) 프리미티브만 추상화. 적대적 검증 완료: 파일 기본값 바이트 동일, chain 연산은 이전과 diff 동일, 비파일 store에서도 시임 동작, 동시 append/tokenize가 비분기·무손실 유지, CR2-002 audit-no-plaintext 유지. 새 export는 `api-stability.md` + `tests/api-contract.test.mjs`에 frozen; `createJsonlAuditSink`/`createLocalTokenVault`는 하위호환 래퍼; 코어는 zero runtime dependency 유지; 코어 1.4.0 → 1.5.0(additive minor)로 bump. `haechi-store-redis` 위성이 운영 소비자. | Pass (`haechi@1.5.0`, 2026-06-17) |
 
 ## 3. P0 배포 차단 리스크 상태
 

@@ -86,12 +86,12 @@ export const INLINE_PATTERNS = [
   {
     id: "only-current-0.3.x",
     re: /Only the current\b[^\n]*0\.3\.x/i,
-    message: "stale support window 'Only the current 0.3.x' (current line is 1.4.x)"
+    message: "stale support window 'Only the current 0.3.x' (current line is 1.5.x)"
   },
   {
     id: "haechi-0.3.x",
     re: /\bHaechi 0\.3\.x\b/i,
-    message: "stale version label 'Haechi 0.3.x' (current line is 1.4.x)"
+    message: "stale version label 'Haechi 0.3.x' (current line is 1.5.x)"
   },
   {
     id: "0.2-only-supports",
@@ -105,7 +105,7 @@ export const INLINE_PATTERNS = [
     // does not collide with the api-stability.md "| `0.3.x` |" support-line
     // table row, which is a legitimate historical support-window reference.
     re: /\bin 0\.3\.x\b/i,
-    message: "stale current-behavior version token 'in 0.3.x' (current line is 1.4.x)"
+    message: "stale current-behavior version token 'in 0.3.x' (current line is 1.5.x)"
   }
 ];
 
@@ -122,12 +122,12 @@ export const FRONTMATTER_PATTERNS = [
     id: "target-version-0.6.0",
     // EN "- Target version: 0.6.0" or KO "- 기준 버전: 0.6.0"
     re: /^\s*-\s*(?:Target version|기준 버전):\s*0\.6\.0\b/i,
-    message: "stale front-matter 'Target version: 0.6.0' on a living doc (current line is 1.4.x)"
+    message: "stale front-matter 'Target version: 0.6.0' on a living doc (current line is 1.5.x)"
   },
   {
     id: "target-version-1.0.0",
     re: /^\s*-\s*(?:Target version|기준 버전):\s*1\.0\.0\b/i,
-    message: "stale front-matter 'Target version: 1.0.0' on a living doc (current line is 1.4.x)"
+    message: "stale front-matter 'Target version: 1.0.0' on a living doc (current line is 1.5.x)"
   }
 ];
 

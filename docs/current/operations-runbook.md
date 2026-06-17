@@ -1,6 +1,6 @@
 # Haechi Operations Runbook (Day-2)
 
-- Status: Living document (tracks core 1.4.x)
+- Status: Living document (tracks core 1.5.x)
 
 A practical guide to running Haechi in production: deploy, configure via the
 env-var overlay, monitor with health/readiness/metrics, shut down gracefully,

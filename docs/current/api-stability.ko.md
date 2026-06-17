@@ -29,10 +29,10 @@
 | `haechi/runtime` — `createRuntime`, `normalizeConfig` (config shape), `defaultConfig`, `loadConfig`, `writeDefaultConfig`, `isValidPort`, `DEFAULT_CONFIG_PATH` | **FROZEN** |
 | `haechi/auth` — `authProvider` 계약, `buildIdentity`, `buildExternalIdentity`, `validateLabels`, `createBearerAuthProvider`, token store (`readAuthStore`, `addToken`, `listTokens`, `revokeToken`), `DEFAULT_ALLOWED_LABEL_KEYS` | **FROZEN** |
 | `haechi/crypto` — `cryptoProvider` 계약, `assertCryptoProviderConformance`, `canonicalize`, `createLocalCryptoProvider`, `initLocalKeyFile` | **FROZEN** |
-| `haechi/audit` — audit **event schema** (§2.3), `verifyAuditChain`, `sanitizeAudit`, `createJsonlAuditSink`, `readAuditSummary`, `FORBIDDEN_KEYS` | **FROZEN** |
+| `haechi/audit` — audit **event schema** (§2.3), `verifyAuditChain`, `sanitizeAudit`, `createJsonlAuditSink`, `readAuditSummary`, `FORBIDDEN_KEYS`, 그리고 1.5.0 주입 가능한 store 시임 `createAuditSink`, `createFileAuditStore`, `buildIntegrityRecord` | **FROZEN** |
 | `haechi/policy` — `buildPolicy`, `createPolicyEngine`, `createPolicyProfiles`, `validatePolicy`, `ACTION_STRENGTH` (action ordering) | **FROZEN** |
 | `haechi/filter` — `createDefaultFilterEngine`, `detectEntry`, 그리고 **rule/detection shape** | **FROZEN** |
-| `haechi/token-vault` — `createLocalTokenVault`, `readVault`, token format, reveal-governance 계약 | **FROZEN** |
+| `haechi/token-vault` — `createLocalTokenVault`, `readVault`, token format, reveal-governance 계약, 그리고 1.5.0 주입 가능한 store 시임 `createTokenVault`, `createFileTokenStore` | **FROZEN** |
 | `haechi/protocol-adapters` — `createProtocolAdapter`, `knownProtocolAdapters`, adapter classification 계약 | **FROZEN** |
 | `haechi/plugin` — `validatePluginManifest`, `validatePluginManifestFile`, manifest schema, 1.0 signed-plugin sandbox 표면 | **FROZEN** |
 | `haechi/proxy` — `createHaechiProxy`, `assertSafeProxyBind`, `DEFAULT_PROXY_PORT` | **FROZEN BEHAVIOR + wire/contract** (사람이 읽는 log/error **텍스트**는 변경 가능) |

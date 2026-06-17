@@ -1,6 +1,6 @@
 # Haechi Release Process
 
-- Status: Living document (tracks core 1.4.x)
+- Status: Living document (tracks core 1.5.x)
 - Date: 2026-06-10
 
 ## 1. Local Release Verification
