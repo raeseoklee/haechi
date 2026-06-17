@@ -11,8 +11,89 @@ const AUDIT_ID_DOMAIN = "haechi:token-vault:audit-id:v1";
 // this shape is treated as a misused raw value and never written verbatim.
 const VAULT_TOKEN_SHAPE = /^tok_[a-z0-9_]+_[a-f0-9]{16,}$/;
 
-export function createLocalTokenVault({
-  path,
+// A token STORE abstracts the token-record map + the exclusive mutation section
+// so the SAME core-owned tokenization can sit on a whole-file vault today and a
+// shared store (e.g. Redis) in a future satellite — the current whole-file
+// rewrite is not safe with multiple writers, so a shared store needs its own
+// exclusive critical section. The contract is:
+//
+//   async mutate(fn) — runs `fn` inside an EXCLUSIVE critical section that
+//     serializes concurrent mutations. `fn` receives a MUTABLE view
+//     { get(token), set(token, record), delete(token), entries() } over the
+//     token-record map, and the store persists the changes ATOMICALLY when `fn`
+//     resolves. mutate() returns `fn`'s return value. This is the
+//     multi-writer-safety primitive.
+//   async read(fn) — read-only access. `fn` receives { get(token), entries() }
+//     over a FRESH snapshot (no lock, matching how reveal/detokenize/export read
+//     today). read() returns `fn`'s value.
+//
+// The store deliberately knows NOTHING about crypto, reveal governance,
+// retention, or audit — those stay core-owned in createTokenVault so a non-core
+// store can never fork or weaken them. Prune-on-mutation is also core-owned: the
+// core deletes expired entries from the view before each operation, so the file
+// store persists the pruning on the trailing writeVault (no store cooperation
+// needed) and the in-memory store sees the same deletions.
+
+// createFileTokenStore implements the store contract over the CURRENT vault
+// mechanism: a `${path}.lock` exclusive section wrapping mkdir + readVault +
+// writeVault, with the view operating on vault.tokens in memory. The on-disk
+// vault JSON format (version/createdAt/tokens, 2-space, trailing newline,
+// temp+rename, 0600) stays byte-identical to the pre-seam vault.
+export function createFileTokenStore({ path }) {
+  if (!path) {
+    throw new Error("file token store requires path");
+  }
+
+  return {
+    async mutate(fn) {
+      await mkdir(dirname(path), { recursive: true });
+      return withFileLock(`${path}.lock`, async () => {
+        const vault = await readVault(path);
+        const result = await fn(mutableView(vault.tokens));
+        await writeVault(path, vault);
+        return result;
+      });
+    },
+
+    async read(fn) {
+      const vault = await readVault(path);
+      return fn(readView(vault.tokens));
+    }
+  };
+}
+
+// A mutable view over a token-record map (the file store backs this with
+// vault.tokens; the in-memory store with a Map). get/set/delete operate on the
+// live map so the store persists whatever the mutation left behind.
+function mutableView(tokens) {
+  return {
+    get: (token) => tokens[token],
+    set: (token, record) => {
+      tokens[token] = record;
+    },
+    delete: (token) => {
+      delete tokens[token];
+    },
+    entries: () => Object.entries(tokens)
+  };
+}
+
+function readView(tokens) {
+  return {
+    get: (token) => tokens[token],
+    entries: () => Object.entries(tokens)
+  };
+}
+
+// createTokenVault holds ALL the SECURITY-CRITICAL, core-owned logic:
+// mutationQueue serialization (cross-call), deterministic-vs-random token id
+// derivation, encrypt/decrypt, reveal governance (revealPolicy gate +
+// reasonCodes + safeAuditToken + recordVaultEvent), retention
+// (expiresAt/prune-on-mutation), detokenize, purge/purgeExpired,
+// exportMetadata, and capabilities. The store only supplies the exclusive
+// mutate/read primitive over the token-record map.
+export function createTokenVault({
+  store,
   cryptoProvider,
   revealPolicy = "disabled",
   retentionDays = 30,
@@ -20,8 +101,8 @@ export function createLocalTokenVault({
   deterministic = false,
   deterministicTypes = null
 }) {
-  if (!path) {
-    throw new Error("Local token vault requires path");
+  if (!store || typeof store.mutate !== "function" || typeof store.read !== "function") {
+    throw new Error("token vault requires a store with mutate(fn) and read(fn) methods");
   }
   if (!cryptoProvider) {
     throw new Error("Local token vault requires cryptoProvider");
@@ -37,14 +118,29 @@ export function createLocalTokenVault({
     return !deterministicTypes || deterministicTypes.includes(type);
   }
 
+  // The mutationQueue (cross-call serialization) stays in core, wrapping
+  // store.mutate. Together with the store's own exclusive critical section this
+  // keeps concurrent tokenize/purge from corrupting or losing tokens.
   let mutationQueue = Promise.resolve();
   async function enqueueMutation(operation) {
-    const mutation = mutationQueue.then(async () => {
-      await mkdir(dirname(path), { recursive: true });
-      return withFileLock(`${path}.lock`, operation);
-    });
+    const mutation = mutationQueue.then(() => store.mutate(operation));
     mutationQueue = mutation.catch(() => {});
     return mutation;
+  }
+
+  // Prune expired entries from the mutable view before each operation. For the
+  // file store this deletes from the in-memory map so they are gone after the
+  // trailing writeVault; for any store the deletions are persisted by mutate().
+  // Returns the number pruned (purgeExpired counts on this).
+  function pruneExpiredView(view, now = Date.now()) {
+    let purged = 0;
+    for (const [token, record] of view.entries()) {
+      if (record.expiresAt && Date.parse(record.expiresAt) < now) {
+        view.delete(token);
+        purged += 1;
+      }
+    }
+    return purged;
   }
 
   // The audit `token` field must never carry a raw secret. A legitimate token
@@ -122,14 +218,13 @@ export function createLocalTokenVault({
         })).slice(0, 32)}`
         : `tok_${type}_${shortHash(`${plaintext}:${randomBytes(16).toString("hex")}`)}`;
 
-      return enqueueMutation(async () => {
-        const vault = await readVault(path);
-        pruneExpiredTokens(vault);
+      return enqueueMutation(async (view) => {
+        pruneExpiredView(view);
 
-        const existing = vault.tokens[token];
+        const existing = view.get(token);
         if (existing) {
           existing.expiresAt = addDays(new Date(), retentionDays).toISOString();
-          await writeVault(path, vault);
+          view.set(token, existing);
           return { token, type, reused: true };
         }
 
@@ -140,15 +235,14 @@ export function createLocalTokenVault({
           type,
           context
         };
-        vault.tokens[token] = {
+        view.set(token, {
           type,
           createdAt: createdAt.toISOString(),
           expiresAt: addDays(createdAt, retentionDays).toISOString(),
           metadata: sanitizeMetadata(metadata),
           envelope: await cryptoProvider.encrypt({ plaintext, aad }),
           aad
-        };
-        await writeVault(path, vault);
+        });
         return { token, type };
       });
     },
@@ -166,8 +260,7 @@ export function createLocalTokenVault({
       // token); the message itself never interpolates the token argument.
       let reasonCode = "reveal_error";
       try {
-        const vault = await readVault(path);
-        const record = vault.tokens[token];
+        const record = await store.read((view) => view.get(token));
         if (!record) {
           reasonCode = "unknown_token";
           throw new Error("Unknown token");
@@ -210,12 +303,19 @@ export function createLocalTokenVault({
     // reachable through the proxy's explicit detokenizeResponses opt-in and is
     // limited to the caller-supplied token set. Audited by count, no plaintext.
     async detokenize({ tokens }) {
-      const vault = await readVault(path);
+      const records = await store.read((view) => {
+        const found = new Map();
+        for (const token of tokens) {
+          found.set(token, view.get(token));
+        }
+        return found;
+      });
+
       const values = new Map();
       let skipped = 0;
 
       for (const token of tokens) {
-        const record = vault.tokens[token];
+        const record = records.get(token);
         if (!record || (record.expiresAt && Date.parse(record.expiresAt) < Date.now())) {
           skipped += 1;
           continue;
@@ -237,36 +337,30 @@ export function createLocalTokenVault({
       return values;
     },
     async purge({ token }) {
-      return enqueueMutation(async () => {
-        const vault = await readVault(path);
-        pruneExpiredTokens(vault);
-        const existed = Boolean(vault.tokens[token]);
-        delete vault.tokens[token];
-        await writeVault(path, vault);
-        await recordVaultEvent({
-          operation: "token-vault:purge",
-          decision: "purge",
-          token
-        });
-        return { token, purged: existed, purgedAt: new Date().toISOString() };
+      const existed = await enqueueMutation(async (view) => {
+        pruneExpiredView(view);
+        const present = Boolean(view.get(token));
+        view.delete(token);
+        return present;
       });
+      await recordVaultEvent({
+        operation: "token-vault:purge",
+        decision: "purge",
+        token
+      });
+      return { token, purged: existed, purgedAt: new Date().toISOString() };
     },
     async purgeExpired() {
-      return enqueueMutation(async () => {
-        const vault = await readVault(path);
-        const purged = pruneExpiredTokens(vault);
-        await writeVault(path, vault);
-        await recordVaultEvent({
-          operation: "token-vault:purge-expired",
-          decision: "purge_expired",
-          count: purged
-        });
-        return { purged, purgedAt: new Date().toISOString() };
+      const purged = await enqueueMutation(async (view) => pruneExpiredView(view));
+      await recordVaultEvent({
+        operation: "token-vault:purge-expired",
+        decision: "purge_expired",
+        count: purged
       });
+      return { purged, purgedAt: new Date().toISOString() };
     },
     async exportMetadata({ type = null } = {}) {
-      const vault = await readVault(path);
-      return Object.entries(vault.tokens)
+      return store.read((view) => view.entries()
         .filter(([, record]) => !type || record.type === type)
         .map(([token, record]) => ({
           token,
@@ -274,9 +368,37 @@ export function createLocalTokenVault({
           createdAt: record.createdAt,
           expiresAt: record.expiresAt,
           metadata: sanitizeMetadata(record.metadata ?? {})
-        }));
+        })));
     }
   };
+}
+
+// Thin back-compat wrapper: the original file-backed vault is now
+// createTokenVault over createFileTokenStore. Its returned shape (id, version,
+// capabilities, tokenize, reveal, detokenize, purge, purgeExpired,
+// exportMetadata) and on-disk bytes are unchanged, so existing call sites
+// (runtime.mjs injection, tests) keep working untouched.
+export function createLocalTokenVault({
+  path,
+  cryptoProvider,
+  revealPolicy = "disabled",
+  retentionDays = 30,
+  auditSink = null,
+  deterministic = false,
+  deterministicTypes = null
+}) {
+  if (!path) {
+    throw new Error("Local token vault requires path");
+  }
+  return createTokenVault({
+    store: createFileTokenStore({ path }),
+    cryptoProvider,
+    revealPolicy,
+    retentionDays,
+    auditSink,
+    deterministic,
+    deterministicTypes
+  });
 }
 
 export async function readVault(path) {
@@ -299,17 +421,6 @@ async function writeVault(path, vault) {
   const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(vault, null, 2)}\n`, { mode: 0o600 });
   await rename(tempPath, path);
-}
-
-function pruneExpiredTokens(vault, now = Date.now()) {
-  let purged = 0;
-  for (const [token, record] of Object.entries(vault.tokens)) {
-    if (record.expiresAt && Date.parse(record.expiresAt) < now) {
-      delete vault.tokens[token];
-      purged += 1;
-    }
-  }
-  return purged;
 }
 
 function sanitizeMetadata(metadata) {
