@@ -1,6 +1,6 @@
 {
   "name": "haechi-auth-jwt",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Headless JWKS bearer (JWT) authProvider satellite for Haechi — node: builtins only, PII-safe identity.",
   "license": "Apache-2.0",
   "type": "module",
