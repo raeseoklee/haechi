@@ -228,6 +228,7 @@ const KNOWN_KEYS = new Set([
   "redirectUri",
   "scopes",
   "returnToAllowlist",
+  "trustedEndpointHosts",
   "sessionTtlSeconds",
   "idleTtlSeconds",
   "maxAgeSeconds",
@@ -404,6 +405,37 @@ export function normalizeOidcConfig(options = {}) {
     returnToAllowlist = options.returnToAllowlist.length > 0 ? options.returnToAllowlist : ["/"];
   }
 
+  // trustedEndpointHosts: operator-PINNED allowlist of additional bare hostnames
+  // permitted to serve this IdP's discovered endpoints (authorization/token/jwks/
+  // end_session) when they differ from the issuer host — e.g. an Azure AD B2C /
+  // Auth0 custom-domain whose issuer is https://login.contoso.com but whose
+  // endpoints live on https://contoso.b2clogin.com. It RELAXES the same-host
+  // discovery check ONLY (never https, never the per-egress SSRF re-check, never
+  // the issuer-confusion guard) and is built EXCLUSIVELY from operator config —
+  // never from discovery-document content — so an attacker controlling the
+  // discovery doc cannot introduce a new host (mix-up defence stands). Symmetric
+  // with PR-1's createJwtVerifier option. Empty/absent => today's strict
+  // single-origin behavior (zero behavior change by default).
+  let trustedEndpointHosts = [];
+  if (options.trustedEndpointHosts !== undefined && options.trustedEndpointHosts !== null) {
+    if (!Array.isArray(options.trustedEndpointHosts)) {
+      throw new Error("normalizeOidcConfig 'trustedEndpointHosts' must be an array of bare hostnames");
+    }
+    const normalized = [];
+    for (const entry of options.trustedEndpointHosts) {
+      if (typeof entry !== "string" || !entry.trim()) {
+        throw new Error("normalizeOidcConfig 'trustedEndpointHosts' entries must be a non-empty hostname string");
+      }
+      if (/[\s/:]/.test(entry) || entry.includes("://")) {
+        throw new Error(
+          "normalizeOidcConfig 'trustedEndpointHosts' entries must be a bare hostname (no scheme, path, port, or whitespace)"
+        );
+      }
+      normalized.push(entry.toLowerCase());
+    }
+    trustedEndpointHosts = normalized;
+  }
+
   // TTLs.
   const sessionTtlSeconds = boundedIntField(options.sessionTtlSeconds, "sessionTtlSeconds", {
     min: 1,
@@ -505,6 +537,7 @@ export function normalizeOidcConfig(options = {}) {
     redirectOrigin: brokerOrigin,
     scopes,
     returnToAllowlist,
+    trustedEndpointHosts,
     sessionTtlSeconds,
     idleTtlSeconds,
     maxAgeSeconds,
@@ -544,6 +577,7 @@ export function createOidcSessionBroker(options = {}) {
     redirectUri,
     scopes,
     returnToAllowlist,
+    trustedEndpointHosts,
     sessionTtlSeconds,
     idleTtlSeconds,
     maxAgeSeconds,
@@ -586,6 +620,12 @@ export function createOidcSessionBroker(options = {}) {
   let discovery = null;       // resolved metadata + endpoints
   let verifier = null;        // createJwtVerifier instance
   let discoveryInflight = null;
+
+  // Operator-PINNED set of additional endpoint hosts (custom-domain IdPs). Built
+  // ONLY from normalized config — never from discovery-document content — so a
+  // compromised discovery doc cannot introduce a new host. Entries are already
+  // validated + lowercased by normalizeOidcConfig. Empty => strict single-origin.
+  const trustedHostSet = new Set(trustedEndpointHosts);
 
   async function guardedFetch(rawUrl, init, maxBytes) {
     const url = new URL(rawUrl);
@@ -659,8 +699,13 @@ export function createOidcSessionBroker(options = {}) {
     if (url.protocol !== "https:") {
       throw new Error(`discovery ${label} must be https`);
     }
-    if (url.hostname.toLowerCase() !== issuerUrl.hostname.toLowerCase()) {
-      throw new Error(`discovery ${label} host must equal the issuer host (single-origin issuers only in 0.9)`);
+    // The host must equal the issuer host OR be an operator-pinned
+    // trustedEndpointHosts entry (custom-domain IdPs). The https requirement
+    // above and the per-egress SSRF re-check in guardedFetch ALWAYS run — the
+    // allowlist relaxes ONLY this string-equality check, never those guards.
+    const host = url.hostname.toLowerCase();
+    if (host !== issuerUrl.hostname.toLowerCase() && !trustedHostSet.has(host)) {
+      throw new Error(`discovery ${label} host must equal the issuer host or be listed in trustedEndpointHosts`);
     }
     return url.href;
   }
@@ -704,6 +749,10 @@ export function createOidcSessionBroker(options = {}) {
         issuer,
         audience: clientId,
         jwksUri,
+        // Thread the SAME operator-pinned allowlist (PR-1 added this option) so a
+        // custom-domain JWKS host is accepted by the shared verifier too. The
+        // verifier still applies its own https + SSRF guards independently.
+        trustedEndpointHosts,
         algorithms,
         ...(clockSkewSeconds !== undefined ? { clockSkewSeconds } : {}),
         fetchImpl: doFetch,

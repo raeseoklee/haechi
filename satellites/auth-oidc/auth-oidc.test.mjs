@@ -1061,3 +1061,224 @@ test("mutating the object returned by authenticate() does not corrupt the sessio
   assert.ok(result2.identity, "identity must still be present after caller mutated the first result");
   assert.equal(result2.identity.provider, "oidc");
 });
+
+// ---------------------------------------------------------------------------
+// PR-2: trustedEndpointHosts — operator-pinned custom-domain allowlist
+// (P1-SEC-026 residual). Symmetric with PR-1's createJwtVerifier option.
+//
+// Custom-domain IdP shape (Azure AD B2C / Auth0 custom domain): the issuer is
+// on one host but the discovered endpoints live on another. Default (no
+// allowlist) MUST stay byte-behavior-identical single-origin; the SSRF and
+// issuer-confusion guards MUST stand regardless of the allowlist.
+// ---------------------------------------------------------------------------
+
+const CD_ISSUER = "https://login.contoso.com";
+const CD_ENDPOINT_HOST = "contoso.b2clogin.com";
+const CD_AUTHZ = "https://contoso.b2clogin.com/authorize";
+const CD_TOKEN = "https://contoso.b2clogin.com/oauth/token";
+const CD_JWKS = "https://contoso.b2clogin.com/.well-known/jwks.json";
+const CD_END_SESSION = "https://contoso.b2clogin.com/logout";
+
+function customDomainDiscovery(overrides = {}) {
+  return {
+    issuer: CD_ISSUER,
+    authorization_endpoint: CD_AUTHZ,
+    token_endpoint: CD_TOKEN,
+    jwks_uri: CD_JWKS,
+    end_session_endpoint: CD_END_SESSION,
+    token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+    ...overrides
+  };
+}
+
+// A fetch stub for the custom-domain shape: discovery is served from the ISSUER
+// host's .well-known; jwks + token are served from the custom-domain endpoint host.
+function makeCustomDomainFetch({ key, discovery, idTokenBuilder, tokenStatus = 200 } = {}) {
+  const disc = discovery ?? customDomainDiscovery();
+  const calls = { discovery: 0, jwks: 0, token: 0, urls: [] };
+  const fetchImpl = async (url) => {
+    const u = String(url);
+    calls.urls.push(u);
+    if (u.endsWith("/.well-known/openid-configuration")) {
+      calls.discovery += 1;
+      return new Response(JSON.stringify(disc), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === disc.jwks_uri || u === CD_JWKS) {
+      calls.jwks += 1;
+      return new Response(JSON.stringify({ keys: [key.jwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === disc.token_endpoint || u === CD_TOKEN) {
+      calls.token += 1;
+      const idToken = idTokenBuilder ? idTokenBuilder({ key }) : signIdToken({ claims: idClaims({ iss: CD_ISSUER }), privateKey: key.rsa.privateKey });
+      return new Response(JSON.stringify({ id_token: idToken, access_token: "ACCESS-TOK", token_type: "Bearer" }), {
+        status: tokenStatus,
+        headers: { "content-type": "application/json" }
+      });
+    }
+    throw new Error(`unexpected fetch URL: ${u}`);
+  };
+  return { fetchImpl, calls };
+}
+
+const customDomainOptions = (crypto, overrides = {}) => ({
+  cryptoProvider: crypto,
+  issuer: CD_ISSUER,
+  clientId: CLIENT_ID,
+  clientSecret: CLIENT_SECRET,
+  redirectUri: REDIRECT,
+  scopes: ["openid", "profile"],
+  secureCookies: true,
+  lookupImpl: PUBLIC_LOOKUP,
+  now: () => NOW_MS,
+  ...overrides
+});
+
+// (a) DEFAULT: a discovery doc whose endpoints are on a DIFFERENT host than the
+// issuer STILL throws when trustedEndpointHosts is unset (single-origin preserved).
+test("PR-2 (a) DEFAULT: cross-host discovered endpoints still reject when trustedEndpointHosts is unset", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const { fetchImpl } = makeCustomDomainFetch({ key }); // endpoints on contoso.b2clogin.com
+  const broker = createOidcSessionBroker(customDomainOptions(crypto, { fetchImpl })); // no trustedEndpointHosts
+  const res = makeRes();
+  await broker.handlers["/auth/login"](makeReq({ url: "/auth/login" }), res);
+  assert.equal(res.statusCode, 503, "single-origin must still reject a cross-host endpoint by default");
+  assert.notEqual(res.statusCode, 302);
+});
+
+// (b) ALLOWLISTED: issuer login.contoso.com + endpoints on contoso.b2clogin.com
+// with trustedEndpointHosts:[...] -> discovery succeeds and a full login/callback
+// verifies (the JWKS on the custom host is accepted via the THREADED verifier option).
+test("PR-2 (b) ALLOWLISTED: custom-domain discovery + full login/callback verifies (JWKS on the custom host accepted)", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const audit = makeAuditSink();
+  let capturedNonce = null;
+  const { fetchImpl, calls } = makeCustomDomainFetch({
+    key,
+    idTokenBuilder: ({ key: k }) => signIdToken({ claims: idClaims({ iss: CD_ISSUER, nonce: capturedNonce }), privateKey: k.rsa.privateKey })
+  });
+  const broker = createOidcSessionBroker(
+    customDomainOptions(crypto, { fetchImpl, auditSink: audit, trustedEndpointHosts: [CD_ENDPOINT_HOST] })
+  );
+
+  // login succeeds and the authorize URL is on the custom-domain endpoint host.
+  const login = await doLogin(broker);
+  capturedNonce = login.nonce;
+  assert.equal(login.authUrl.origin + login.authUrl.pathname, CD_AUTHZ);
+
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({
+      url: `/auth/callback?code=AUTH_CODE&state=${encodeURIComponent(login.state)}`,
+      cookies: { [login.preauthName]: login.preauthValue }
+    }),
+    cbRes
+  );
+  assert.equal(cbRes.statusCode, 302, "callback must succeed against a custom-domain JWKS host");
+  assert.ok(calls.jwks > 0, "the verifier must have fetched the custom-host JWKS");
+  const sessionCookie = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c));
+  assert.ok(sessionCookie, "a session cookie must be minted");
+  const sessionId = sessionCookie.split("=")[1].split(";")[0];
+  const session = await broker.authenticate(makeReq({ cookies: { "__Host-haechi_session": sessionId } }));
+  assert.ok(session, "session must authenticate");
+  assert.equal(session.identity.provider, "oidc");
+  assert.ok(audit.events.some((e) => e.type === "oidc.login.success"));
+});
+
+// (c) SSRF STILL ENFORCED: an allowlisted host that resolves to a BLOCKED address
+// still fails closed at guardedFetch (post-DNS re-check), regardless of the allowlist.
+test("PR-2 (c) SSRF STILL ENFORCED: an allowlisted host resolving to a blocked address fails closed at fetch", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const { fetchImpl, calls } = makeCustomDomainFetch({ key });
+  // Discovery (issuer host) resolves public; the allowlisted endpoint host
+  // resolves to the cloud metadata address -> guardedFetch must refuse.
+  const lookupImpl = async (hostname) => {
+    if (hostname === "login.contoso.com") return [{ address: "93.184.216.34", family: 4 }];
+    if (hostname === CD_ENDPOINT_HOST) return [{ address: "169.254.169.254", family: 4 }];
+    return [{ address: "93.184.216.34", family: 4 }];
+  };
+  const broker = createOidcSessionBroker(
+    customDomainOptions(crypto, { fetchImpl, lookupImpl, trustedEndpointHosts: [CD_ENDPOINT_HOST] })
+  );
+  // login itself reaches authorize via discovery (issuer host, public) — discovery
+  // succeeds, but the authorize/token endpoints sit on the blocked custom host.
+  // The token exchange at /auth/callback must fail closed at guardedFetch.
+  const login = await doLogin(broker);
+  const before = calls.token;
+  const res = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({ url: `/auth/callback?code=C&state=${encodeURIComponent(login.state)}`, cookies: { [login.preauthName]: login.preauthValue } }),
+    res
+  );
+  assert.equal(res.statusCode, 401, "an allowlisted host resolving to metadata must still deny");
+  assert.equal(calls.token, before, "the token POST must never reach the blocked host (SSRF re-check)");
+});
+
+// (d) ISSUER-CONFUSION STILL ENFORCED: a discovery doc whose metadata.issuer !=
+// the configured issuer still throws EVEN IF its endpoint hosts are allowlisted.
+test("PR-2 (d) ISSUER-CONFUSION STILL ENFORCED: metadata.issuer mismatch rejects even with allowlisted endpoint hosts", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  // endpoints on the allowlisted custom host, but metadata.issuer is a DIFFERENT issuer.
+  const { fetchImpl } = makeCustomDomainFetch({ key, discovery: customDomainDiscovery({ issuer: "https://evil.contoso.com" }) });
+  const broker = createOidcSessionBroker(
+    customDomainOptions(crypto, { fetchImpl, trustedEndpointHosts: [CD_ENDPOINT_HOST] })
+  );
+  const res = makeRes();
+  await broker.handlers["/auth/login"](makeReq({ url: "/auth/login" }), res);
+  assert.equal(res.statusCode, 503, "an issuer-confusion mismatch must reject regardless of the endpoint-host allowlist");
+});
+
+// (e) A NON-ALLOWLISTED endpoint host still throws (the allowlist is exact, not
+// a wildcard): allowlisting one custom host does not admit another.
+test("PR-2 (e) a non-allowlisted endpoint host still rejects", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  // token_endpoint moves to a host that is NOT in the allowlist.
+  const { fetchImpl } = makeCustomDomainFetch({
+    key,
+    discovery: customDomainDiscovery({ token_endpoint: "https://other.b2clogin.com/oauth/token" })
+  });
+  const broker = createOidcSessionBroker(
+    customDomainOptions(crypto, { fetchImpl, trustedEndpointHosts: [CD_ENDPOINT_HOST] })
+  );
+  const res = makeRes();
+  await broker.handlers["/auth/login"](makeReq({ url: "/auth/login" }), res);
+  assert.equal(res.statusCode, 503, "a host outside the operator-pinned allowlist must still be rejected");
+});
+
+// (f) trustedEndpointHosts validation: URL-shaped / port-bearing / non-string /
+// whitespace entries throw at construction; an unknown key is still rejected.
+test("PR-2 (f) trustedEndpointHosts validation is fail-closed; unknown-key rejection still works", async () => {
+  const crypto = await makeCrypto();
+  const base = customDomainOptions(crypto, {});
+  delete base.lookupImpl;
+  delete base.now;
+
+  // Non-array.
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: CD_ENDPOINT_HOST }), /trustedEndpointHosts.*must be an array/);
+  // URL-shaped (scheme).
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: ["https://contoso.b2clogin.com"] }), /bare hostname/);
+  // Path segment.
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: ["contoso.b2clogin.com/jwks"] }), /bare hostname/);
+  // Port.
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: ["contoso.b2clogin.com:443"] }), /bare hostname/);
+  // Whitespace.
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: ["contoso b2clogin"] }), /bare hostname/);
+  // Empty string.
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: [""] }), /non-empty hostname/);
+  // Non-string.
+  assert.throws(() => normalizeOidcConfig({ ...base, trustedEndpointHosts: [123] }), /non-empty hostname/);
+  // Unknown key still rejected (strict KNOWN_KEYS).
+  assert.throws(() => normalizeOidcConfig({ ...base, bogusKey: 1 }), /Unknown oidc config option/);
+
+  // Valid: a bare hostname normalizes (lowercased) and is exposed on the config.
+  const cfg = normalizeOidcConfig({ ...base, trustedEndpointHosts: ["Contoso.B2CLogin.com"] });
+  assert.deepEqual(cfg.trustedEndpointHosts, ["contoso.b2clogin.com"]);
+
+  // Absent: default empty array (zero behavior change).
+  const dflt = normalizeOidcConfig({ ...base });
+  assert.deepEqual(dflt.trustedEndpointHosts, []);
+});
