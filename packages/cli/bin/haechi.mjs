@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { readAuditSummary, verifyAuditChain } from "../../audit/index.mjs";
 import { DEFAULT_PROXY_PORT, HAECHI_VERSION, createHaechiProxy } from "../../proxy/index.mjs";
 import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundle/index.mjs";
-import { validatePluginManifestFile } from "../../plugin/index.mjs";
+import { PluginLoadError, signPluginManifest, validatePluginManifestFile, verifySignedPlugin } from "../../plugin/index.mjs";
 import { runMcpStdioFilter, wrapMcpChild } from "../../mcp-stdio/index.mjs";
 import { addToken, listTokens, revokeToken } from "../../auth/index.mjs";
 import { createLocalCryptoProvider } from "../../crypto/index.mjs";
@@ -50,6 +52,15 @@ try {
       break;
     case "plugin-validate":
       await pluginValidateCommand(argv);
+      break;
+    case "plugin-keygen":
+      await pluginKeygenCommand(argv);
+      break;
+    case "plugin-sign":
+      await pluginSignCommand(argv);
+      break;
+    case "plugin-verify":
+      await pluginVerifyCommand(argv);
       break;
     case "mcp-stdio":
       await mcpStdioCommand(argv);
@@ -472,6 +483,251 @@ async function pluginValidateCommand(argv) {
   }
 }
 
+// plugin-keygen — generate an Ed25519 keypair for signing plugin envelopes. The
+// PRIVATE key is written PKCS8 PEM at 0600 (operator-readable only); the PUBLIC
+// key is written SPKI PEM (this is the trust anchor an operator pastes into
+// auth.plugin.trustAnchors). The JSON output carries ONLY non-secret fields plus
+// the PATH to the private key — never the private key material itself.
+async function pluginKeygenCommand(argv) {
+  const options = parseOptions(argv);
+  const keyId = typeof options["key-id"] === "string" ? options["key-id"] : "haechi-plugin-signer";
+  const outDir = typeof options["out-dir"] === "string" ? options["out-dir"] : ".";
+
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+
+  const privateKeyPath = join(outDir, `${keyId}.key`);
+  const publicKeyPath = join(outDir, `${keyId}.pub`);
+
+  await mkdir(outDir, { recursive: true });
+  // Restrictive mode on the private key: written 0600 so it is not group/world
+  // readable. (mkdir above is best-effort for "." which always exists.)
+  await writeFile(privateKeyPath, privateKeyPem, { mode: 0o600 });
+  await writeFile(publicKeyPath, publicKeyPem);
+
+  writeJson({
+    ok: true,
+    command: "plugin-keygen",
+    keyId,
+    privateKeyPath,
+    publicKeyPath,
+    publicKeyPem
+  });
+}
+
+// plugin-sign — Ed25519-sign a plugin envelope. The entry bytes are read as RAW
+// bytes (no transcoding) so entrySha256 binds the exact on-disk plugin source.
+// The private key is read from a FILE (never from argv — a key on the command
+// line leaks into process args / shell history). Output is the signed envelope
+// JSON; the JSON status print never includes private material.
+async function pluginSignCommand(argv) {
+  const [entryPath, ...rest] = argv;
+  if (!entryPath || entryPath.startsWith("--")) {
+    throw new Error("plugin-sign requires an entry file path");
+  }
+  const options = parseOptions(rest);
+
+  const required = {
+    key: "--key <private-key.pem>",
+    "signer-key-id": "--signer-key-id <id>",
+    "plugin-id": "--plugin-id <id>",
+    kind: "--kind <kind>",
+    "plugin-version": "--plugin-version <v>",
+    "core-range": "--core-range <range>"
+  };
+  for (const [flag, usage] of Object.entries(required)) {
+    if (typeof options[flag] !== "string" || options[flag].length === 0) {
+      throw new Error(`plugin-sign requires ${usage}`);
+    }
+  }
+
+  // Read the EXACT entry bytes (Buffer, no utf8 transcoding) so the signed
+  // entrySha256 binds the real source.
+  const entryBytes = await readFile(entryPath);
+  // Read the private key from the file, not from argv.
+  const privateKey = createPrivateKey(await readFile(options.key, "utf8"));
+
+  const capabilities = await parseCapabilitiesOption(options.capabilities);
+  const notBefore = parseOptionalEpochMs(options["not-before"], "--not-before");
+  const notAfter = parseOptionalEpochMs(options["not-after"], "--not-after");
+
+  const pluginId = options["plugin-id"];
+  const signed = signPluginManifest(
+    {
+      pluginId,
+      kind: options.kind,
+      version: options["plugin-version"],
+      capabilities,
+      coreVersionRange: options["core-range"],
+      entryBytes,
+      notBefore,
+      notAfter
+    },
+    privateKey,
+    options["signer-key-id"]
+  );
+
+  const outPath = typeof options.out === "string" ? options.out : `${pluginId}.signed.json`;
+  await writeFile(outPath, `${JSON.stringify(signed, null, 2)}\n`);
+
+  writeJson({
+    ok: true,
+    command: "plugin-sign",
+    outPath,
+    pluginId,
+    signerKeyId: signed.signerKeyId,
+    entrySha256: signed.payload.entrySha256,
+    kind: signed.payload.kind,
+    version: signed.payload.version
+  });
+}
+
+// plugin-verify — verify a signed plugin envelope against the exact entry bytes
+// and operator trust anchors. Anchors come from EITHER an explicit --anchor PEM
+// (+ --anchor-key-id, defaulting to the envelope's signerKeyId) OR a --config
+// file's auth.plugin.trustAnchors. On success prints valid:true; on a
+// PluginLoadError it FAILS CLOSED — the error propagates to main()'s catch, the
+// reason code is printed to stderr, and the process exits non-zero (the gate
+// signal). Never prints private material.
+async function pluginVerifyCommand(argv) {
+  const [signedPath, ...rest] = argv;
+  if (!signedPath || signedPath.startsWith("--")) {
+    throw new Error("plugin-verify requires a signed envelope JSON file path");
+  }
+  const options = parseOptions(rest);
+  if (typeof options.entry !== "string" || options.entry.length === 0) {
+    throw new Error("plugin-verify requires --entry <entry-file>");
+  }
+
+  const signed = JSON.parse(await readFile(signedPath, "utf8"));
+  const entryBytes = await readFile(options.entry);
+
+  const trustAnchors = await resolvePluginTrustAnchors(options, signed);
+
+  const coreVersion = typeof options["core-version"] === "string" ? options["core-version"] : null;
+  const pin = typeof options.pin === "string" ? { entrySha256: options.pin } : null;
+
+  // --allow-capability <name> (repeatable) mirrors the OPERATOR capability
+  // allowlist that createRuntime passes at load time. It is REQUIRED to verify an
+  // authProvider envelope (core mandates such a plugin declare readsCredentials,
+  // which is not allowlisted by default) — without it, plugin-verify can only
+  // confirm a no-capability plugin. A bare flag (no value) is ignored.
+  const rawAllow = options["allow-capability"];
+  const allowCapabilities = (Array.isArray(rawAllow) ? rawAllow : [rawAllow])
+    .filter((value) => typeof value === "string" && value.length > 0);
+
+  // verifySignedPlugin throws a PluginLoadError on any refusal. We surface the
+  // stable .reason CODE (the gate signal) in the error message and re-throw so
+  // main()'s catch prints it and sets a non-zero exit code. A non-zero exit +
+  // the reason code is what a caller branches on (never a free-text message).
+  let payload;
+  try {
+    payload = verifySignedPlugin({
+      signed,
+      entryBytes,
+      trustAnchors,
+      coreVersion,
+      pin,
+      allowCapabilities
+    });
+  } catch (error) {
+    if (error instanceof PluginLoadError) {
+      throw new Error(`plugin-verify refused: ${error.reason} (${error.message})`);
+    }
+    throw error;
+  }
+
+  writeJson({
+    ok: true,
+    command: "plugin-verify",
+    valid: true,
+    pluginId: payload.pluginId,
+    signerKeyId: signed.signerKeyId,
+    entrySha256: payload.entrySha256
+  });
+}
+
+// Resolve plugin trust anchors for plugin-verify. Precedence: an explicit
+// --anchor PEM file (keyed by --anchor-key-id, defaulting to the envelope's
+// signerKeyId) wins; otherwise --config supplies auth.plugin.trustAnchors. The
+// config is read as RAW JSON (not normalizeConfig) so verifying an envelope does
+// not require a full auth.provider:"plugin" config — only the anchors matter.
+async function resolvePluginTrustAnchors(options, signed) {
+  if (typeof options.anchor === "string" && options.anchor.length > 0) {
+    const publicKeyPem = await readFile(options.anchor, "utf8");
+    const keyId = typeof options["anchor-key-id"] === "string" && options["anchor-key-id"].length > 0
+      ? options["anchor-key-id"]
+      : signed?.signerKeyId;
+    if (typeof keyId !== "string" || keyId.length === 0) {
+      throw new Error("plugin-verify --anchor requires --anchor-key-id (or a signerKeyId in the envelope)");
+    }
+    return { [keyId]: publicKeyPem };
+  }
+
+  if (typeof options.config === "string" && options.config.length > 0) {
+    const raw = JSON.parse(await readFile(options.config, "utf8"));
+    const anchors = raw?.auth?.plugin?.trustAnchors;
+    if (Array.isArray(anchors)) {
+      const map = {};
+      for (const anchor of anchors) {
+        if (!anchor || typeof anchor !== "object" || typeof anchor.keyId !== "string" || anchor.publicKey == null) {
+          throw new Error("each auth.plugin.trustAnchors entry must be { keyId, publicKey }");
+        }
+        map[anchor.keyId] = anchor.publicKey;
+      }
+      if (Object.keys(map).length === 0) {
+        throw new Error("auth.plugin.trustAnchors in --config is empty");
+      }
+      return map;
+    }
+    if (anchors && typeof anchors === "object") {
+      if (Object.keys(anchors).length === 0) {
+        throw new Error("auth.plugin.trustAnchors in --config is empty");
+      }
+      return anchors;
+    }
+    throw new Error("--config has no auth.plugin.trustAnchors to verify against");
+  }
+
+  throw new Error("plugin-verify requires either --anchor <public-key.pem> or --config <haechi.config.json>");
+}
+
+// Parse the --capabilities option: inline JSON, or @file pointing at a JSON
+// file. Defaults to {} (an empty capability set). Must resolve to a plain
+// object; anything else fails closed.
+async function parseCapabilitiesOption(value) {
+  if (value === undefined || value === true) {
+    return {};
+  }
+  if (typeof value !== "string") {
+    throw new Error("--capabilities must be inline JSON or @file");
+  }
+  const text = value.startsWith("@") ? await readFile(value.slice(1), "utf8") : value;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`--capabilities is not valid JSON: ${error.message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("--capabilities must be a JSON object");
+  }
+  return parsed;
+}
+
+// Parse an optional epoch-ms flag value. Absent -> undefined (the signer treats
+// it as null/unbounded). A present value must be an integer string.
+function parseOptionalEpochMs(value, flag) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !/^-?\d+$/.test(value.trim())) {
+    throw new Error(`${flag} must be an integer epoch-ms value`);
+  }
+  return Number(value);
+}
+
 async function authCommand(argv) {
   const [sub, ...rest] = argv;
   const options = parseOptions(rest);
@@ -759,6 +1015,21 @@ const COMMAND_HELP = {
     usage: "haechi plugin-validate <plugin-manifest.json>",
     summary: "Validate a plugin manifest (manifest-only; dynamic runtime is rejected)."
   },
+  "plugin-keygen": {
+    usage: "haechi plugin-keygen [--key-id haechi-plugin-signer] [--out-dir .]",
+    summary: "Generate an Ed25519 plugin-signing keypair.",
+    detail: "Writes the PKCS8-PEM private key to <out-dir>/<keyId>.key (0600) and the SPKI-PEM public key to <out-dir>/<keyId>.pub. The public key is the trust anchor an operator pastes into auth.plugin.trustAnchors. The private key is never printed — only its path."
+  },
+  "plugin-sign": {
+    usage: "haechi plugin-sign <entry-file> --key <private-key.pem> --signer-key-id <id> --plugin-id <id> --kind <kind> --plugin-version <v> --core-range <range> [--capabilities <json|@file>] [--not-before <ms>] [--not-after <ms>] [--out <signed.json>]",
+    summary: "Ed25519-sign a plugin envelope binding the exact entry bytes.",
+    detail: "Reads the entry file as raw bytes (entrySha256 binds the real source) and the private key from the --key FILE (never argv). Writes the signed envelope to --out (default <plugin-id>.signed.json). Capabilities default to {}; provide inline JSON or @file. The private key is never printed."
+  },
+  "plugin-verify": {
+    usage: "haechi plugin-verify <signed.json> --entry <entry-file> [--anchor <public-key.pem> --anchor-key-id <id>] [--config haechi.config.json] [--core-version <v>] [--pin <entrySha256>] [--allow-capability <name>]...",
+    summary: "Verify a signed plugin envelope; fail closed on any refusal.",
+    detail: "Resolves trust anchors from --anchor (with --anchor-key-id, default the envelope signerKeyId) or from --config auth.plugin.trustAnchors. Pass --allow-capability <name> (repeatable) to allowlist each declared capability — REQUIRED to verify an authProvider envelope (it must declare readsCredentials, which is not allowlisted by default). On success prints valid:true; on any refusal it exits non-zero with the PluginLoadError reason (the gate signal)."
+  },
   "mcp-stdio": {
     usage: "haechi mcp-stdio [--config haechi.config.json]",
     summary: "Filter MCP JSON-RPC traffic on stdin/stdout (one direction)."
@@ -790,7 +1061,8 @@ function printHelp(topic) {
     "init", "protect", "report", "status", "audit-verify", "proxy",
     "policy-sign", "policy-verify",
     "token-reveal", "token-purge", "token-export",
-    "plugin-validate", "mcp-stdio", "mcp-wrap", "auth", "config"
+    "plugin-validate", "plugin-keygen", "plugin-sign", "plugin-verify",
+    "mcp-stdio", "mcp-wrap", "auth", "config"
   ];
   const lines = order.map((name) => `  ${name.padEnd(16)}${COMMAND_HELP[name].summary}`);
   console.log(`Haechi — self-hosted AI context enforcement
