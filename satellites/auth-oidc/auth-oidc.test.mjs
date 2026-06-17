@@ -1736,3 +1736,354 @@ test("PR-3 single-flight — concurrent in-window authenticate() calls fire exac
   assert.ok(results.every((r) => r && r.identity), "every concurrent caller gets the renewed session");
   assert.equal(calls.refresh, 1, "single-flight collapses concurrent refreshes into one token-endpoint POST");
 });
+
+// ---------------------------------------------------------------------------
+// PR-3 PRE-PUBLISH REVIEW REGRESSIONS — lock in the two 0.2.0 refresh fixes.
+//
+// These tests reproduce two issues found in a pre-publish review of the
+// (unreleased) auth-oidc 0.2.0 refresh feature; both are now FIXED in
+// index.mjs. Each test FAILS against the pre-fix code and PASSES against the
+// fixed code:
+//   A. HIGH resurrection race — a logout that deletes the session DURING the
+//      refresh network wait must NOT be undone by the post-refresh commit.
+//      Pre-fix: performRefresh ran an UNCONDITIONAL sessionStore.set() at the
+//      end, silently resurrecting the logged-out session. Fixed: a synchronous
+//      get-then-check resurrection guard (live + matching gen) before the set.
+//   B. MEDIUM raw-sub-at-rest — the session must NOT persist the raw `sub`.
+//      Pre-fix: stored session.subject = claims.sub (PII at rest in any custom
+//      Redis/DB sessionStore). Fixed: anti-swap rebuilds the identity from the
+//      renewed claims and compares the keyed-HMAC subjectHash; the raw sub is
+//      never stored.
+//   C. ANTI-SWAP SAME-SUB STILL RENEWS — guard the happy path of the HMAC
+//      compare (a SAME-sub refresh must still renew; the HMAC compare must not
+//      break a legitimate renewal).
+// SYNTHETIC issuers/subjects/keys; token endpoint / JWKS / discovery mocked.
+// ---------------------------------------------------------------------------
+
+// (A) RESURRECTION RACE. Drive a renewable login, advance into the renewal
+// window, then trigger renewal via authenticate() while the mocked refresh
+// token-endpoint fetch INTERLEAVES a logout for the SAME session before it
+// resolves — deleting it from the sessionStore mid-flight. After authenticate()
+// resolves: (i) it returned null (the refresh did NOT resurrect the session),
+// and (ii) a subsequent authenticate() with the same cookie also returns null
+// (the session is truly gone, never re-saved by the post-refresh commit).
+//
+// PRE-FIX: performRefresh's final, UNCONDITIONAL sessionStore.set(sessionId,
+// session) would re-add the just-deleted session, so authenticate() returns the
+// renewed session (non-null) AND the follow-up call also returns it — both
+// assertions below would FAIL. The synchronous resurrection guard makes them PASS.
+test("PR-3 RESURRECTION RACE — a logout DURING the refresh network wait is NOT undone by the post-refresh commit", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const audit = makeAuditSink();
+  const sessionStore = createInMemorySessionStore();
+  let clock = NOW_MS;
+  let capturedNonce = null;
+
+  // Late-bound holders so the refresh-grant fetch branch can reach the broker +
+  // the live session id to interleave a logout mid-flight (the broker/sessionId
+  // do not exist yet when the fetch closure is created).
+  let brokerRef = null;
+  let sessionIdRef = null;
+  let interleavedLogout = 0;
+
+  const fetchImpl = async (url, init = {}) => {
+    const u = String(url);
+    if (u.endsWith("/.well-known/openid-configuration")) {
+      return new Response(JSON.stringify(discoveryDoc()), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === JWKS) {
+      return new Response(JSON.stringify({ keys: [key.jwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === TOKEN) {
+      const body = new URLSearchParams(String(init.body || ""));
+      if (body.get("grant_type") === "refresh_token") {
+        // INTERLEAVE: a concurrent logout for the SAME session lands DURING the
+        // refresh network wait. Drive it through the broker's own logout handler
+        // (POST + CSRF header + the session cookie) so the session id is deleted
+        // from the injected sessionStore BEFORE this fetch resolves.
+        interleavedLogout += 1;
+        const logoutRes = makeRes();
+        await brokerRef.handlers["/auth/logout"](
+          makeReq({
+            method: "POST",
+            url: "/auth/logout",
+            cookies: { [SESSION_COOKIE_NAME]: sessionIdRef },
+            headers: { "x-haechi-csrf": "1" }
+          }),
+          logoutRes
+        );
+        // The session is now gone from the store; THEN return a valid refresh
+        // response (same sub -> anti-swap would otherwise pass and re-commit).
+        const idToken = signIdToken({ claims: idClaimsAt(clock), privateKey: key.rsa.privateKey });
+        return new Response(JSON.stringify({ id_token: idToken, access_token: "ACCESS-REFRESH-1", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      // authorization_code exchange (mints the renewable session).
+      const idToken = signIdToken({ claims: idClaimsAt(clock, { nonce: capturedNonce }), privateKey: key.rsa.privateKey });
+      return new Response(
+        JSON.stringify({ id_token: idToken, access_token: "ACCESS-INITIAL", refresh_token: "REFRESH-INITIAL", token_type: "Bearer" }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    throw new Error(`unexpected fetch URL: ${u}`);
+  };
+
+  const broker = createOidcSessionBroker(
+    baseOptions(crypto, {
+      fetchImpl,
+      auditSink: audit,
+      sessionStore,
+      now: () => clock,
+      enableRefresh: true,
+      sessionTtlSeconds: 1000,
+      idleTtlSeconds: 1000,
+      refreshMaxLifetimeSeconds: 5000
+    })
+  );
+  brokerRef = broker;
+
+  const login = await doLogin(broker);
+  capturedNonce = login.nonce;
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({
+      url: `/auth/callback?code=AUTH_CODE&state=${encodeURIComponent(login.state)}`,
+      cookies: { [login.preauthName]: login.preauthValue }
+    }),
+    cbRes
+  );
+  const sessionId = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c)).split("=")[1].split(";")[0];
+  sessionIdRef = sessionId;
+  assert.ok(sessionStore.get(sessionId), "a renewable session was minted");
+
+  // Advance into the renewal window (ttl=1000s, window=250s -> renewAt 750s).
+  clock = NOW_MS + 800 * 1000;
+
+  // Trigger the silent renewal. The mocked refresh fetch deletes this very
+  // session mid-flight (above), so the post-refresh commit must NOT resurrect it.
+  const renewed = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+
+  // (i) authenticate() returned null — the refresh did not resurrect a session
+  //     deleted during the network wait.
+  assert.equal(interleavedLogout, 1, "the refresh fetch interleaved exactly one logout for the same session");
+  assert.equal(renewed, null, "a logout during the refresh network wait must NOT be undone (no resurrection)");
+
+  // (ii) the session is truly gone from the store (never re-saved).
+  assert.equal(sessionStore.get(sessionId), null, "the logged-out session must not be re-added by the refresh commit");
+
+  // (iii) a subsequent authenticate() with the same cookie also returns null.
+  const after = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.equal(after, null, "replaying the cookie after the raced logout must still deny");
+});
+
+// (B) NO RAW SUB AT REST. Use an email-shaped synthetic subject and
+// enableRefresh; complete a login that stores a refresh-capable session; then
+// inspect the STORED session record (a sessionStore that captures the object
+// passed to set()) and assert NO field contains the raw subject string
+// (deep-scan the stored record JSON), while session.identity.subjectHash IS
+// present. Also assert anti-swap still works (a refresh with a DIFFERENT sub is
+// rejected / the session is evicted).
+//
+// PRE-FIX: the callback stored session.subject = claims.sub, so the raw
+// "alice@corp.example" WOULD appear in the deep-scanned stored-record JSON —
+// the no-raw-sub assertion would FAIL. The fixed code never persists the raw
+// sub (anti-swap uses the keyed-HMAC subjectHash), so the scan finds nothing.
+test("PR-3 NO RAW SUB AT REST — the stored session record never contains the raw sub; anti-swap still rejects a swapped sub", async () => {
+  const RAW_SUB = "alice@corp.example";
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const audit = makeAuditSink();
+
+  // A capturing sessionStore: wraps the in-memory store and records the EXACT
+  // object handed to set() so we inspect what would be persisted at rest.
+  const inner = createInMemorySessionStore();
+  const setCaptures = [];
+  const sessionStore = {
+    set(id, session) {
+      setCaptures.push({ id, session });
+      return inner.set(id, session);
+    },
+    get(id) {
+      return inner.get(id);
+    },
+    delete(id) {
+      return inner.delete(id);
+    },
+    size() {
+      return inner.size();
+    }
+  };
+
+  let clock = NOW_MS;
+  let capturedNonce = null;
+  // Control the refresh-grant sub independently: by default the refresh returns
+  // a DIFFERENT sub ("attacker-sub") so the anti-swap assertion below bites.
+  let refreshSub = "attacker-sub";
+
+  const fetchImpl = async (url, init = {}) => {
+    const u = String(url);
+    if (u.endsWith("/.well-known/openid-configuration")) {
+      return new Response(JSON.stringify(discoveryDoc()), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === JWKS) {
+      return new Response(JSON.stringify({ keys: [key.jwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === TOKEN) {
+      const body = new URLSearchParams(String(init.body || ""));
+      if (body.get("grant_type") === "refresh_token") {
+        const idToken = signIdToken({ claims: idClaimsAt(clock, { sub: refreshSub }), privateKey: key.rsa.privateKey });
+        return new Response(JSON.stringify({ id_token: idToken, access_token: "ACCESS-REFRESH", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      const idToken = signIdToken({ claims: idClaimsAt(clock, { sub: RAW_SUB, nonce: capturedNonce }), privateKey: key.rsa.privateKey });
+      return new Response(
+        JSON.stringify({ id_token: idToken, access_token: "ACCESS-INITIAL", refresh_token: "REFRESH-INITIAL", token_type: "Bearer" }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    throw new Error(`unexpected fetch URL: ${u}`);
+  };
+
+  const broker = createOidcSessionBroker(
+    baseOptions(crypto, {
+      fetchImpl,
+      auditSink: audit,
+      sessionStore,
+      now: () => clock,
+      enableRefresh: true,
+      sessionTtlSeconds: 1000,
+      idleTtlSeconds: 1000,
+      refreshMaxLifetimeSeconds: 5000
+    })
+  );
+
+  const login = await doLogin(broker);
+  capturedNonce = login.nonce;
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({
+      url: `/auth/callback?code=AUTH_CODE&state=${encodeURIComponent(login.state)}`,
+      cookies: { [login.preauthName]: login.preauthValue }
+    }),
+    cbRes
+  );
+  const sessionId = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c)).split("=")[1].split(";")[0];
+
+  const stored = sessionStore.get(sessionId);
+  assert.ok(stored, "a refresh-capable session was minted");
+  assert.ok(stored.refreshTokenEnvelope, "the session is renewable (refresh ciphertext stored)");
+
+  // The keyed-HMAC subjectHash IS present (the anti-swap pin) ...
+  assert.ok(stored.identity && typeof stored.identity.subjectHash === "string" && stored.identity.subjectHash.length > 0,
+    "the session identity must carry a keyed-HMAC subjectHash");
+  assert.match(stored.identity.subjectHash, /^[a-f0-9]{64}$/);
+
+  // ... and the RAW sub appears NOWHERE in the stored record (deep-scan the
+  // captured + the live stored object JSON). There is no top-level
+  // session.subject field, and no nested value equals the raw sub.
+  assert.equal(stored.subject, undefined, "the session must not carry a top-level raw `subject` field");
+  const storedJson = JSON.stringify(stored);
+  assert.ok(!storedJson.includes(RAW_SUB), "the raw sub must not appear anywhere in the live stored session record");
+  for (const cap of setCaptures) {
+    assert.ok(!JSON.stringify(cap.session).includes(RAW_SUB), "the raw sub must not appear in any object handed to sessionStore.set()");
+  }
+
+  // Anti-swap STILL works: the refresh returns a DIFFERENT sub -> evict + null.
+  clock = NOW_MS + 800 * 1000; // renewal window
+  const denied = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.equal(denied, null, "a refresh returning a different sub must be rejected (anti-swap via keyed-HMAC compare)");
+  assert.ok(
+    audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "refresh_subject_mismatch"),
+    "a refresh_subject_mismatch evict event must be emitted"
+  );
+  assert.equal(sessionStore.get(sessionId), null, "the session is evicted after the subject swap");
+});
+
+// (C) ANTI-SWAP SAME-SUB STILL RENEWS. A refresh that returns the SAME sub as
+// the pinned session renews successfully (the keyed-HMAC subjectHash compare
+// matches). This guards against the HMAC compare accidentally breaking the
+// happy path: with no raw sub stored, a legitimate same-sub renewal must still
+// reconstruct an identical subjectHash and renew, NOT fail closed.
+test("PR-3 ANTI-SWAP SAME-SUB — a refresh returning the SAME sub renews (the keyed-HMAC compare matches the happy path)", async () => {
+  const RAW_SUB = "alice@corp.example";
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const audit = makeAuditSink();
+  const sessionStore = createInMemorySessionStore();
+  let clock = NOW_MS;
+  let capturedNonce = null;
+
+  const fetchImpl = async (url, init = {}) => {
+    const u = String(url);
+    if (u.endsWith("/.well-known/openid-configuration")) {
+      return new Response(JSON.stringify(discoveryDoc()), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === JWKS) {
+      return new Response(JSON.stringify({ keys: [key.jwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === TOKEN) {
+      const body = new URLSearchParams(String(init.body || ""));
+      if (body.get("grant_type") === "refresh_token") {
+        // SAME sub on the renewed id_token -> the keyed-HMAC subjectHash matches.
+        const idToken = signIdToken({ claims: idClaimsAt(clock, { sub: RAW_SUB }), privateKey: key.rsa.privateKey });
+        return new Response(JSON.stringify({ id_token: idToken, access_token: "ACCESS-REFRESH", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      const idToken = signIdToken({ claims: idClaimsAt(clock, { sub: RAW_SUB, nonce: capturedNonce }), privateKey: key.rsa.privateKey });
+      return new Response(
+        JSON.stringify({ id_token: idToken, access_token: "ACCESS-INITIAL", refresh_token: "REFRESH-INITIAL", token_type: "Bearer" }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    throw new Error(`unexpected fetch URL: ${u}`);
+  };
+
+  const broker = createOidcSessionBroker(
+    baseOptions(crypto, {
+      fetchImpl,
+      auditSink: audit,
+      sessionStore,
+      now: () => clock,
+      enableRefresh: true,
+      sessionTtlSeconds: 1000,
+      idleTtlSeconds: 1000,
+      refreshMaxLifetimeSeconds: 5000
+    })
+  );
+
+  const login = await doLogin(broker);
+  capturedNonce = login.nonce;
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({
+      url: `/auth/callback?code=AUTH_CODE&state=${encodeURIComponent(login.state)}`,
+      cookies: { [login.preauthName]: login.preauthValue }
+    }),
+    cbRes
+  );
+  const sessionId = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c)).split("=")[1].split(";")[0];
+  const pinnedHash = sessionStore.get(sessionId).identity.subjectHash;
+
+  clock = NOW_MS + 800 * 1000; // renewal window
+  const renewed = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.ok(renewed, "a same-sub refresh must renew (the keyed-HMAC subjectHash compare matches)");
+  assert.equal(renewed.createdAt, NOW_MS + 800 * 1000, "createdAt resets to the refresh time on a successful renewal");
+  assert.equal(renewed.identity.subjectHash, pinnedHash, "the renewed identity keeps the same keyed-HMAC subjectHash");
+  assert.ok(audit.events.some((e) => e.type === "oidc.session.refresh"), "a refresh success event must be emitted");
+  // No subject-mismatch eviction on the happy path.
+  assert.ok(
+    !audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "refresh_subject_mismatch"),
+    "a same-sub renewal must NOT trigger a subject-mismatch eviction"
+  );
+  // The renewed live session still carries no raw sub and a present subjectHash.
+  const live = sessionStore.get(sessionId);
+  assert.ok(!JSON.stringify(live).includes(RAW_SUB), "the renewed stored record must still not contain the raw sub");
+  assert.equal(live.identity.subjectHash, pinnedHash);
+});
