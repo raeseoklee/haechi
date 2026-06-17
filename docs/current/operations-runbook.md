@@ -30,6 +30,23 @@ docker compose up -d        # build + run the reference stack
 docker compose logs -f haechi
 ```
 
+**Pre-built image (GHCR).** Each `v<semver>` release publishes a cosign-signed
+image to `ghcr.io/<owner>/haechi` (tags `<major>.<minor>.<patch>`, `<major>.<minor>`,
+`<major>`, `latest`). Verify it before running — the signature and provenance bind
+the image to this repo's release workflow:
+
+```bash
+cosign verify ghcr.io/<owner>/haechi:1.3.3 \
+  --certificate-identity-regexp '^https://github.com/<owner>/haechi/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/<owner>/haechi:1.3.3 --repo <owner>/haechi
+```
+
+The image bakes `proxy.trustForwardedProto: true` (it binds `0.0.0.0` behind a
+TLS-terminating reverse proxy — see below), so Haechi requires `X-Forwarded-Proto:
+https` on every protected request; mount your own config with `proxy.tls` set
+instead if you want Haechi to terminate TLS itself.
+
 **Front it with TLS + auth.** Haechi has no TLS of its own. Publish its port only
 to a TLS-terminating, authenticating reverse proxy (nginx / Caddy / Traefik / an
 API gateway); never expose the raw Haechi port on a public interface. The compose

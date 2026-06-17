@@ -68,6 +68,7 @@ npm audit signatures
 |---|---|---|---|
 | `.github/workflows/ci.yml` | — | any push/PR | Tests, release preflight, SBOM artifact |
 | `.github/workflows/npm-publish.yml` | `haechi` | `v<semver>` | npm provenance publish + checksummed/attested release assets |
+| `.github/workflows/container-publish.yml` | `ghcr.io/<owner>/haechi` image | `v<semver>` | Build the root Dockerfile, push to GHCR, keyless cosign sign by digest + sigstore build-provenance attestation |
 | `.github/workflows/crypto-kms-publish.yml` | `haechi-crypto-kms` | `crypto-kms-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/auth-jwt-publish.yml` | `haechi-auth-jwt` | `auth-jwt-v<semver>` | satellite publish, same signed-artifacts path |
 | `.github/workflows/dashboard-publish.yml` | `haechi-dashboard` | `dashboard-v<semver>` | satellite publish, same signed-artifacts path |
