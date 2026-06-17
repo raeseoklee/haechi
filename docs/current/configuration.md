@@ -235,7 +235,7 @@ Applies to `mcp-stdio` and `mcp-wrap`.
 
 ### `auth.plugin` (signed authProvider sandbox)
 
-Required when `auth.provider: "plugin"`. The sandbox loads a **signed** `authProvider` plugin under a capability-gated, audited runtime. The top-level `plugins.enabled` (default `true`) is a kill-switch — `false` refuses to construct any plugin. Dynamic loading is opt-in; the default is dependency injection. See `docs/current/release-1.0-implementation-scope.md` (worker) and `release-1.1-implementation-scope.md` (process).
+Required when `auth.provider: "plugin"`. The sandbox loads a **signed** `authProvider` plugin under a capability-gated, audited runtime. The top-level `plugins.enabled` (default `true`) is a kill-switch — `false` refuses to construct any plugin. Dynamic loading is opt-in; the default is dependency injection. See `docs/current/release-1.0-implementation-scope.md` (worker) and `release-1.1-implementation-scope.md` (process). For the end-to-end signing + trust-anchor curation flow (the `haechi plugin-keygen`/`plugin-sign`/`plugin-verify` CLI), see [`plugin-signing-and-trust.md`](plugin-signing-and-trust.md).
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
