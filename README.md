@@ -8,7 +8,7 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.2-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.3-brightgreen)](docs/current/api-stability.md)
 
 **English** | [한국어](README.ko.md)
 
@@ -16,7 +16,11 @@ Haechi is a self-hosted AI context enforcement layer for protecting LLM, MCP, vL
 
 The name comes from Haechi, a Korean guardian figure associated with discernment and protection.
 
-This repository is intended for local development, security design review, and self-hosted integration experiments. It is not a compliance guarantee.
+**What it is:** a local, self-hosted **gateway and library you run yourself**. It inspects OpenAI-compatible / MCP / vLLM / Ollama / agent JSON and redacts, masks, tokenizes, encrypts, or blocks PII and secrets before they reach models, tools, or logs.
+
+**What it is *not*:** a turnkey **production appliance**, a managed/hosted service, or a compliance guarantee. Core ships no production KMS/HSM, no built-in TLS, and no internet-facing hardening — **you** bring the network controls, authentication, key custody, and a TLS-terminating reverse proxy. See [Known limitations](#known-limitations) before deploying.
+
+This repository is intended for local development, security design review, and self-hosted integration. It is not a compliance guarantee.
 
 **1.0.0 is the first stable release.** From 1.0 the public API is a frozen contract under strict semver: the `package.json` `exports` surface, the CLI's machine-readable behavior, the audit event schema, and the config key shape are all part of the major-versioned contract, with a documented deprecation policy and a one in-minor security exception. See [`docs/current/api-stability.md`](docs/current/api-stability.md). The `haechi-*` satellites stay pre-1.0 and version independently of core (see [Satellite packages](#satellite-packages)).
 
@@ -54,16 +58,31 @@ See [`examples/local-proxy-demo/`](examples/local-proxy-demo/).
 
 ## Install
 
+### npm
+
 ```bash
-npm install -g haechi
+npm install -g haechi      # or: npx haechi init  (run without installing)
 haechi init
 ```
 
-Or run without installing:
+Verify the published package's supply chain (every release after `0.3.2` is attested):
 
 ```bash
-npx haechi init
+npm audit signatures       # npm SLSA provenance attestation
 ```
+
+### Docker (GHCR)
+
+Each release publishes a **cosign-signed** image to `ghcr.io/raeseoklee/haechi` (tags `1.3.3`, `1.3`, `1`, `latest`). Verify it, then run **behind a TLS-terminating reverse proxy** (the image binds `0.0.0.0` with `proxy.trustForwardedProto: true`):
+
+```bash
+cosign verify ghcr.io/raeseoklee/haechi:1.3.3 \
+  --certificate-identity-regexp '^https://github.com/raeseoklee/haechi/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker run --rm -p 127.0.0.1:11016:11016 ghcr.io/raeseoklee/haechi:1.3.3
+```
+
+See [`docs/current/operations-runbook.md`](docs/current/operations-runbook.md) for the hardened compose stack and day-2 operations.
 
 ## Quickstart
 
@@ -291,6 +310,22 @@ Haechi includes baseline regional privacy profiles for local policy bootstrappin
 
 Set `privacy.profile` in `haechi.config.json` to apply the profile's default actions before enforcement. These profiles are engineering defaults, not legal advice.
 
+## Known limitations
+
+Haechi is deliberately scoped. These are real, current limitations — listed openly, not hidden:
+
+- **Detection is regex + validators, not ML.** Rules are anchored on prefix/charclass/length with checksum validators (Luhn, KR RRN, IBAN mod-97, national-ID checks) — strong precision on known shapes, but a novel or obfuscated secret can be missed. Tune with `filters.minConfidence` / `filters.allowlist`; an ML/classifier layer is backlog, not shipped.
+- **Streaming match window is bounded.** Cross-frame PII is caught on the JSON **delta channel** up to `streaming.maxMatchBytes` (default 256). A match split across **non-JSON** SSE/NDJSON frames is inspected per-frame only (documented residual).
+- **Response inspection is a secondary defense.** The response direction does not scan bare JSON **number** leaves by default (they are inference-server metadata and only false-positive); opt in with `responseProtection.scanNumbers: true` for a strict threat model.
+- **MCP `--stderr filter` is line-oriented.** It protects each complete stderr line; a secret a child splits across a newline is not caught (an anchored regex cannot match across `\n`). Use `--stderr drop` for high-sensitivity local tools.
+- **Audit tail-truncation needs separate media.** `haechi audit-verify` detects modification, reordering, and middle tampering; deletion of *trailing* records is only detectable via `audit.anchor` written to append-only / separate storage.
+- **Rate limiting is per-process by default.** Behind N replicas the built-in limiter counts independently — inject a shared store (the `haechi-ratelimit-redis` satellite) for a fleet-wide budget.
+- **Plugin sandbox: the default `worker_threads` mode is not a capability sandbox** (it is memory/crash isolation + data-minimization, gated by the Ed25519 trust gate). Real kernel-enforced containment is the opt-in `process-isolated` runtime, which requires a Node that enforces `--allow-net`.
+- **No production key custody in core.** The local AES-256-GCM software-key file is **dev-only**; use the `haechi-crypto-kms` satellite for KMS/HSM/Vault-backed custody.
+- **CI note:** the GHCR image-publish workflow's `docker/*` actions still run on Node 20 (a GitHub deprecation warning, non-blocking) — pinned and scheduled for a Node-24 bump.
+
+**Deliberately out of scope (won't fix):** URL query-string scanning; always-on base64/encoded-value decoding (opt-in only via `filters.decodeAndRescan`); dashboard write actions (the audit viewer is read-only by design); OS-level (seccomp) plugin sandboxing; and any compliance certification. **Haechi is not a compliance guarantee.**
+
 ## Security Notes
 
 - This project is not a compliance guarantee.
@@ -335,3 +370,9 @@ Set `privacy.profile` in `haechi.config.json` to apply the profile's default act
 1.0.0 is the **first stable release**. It declares a frozen API contract under strict semver: the `package.json` `exports` surface, the CLI's machine-readable behavior, the audit event schema (including its nested sub-schemas and `schemaVersion`), and the config key shape are all part of the major-versioned contract, guarded by `tests/api-contract.test.mjs` and governed by a documented deprecation policy (`HAECHI_DEPRECATION_*` runtime warnings, removal only at the next major) with a single in-minor security exception for disclosed vulnerabilities (see [`docs/current/api-stability.md`](docs/current/api-stability.md)). 1.0 also lifts the dynamic-loading ban **narrowly**, for `authProvider` plugins only: an Ed25519-signed (asymmetric `node:crypto` verification with trust-anchor-only key resolution, entry-hash binding, version pin/floor, revocation, and a signing window), capability-gated, `worker_threads`-isolated, fully audited plugin sandbox. Dependency injection (`createRuntime(config, providers)`) stays the default. **Honest residual:** the worker is memory/crash isolation and data-minimization, not a capability sandbox — a malicious *signed* plugin can still use `fs`/`net` and exfiltrate the credential slice it receives, so the load-bearing control is the trust gate; true capability enforcement (child-process + Node permission model) is a 1.x target. The four `haechi-*` satellites (`haechi-auth-jwt@0.2.1`, `haechi-crypto-kms@0.2.1`, `haechi-dashboard@0.1.2`, `haechi-auth-oidc@0.1.2`) stay pre-1.0, version independently, and widen their `haechi` peer range to `>=0.8.0 <2.0.0` so core 1.0.0 does not break their installs. See `docs/current/release-1.0-implementation-scope.md`.
 
 1.1.0 closes the most-cited 1.0 honest residual with **real plugin capability enforcement**: a new opt-in `process-isolated` authProvider runtime (`auth.plugin.isolation: "process"`) runs the signed plugin in a child process under the Node permission model (`--permission`, **zero grants**), loaded from a `data:` URL (no filesystem grant), with `stdio: ['ignore','ignore','ignore','ipc']` and a scrubbed env. On a Node that enforces `--allow-net`, the kernel denies the plugin's `fs`/`net`/`fetch`/`dns`/`child_process`/`worker` *and* the `process.binding('tcp_wrap')` bypass, so a malicious signed plugin cannot exfiltrate the credential it receives. Network containment is the kernel `--allow-net` denial (not a deletable JS harness); the default `netEnforcement: "require-permission"` **fails closed** (refuses to construct) on a Node without `--allow-net`. For a custom-credential plugin, the **host** fetches operator-declared key material through an SSRF-hardened core guard (`haechi/ssrf`) and injects it over the IPC — the plugin never names a URL. A spawn-storm circuit breaker bounds respawns. The unchanged 1.0 `worker_threads` mode stays the default; `process-isolated` is additive and opt-in (a **minor** under strict semver). See `docs/current/release-1.1-implementation-scope.md`.
+
+1.2.0 is the Reliability Hardening Track (WS1–WS6, additive behind 1.1-preserving defaults): a labeled-corpus detection precision/recall benchmark + regression gate; `filters.minConfidence` / `filters.allowlist` with a non-suppressible hard-block-types invariant; NFKC unicode-evasion folding; an injectable rate-limiter seam; operability (`/__haechi/live`+`/ready`, injectable `/metrics`, structured logs + per-request `correlationId`, graceful drain, env overlay, hardened Dockerfile/compose); and proxy TLS / remote-bind hardening plus an OWASP-LLM / NIST control-mapping whitepaper. See `docs/current/reliability-hardening-track.md`.
+
+1.3.0 expands backends and detection: protocol adapters for the **Anthropic Messages API** and **Google Gemini API**; cloud/SaaS provider-key detection and international PII (FR/ES/JP/IT/SG/IN/DE/NL national IDs, checksum-validated, each hard-block-vs-allowlist-clearable decision driven by measured collision rates); a proxy throughput benchmark; and the `haechi-ratelimit-redis` shared-store rate-limiter satellite. All additive (new `target.type`/detection-type/profile *values*, `configVersion` stays `1`).
+
+1.3.1 → 1.3.3 are security-remediation and hardening **patches** (no API/config change). 1.3.1 and 1.3.2 close two external code-review rounds — proxy header-boundary credential leak, hex IPv4-mapped IPv6 SSRF, response-header/streaming bounds, and non-JSON streaming inspection (1.3.1); proxy upstream-reader cancel-on-disconnect, token-vault audit-log hygiene, and plugin IPC reply bounds (1.3.2). 1.3.3 tightens the response-direction marker skip (a model can't wrap a secret in a fake `[TOKEN:…]` to evade scanning) and adds the cosign-signed GHCR container image.
