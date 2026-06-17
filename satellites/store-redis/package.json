@@ -1,6 +1,6 @@
 {
   "name": "haechi-store-redis",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared-store (Redis-backed) audit + token-vault satellites for Haechi (the 1.5.0 store seams) — the sha256 audit chain and the tokenization vault held across replicas over an injected store/client.",
   "license": "Apache-2.0",
   "type": "module",
