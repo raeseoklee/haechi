@@ -1103,14 +1103,19 @@ export function createOidcSessionBroker(options = {}) {
 
     const sessionId = randomToken(SESSION_ID_BYTES);
     const createdAt = now();
-    const session = { identity, createdAt, lastSeen: createdAt };
+    // `gen` is a monotonic per-session generation used by the refresh commit's
+    // resurrection guard (a logout during a refresh deletes the id; the refresh
+    // must not re-create it).
+    const session = { identity, createdAt, lastSeen: createdAt, gen: 0 };
 
     // --- refresh custody: store the refresh token as CIPHERTEXT only ---
     //
     // Only when enableRefresh AND the IdP actually returned a non-empty
     // refresh_token (RFC 6749 §5.1). The plaintext token is encrypted with the
     // domain-separated AAD and only the envelope is persisted; originalCreatedAt
-    // pins the hard-ceiling anchor and subject pins the anti-swap subject. The
+    // pins the hard-ceiling anchor. The anti-swap pin is the keyed-HMAC
+    // `session.identity.subjectHash` (already stored) — the raw `sub` is NEVER
+    // persisted, so a custom Redis/DB sessionStore holds no PII at rest. The
     // access/id token is NEVER stored. If the IdP returned no refresh_token, this
     // is a normal (non-renewable) session — proceed exactly as before. A failure
     // to encrypt fails closed (no session can be minted with a plaintext token).
@@ -1125,7 +1130,6 @@ export function createOidcSessionBroker(options = {}) {
       }
       session.refreshTokenEnvelope = refreshEnvelope;
       session.originalCreatedAt = createdAt;
-      session.subject = claims.sub; // anti-swap pin (raw sub stays server-side only)
     }
 
     sessionStore.set(sessionId, session);
@@ -1342,6 +1346,10 @@ export function createOidcSessionBroker(options = {}) {
   //   5. On success: reset createdAt (new absolute window), keep originalCreatedAt
   //      + the ceiling, rotate the stored ciphertext if the IdP rotated the token.
   async function performRefresh(sessionId, session, t) {
+    // The session generation captured BEFORE any network wait. The commit guard
+    // below only persists if the live session still exists with this same gen —
+    // a logout/eviction during the refresh deletes the id and must not be undone.
+    const expectedGen = session.gen ?? 0;
     // (1) Hard lifetime ceiling — absolute. No refresh may cross it.
     const ceiling = session.originalCreatedAt + refreshMaxLifetimeSeconds * 1000;
     if (t >= ceiling) {
@@ -1400,9 +1408,25 @@ export function createOidcSessionBroker(options = {}) {
       return null;
     }
 
-    // (4) ANTI-SWAP: the renewed subject MUST equal the pinned subject. A refresh
-    // returning a different subject is rejected (fail closed, evict).
-    if (typeof claims.sub !== "string" || claims.sub !== session.subject) {
+    // (4) ANTI-SWAP via keyed-HMAC (no raw sub stored): rebuild the identity from
+    // the renewed claims and compare its keyed-HMAC subjectHash to the pinned
+    // session identity's. A different subject yields a different HMAC -> reject
+    // (fail closed, evict). This keeps the raw `sub` out of the session store.
+    if (typeof claims.sub !== "string" || !claims.sub) {
+      await evictSession(sessionId, REASON.refresh_subject_mismatch);
+      return null;
+    }
+    let renewedIdentity;
+    try {
+      renewedIdentity = await buildExternalIdentity(
+        { provider: IDENTITY_PROVIDER, subject: claims.sub, issuer: claims.iss, type: "user", scopes: [], labels: {} },
+        cryptoProvider
+      );
+    } catch {
+      await evictSession(sessionId, REASON.refresh_failed);
+      return null;
+    }
+    if (renewedIdentity.subjectHash !== session.identity.subjectHash) {
       await evictSession(sessionId, REASON.refresh_subject_mismatch);
       return null;
     }
@@ -1427,8 +1451,18 @@ export function createOidcSessionBroker(options = {}) {
       session.refreshTokenEnvelope = rotated;
     }
 
-    // Identity is rebuilt only if needed; sub is pinned/unchanged so the existing
-    // keyed-HMAC identity stays valid. Persist and audit (sessionIdHash only).
+    // RESURRECTION GUARD: a logout (or eviction) that landed during the refresh
+    // network wait deleted this sessionId — re-saving here would silently undo the
+    // logout. The sessionStore is synchronous, so this get-check and the set run in
+    // ONE event-loop turn with NO await between them: a concurrent logout cannot
+    // interleave. The generation compare also rejects a session replaced under the
+    // same id. If the live session is gone or changed, stay gone (do NOT resurrect).
+    session.identity = renewedIdentity; // keep identity fresh (subjectHash matched)
+    const live = sessionStore.get(sessionId);
+    if (!live || (live.gen ?? 0) !== expectedGen) {
+      return null;
+    }
+    session.gen = expectedGen + 1;
     sessionStore.set(sessionId, session);
     const sidHash = await sessionIdHash(sessionId).catch(() => null);
     emit(buildEvent("oidc.session.refresh", sidHash ? { identity: session.identity, sessionIdHash: sidHash } : { identity: session.identity }));
