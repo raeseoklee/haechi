@@ -1,11 +1,17 @@
 // Distributed-lock helper for haechi-store-redis.
 //
-// The 1.5.0 audit + token-vault STORE seams both hinge on an EXCLUSIVE critical
-// section (audit `transaction(fn)`, token `mutate(fn)`): the store must
-// serialize the read-previous+persist (audit) and the read-all+mutate+persist
-// (token) so concurrent writers — crucially, MULTIPLE REPLICAS sharing one
-// Redis — never fork the hash chain or lose a token. A single-process mutex is
-// not enough across replicas; we need a lock that lives in Redis itself.
+// CONTENTION-REDUCTION OPTIMIZATION, NOT THE CORRECTNESS MECHANISM. This lock is
+// a TTL lock (SET NX PX) with no fencing token renewal, so a holder whose `fn`
+// runs longer than ttlMs can have its lock expire mid-operation and a second
+// writer can enter concurrently. That is fine here: correctness NO LONGER
+// depends on perfect mutual exclusion. The audit store appends with a SERVER-SIDE
+// compare-and-append fenced on the head eventHash, and the token store applies
+// its diff with a SERVER-SIDE compare-and-apply fenced on a version counter —
+// each REJECTS a stale writer (and the caller retries onto the fresh state). So
+// a forked hash chain or a lost token write is impossible EVEN IF the TTL lapses
+// and two writers run at once. The lock just reduces how often those fences
+// conflict-and-retry under contention; it is a throughput optimization layered
+// over fences that are already safe on their own.
 //
 // `withRedisLock(client, lockKey, fn, opts)` implements the canonical
 // single-instance Redlock-style lock:

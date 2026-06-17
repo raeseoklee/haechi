@@ -122,9 +122,30 @@ test("shared token vault: tokenize on replica A reveals on replica B", {
     const revealed = await vaultB.reveal({ token });
     assert.equal(revealed.plaintext, secret, "replica B reveals replica A's token");
     assert.equal(revealed.type, "card");
+
+    // Exercise the version-fence Lua's HDEL loop against REAL Redis (the A->B
+    // case above only hits the HSET path): purge on B, then re-tokenize on A.
+    const purged = await vaultB.purge({ token });
+    assert.equal(purged.purged, true, "replica B purges replica A's token");
+    await assert.rejects(() => vaultA.reveal({ token }), "purged token no longer reveals");
+    const reissued = await vaultA.tokenize({ plaintext: secret, type: "card" });
+    assert.equal((await vaultB.reveal({ token: reissued.token })).plaintext, secret, "re-tokenized after purge round-trips");
   } finally {
     await rm(dir, { recursive: true, force: true });
     await clientA.quit();
     await clientB.quit();
+  }
+});
+
+test("redis audit store ready() write-probe is ok against real Redis", { skip: !REDIS_URL }, async () => {
+  const client = await connect();
+  try {
+    const store = createRedisAuditStore({ client, keyPrefix: `haechi:audit:ready:${RUN}:` });
+    // Exercises the ready() write-probe Lua (SET ... PX) against real Redis — a
+    // reachable + writable store is ready.
+    const probe = await store.ready();
+    assert.deepEqual(probe, { ok: true }, `ready() must be ok against a live writable Redis: ${probe.reason ?? ""}`);
+  } finally {
+    await client.quit();
   }
 });
