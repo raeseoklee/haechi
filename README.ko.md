@@ -8,13 +8,17 @@
 [![CI](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml/badge.svg)](https://github.com/raeseoklee/haechi/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/haechi)](https://nodejs.org)
-[![status](https://img.shields.io/badge/status-stable%201.2-brightgreen)](docs/current/api-stability.md)
+[![status](https://img.shields.io/badge/status-stable%201.3-brightgreen)](docs/current/api-stability.md)
 
 [English](README.md) | **한국어**
 
 Haechi는 LLM·MCP·vLLM·Ollama 및 에이전트 payload가 모델, 도구, 로그, proxy에 도달하기 전에 보호하는 자체 호스팅 AI 컨텍스트 집행 레이어입니다.
 
 이름은 분별과 보호를 상징하는 한국의 수호 신수 해치에서 따왔습니다.
+
+**무엇인가:** 직접 운영하는 로컬 자체 호스팅 **게이트웨이이자 라이브러리**입니다. OpenAI 호환 / MCP / vLLM / Ollama / 에이전트 JSON을 검사하여, PII와 비밀이 모델, 도구, 로그에 도달하기 전에 redact·mask·tokenize·encrypt하거나 차단합니다.
+
+**무엇이 *아닌가*:** 즉시 사용 가능한 **운영용 어플라이언스**, 관리형/호스팅 서비스, 컴플라이언스 보장이 아닙니다. 코어에는 운영용 KMS/HSM도, 내장 TLS도, 인터넷 노출 대비 강화도 들어 있지 않습니다 — 네트워크 통제, 인증, 키 custody, TLS 종단 reverse proxy는 **사용자**가 직접 갖춰야 합니다. 배포하기 전에 [Known limitations](#known-limitations)를 참고하십시오.
 
 이 저장소는 로컬 개발, 보안 설계 검토, 자체 호스팅 통합 실험을 위한 것입니다. 컴플라이언스를 보장하지는 않습니다.
 
@@ -54,16 +58,31 @@ HAECHI_LIVE_UPSTREAM=http://127.0.0.1:8000 node examples/local-proxy-demo/live-d
 
 ## 설치
 
+### npm
+
 ```bash
-npm install -g haechi
+npm install -g haechi      # or: npx haechi init  (run without installing)
 haechi init
 ```
 
-설치 없이 실행하려면:
+배포된 패키지의 공급망을 검증하십시오(`0.3.2` 이후 모든 릴리스에 attestation이 붙습니다):
 
 ```bash
-npx haechi init
+npm audit signatures       # npm SLSA provenance attestation
 ```
+
+### Docker (GHCR)
+
+각 릴리스는 **cosign으로 서명된** 이미지를 `ghcr.io/raeseoklee/haechi`(태그 `1.3.3`, `1.3`, `1`, `latest`)에 발행합니다. 검증한 뒤 **TLS 종단 reverse proxy 뒤에서** 실행하십시오(이미지는 `proxy.trustForwardedProto: true`로 `0.0.0.0`에 바인딩합니다):
+
+```bash
+cosign verify ghcr.io/raeseoklee/haechi:1.3.3 \
+  --certificate-identity-regexp '^https://github.com/raeseoklee/haechi/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker run --rm -p 127.0.0.1:11016:11016 ghcr.io/raeseoklee/haechi:1.3.3
+```
+
+강화된 compose 스택과 day-2 운영은 [`docs/current/operations-runbook.md`](docs/current/operations-runbook.md)를 참고하십시오.
 
 ## 빠른 시작
 
@@ -291,6 +310,22 @@ Haechi는 로컬 정책 부트스트래핑을 위한 지역별 기본 Privacy Pr
 
 `haechi.config.json`에서 `privacy.profile`을 설정하면 집행 전에 해당 프로필의 기본 action이 적용됩니다. 이 프로필은 엔지니어링 기본값이며, 법적 자문이 아닙니다.
 
+## Known limitations
+
+Haechi는 의도적으로 범위를 좁혔습니다. 아래는 숨기지 않고 솔직하게 밝히는 현재의 실제 한계입니다.
+
+- **탐지는 ML이 아니라 정규식 + 검증기입니다.** 규칙은 prefix/charclass/length로 앵커링되고 checksum 검증기(Luhn, KR RRN, IBAN mod-97, national-ID 검사)를 함께 씁니다 — 알려진 형태에는 강한 정밀도를 보이지만, 새롭거나 난독화된 비밀은 놓칠 수 있습니다. `filters.minConfidence` / `filters.allowlist`로 튜닝하십시오. ML/분류기 레이어는 백로그이며 아직 출시되지 않았습니다.
+- **스트리밍 매칭 윈도우에는 한계가 있습니다.** cross-frame PII는 JSON **델타 채널**에서 `streaming.maxMatchBytes`(기본값 256)까지 잡힙니다. **비JSON** SSE/NDJSON 프레임에 걸쳐 나뉜 매치는 프레임 단위로만 검사됩니다(문서화된 잔존 위험).
+- **응답 검사는 보조 방어입니다.** 응답 방향은 기본적으로 bare JSON **number** leaf를 스캔하지 않습니다(inference 서버 메타데이터라 false-positive만 냅니다). 엄격한 위협 모델에서는 `responseProtection.scanNumbers: true`로 활성화하십시오.
+- **MCP `--stderr filter`는 줄 단위입니다.** 완전한 stderr 한 줄씩 보호하므로, 자식이 개행을 넘어 쪼갠 비밀은 잡지 못합니다(앵커링된 정규식은 `\n`을 가로질러 매치할 수 없습니다). 고민감 로컬 도구에는 `--stderr drop`을 쓰십시오.
+- **Audit 꼬리 절단에는 별도 미디어가 필요합니다.** `haechi audit-verify`는 수정, 재정렬, 중간 변조를 탐지합니다. *꼬리* 레코드 삭제는 추가 전용/별도 저장소에 기록된 `audit.anchor`로만 탐지할 수 있습니다.
+- **Rate limiting은 기본적으로 프로세스별입니다.** N개 replica 뒤에서는 내장 limiter가 독립적으로 카운트합니다 — 플릿 전체 예산을 쓰려면 공유 저장소(`haechi-ratelimit-redis` 위성)를 주입하십시오.
+- **플러그인 샌드박스: 기본 `worker_threads` 모드는 capability 샌드박스가 아닙니다**(Ed25519 trust gate로 게이트된 메모리/크래시 격리 + 데이터 최소화입니다). 진정한 커널 강제 봉쇄는 opt-in `process-isolated` 런타임이며, 이는 `--allow-net`을 강제하는 Node를 필요로 합니다.
+- **코어에는 운영용 키 custody가 없습니다.** 로컬 AES-256-GCM 소프트웨어 키 파일은 **개발 전용**입니다. KMS/HSM/Vault 기반 custody에는 `haechi-crypto-kms` 위성을 쓰십시오.
+- **CI 참고:** GHCR 이미지 발행 워크플로의 `docker/*` 액션은 아직 Node 20에서 실행됩니다(GitHub deprecation 경고이며 non-blocking입니다) — pin되어 있고 Node-24 bump이 예정되어 있습니다.
+
+**의도적으로 범위 밖 (won't fix):** URL 쿼리 스트링 스캔; 항상 켜진 base64/인코딩 값 디코딩(`filters.decodeAndRescan`을 통한 opt-in만 지원); 대시보드 쓰기 동작(audit 뷰어는 설계상 읽기 전용); OS 수준(seccomp) 플러그인 샌드박싱; 그리고 일체의 컴플라이언스 인증. **Haechi는 컴플라이언스를 보장하지 않습니다.**
+
 ## 보안 노트
 
 - 이 프로젝트는 컴플라이언스를 보장하지 않습니다.
@@ -335,3 +370,9 @@ Haechi는 로컬 정책 부트스트래핑을 위한 지역별 기본 Privacy Pr
 1.0.0은 **첫 stable 릴리스**입니다. strict semver 하의 frozen API 계약을 선언합니다. `package.json`의 `exports` 표면, CLI의 기계 판독 동작, audit event schema(중첩 sub-schema와 `schemaVersion` 포함), config key shape이 모두 major 버전 계약의 일부이며, `tests/api-contract.test.mjs`가 이를 가드하고, 문서화된 deprecation 정책(`HAECHI_DEPRECATION_*` 런타임 경고, 제거는 다음 major에서만)과 공개된 취약점에 대한 in-minor 보안 예외 하나가 이를 규율합니다([`docs/current/api-stability.md`](docs/current/api-stability.md) 참고). 1.0은 또한 dynamic-loading 금지를 **좁게** 해제합니다 — `authProvider` 플러그인에 한해, Ed25519 서명(trust-anchor 전용 키 해석, entry-hash 바인딩, 버전 pin/floor, revocation, 서명 윈도우를 갖춘 비대칭 `node:crypto` 검증)에 capability-gated, `worker_threads` 격리, 완전 감사되는 플러그인 샌드박스를 허용합니다. dependency injection(`createRuntime(config, providers)`)이 기본으로 유지됩니다. **정직한 잔존 위험:** worker는 메모리/크래시 격리와 데이터 최소화일 뿐 capability 샌드박스가 아니므로, 악의적인 *서명된* 플러그인은 여전히 `fs`/`net`을 써서 받은 credential 슬라이스를 유출할 수 있습니다. 따라서 load-bearing 통제는 trust gate이며, 진정한 capability 강제(child-process + Node permission model)는 1.x 목표입니다. 네 개의 `haechi-*` 위성(`haechi-auth-jwt@0.2.1`, `haechi-crypto-kms@0.2.1`, `haechi-dashboard@0.1.2`, `haechi-auth-oidc@0.1.2`)은 pre-1.0으로 유지되고 독립적으로 버저닝하며, `haechi` peer 범위를 `>=0.8.0 <2.0.0`으로 넓혀 core 1.0.0이 그 설치를 깨뜨리지 않게 합니다. `docs/current/release-1.0-implementation-scope.md` 참고.
 
 1.1.0은 가장 많이 거론되던 1.0의 정직한 잔존 위험을 **진정한 플러그인 capability 강제**로 닫습니다. 새 opt-in `process-isolated` authProvider 런타임(`auth.plugin.isolation: "process"`)은 서명된 플러그인을 Node 권한 모델(`--permission`, **부여 0**) 하의 자식 프로세스에서 실행합니다 — `data:` URL 로드(파일시스템 권한 없음), `stdio: ['ignore','ignore','ignore','ipc']`, 정화된 env. `--allow-net`을 강제하는 Node에서 커널이 플러그인의 `fs`/`net`/`fetch`/`dns`/`child_process`/`worker`는 물론 `process.binding('tcp_wrap')` 우회까지 거부하므로, 악의적 서명 플러그인은 받은 credential을 유출할 수 없습니다. 네트워크 봉쇄는 커널의 `--allow-net` 거부이며(삭제 가능한 JS 하니스가 아닙니다), 기본값 `netEnforcement: "require-permission"`은 `--allow-net`이 없는 Node에서 **fail closed**(생성 거부)합니다. 커스텀 자격증명 플러그인의 경우, **호스트**가 운영자 선언 키 자료를 SSRF 강화 코어 가드(`haechi/ssrf`)로 가져와 IPC로 주입하므로 플러그인은 URL을 직접 지정하지 않습니다. spawn-storm 서킷 브레이커가 재spawn을 제한합니다. 변경되지 않은 1.0 `worker_threads` 모드가 기본으로 유지되며, `process-isolated`는 additive + opt-in(strict semver 하의 **마이너**)입니다. `docs/current/release-1.1-implementation-scope.md` 참고.
+
+1.2.0은 Reliability Hardening Track(WS1–WS6, 1.1을 보존하는 기본값 뒤에서 additive)입니다. 레이블링된 코퍼스 기반 탐지 정밀도/재현율 벤치마크 + 회귀 게이트; non-suppressible hard-block-types 불변식을 갖춘 `filters.minConfidence` / `filters.allowlist`; NFKC 유니코드 회피 폴딩; 주입 가능한 rate-limiter 시임; 운영성(`/__haechi/live`+`/ready`, 주입 가능한 `/metrics`, 구조화 로그 + 요청별 `correlationId`, graceful drain, env 오버레이, 강화된 Dockerfile/compose); 그리고 proxy TLS / remote-bind 강화에 더해 OWASP-LLM / NIST 통제 매핑 백서를 담았습니다. `docs/current/reliability-hardening-track.md` 참고.
+
+1.3.0은 백엔드와 탐지를 확장합니다. **Anthropic Messages API**와 **Google Gemini API**용 프로토콜 adapter; 클라우드/SaaS provider-key 탐지와 국제 PII(FR/ES/JP/IT/SG/IN/DE/NL national ID, checksum 검증, hard-block-vs-allowlist-clearable 결정은 측정된 collision rate로 결정); proxy 처리량 벤치마크; 그리고 `haechi-ratelimit-redis` 공유 저장소 rate-limiter 위성을 추가합니다. 모두 additive입니다(새 `target.type`/탐지 type/profile *값*, `configVersion`은 `1`로 유지).
+
+1.3.1 → 1.3.3은 보안 교정과 강화 **패치**입니다(API/config 변경 없음). 1.3.1과 1.3.2는 두 차례의 외부 코드 리뷰 라운드를 닫습니다 — proxy 헤더 경계 credential 유출, hex IPv4-mapped IPv6 SSRF, 응답 헤더/스트리밍 경계, 비JSON 스트리밍 검사(1.3.1); proxy upstream-reader 연결 끊김 시 취소, token-vault audit 로그 위생, 플러그인 IPC 응답 경계(1.3.2). 1.3.3은 응답 방향 마커 skip을 강화하고(모델이 비밀을 가짜 `[TOKEN:…]`로 감싸 스캔을 회피할 수 없음) cosign으로 서명된 GHCR 컨테이너 이미지를 추가합니다.
