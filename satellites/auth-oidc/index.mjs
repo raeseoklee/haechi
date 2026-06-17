@@ -79,7 +79,8 @@ const REASON = {
   refresh_failed: "refresh_failed",          // network / non-2xx / parse at the token endpoint
   refresh_token_invalid: "refresh_token_invalid", // new id_token failed verification
   refresh_subject_mismatch: "refresh_subject_mismatch", // anti-swap: new sub != pinned sub
-  refresh_ceiling: "refresh_ceiling"         // hard lifetime ceiling reached
+  refresh_ceiling: "refresh_ceiling",        // hard lifetime ceiling reached
+  store_async: "store_async"                 // sessionStore breached the sync contract (async delete) — destruction not confirmed
 };
 
 // --- small utilities -------------------------------------------------------
@@ -179,15 +180,21 @@ export function createInMemoryPendingStore({ cap = DEFAULT_PENDING_CAP } = {}) {
 
 // sessionStore: opaque-id -> session. Absolute + idle TTL enforced by the broker.
 //
-// CONTRACT: a sessionStore MUST be SYNCHRONOUS. get() returns the session object
-// (or null) in the same event-loop turn — never a Promise. The broker reads
-// get() and acts on it synchronously in authenticate(), logout(), and the refresh
-// resurrection guard, whose get-then-set atomicity depends on it. An async
-// (Redis/DB) store whose get() returns a Promise is rejected fail-closed at
-// construction (a truthy Promise would otherwise look like a valid session and
-// authenticate an arbitrary cookie). To use a shared backend, wrap it in a
-// synchronous in-process cache. A natively-async shared store is a future item:
-// it needs a CAS/version/tombstone contract, not just `await`.
+// CONTRACT: a sessionStore MUST be SYNCHRONOUS in ALL of get/set/delete — each
+// completes in the same event-loop turn and never returns a Promise. The broker
+// reads get()/set()/delete() and acts on them synchronously in authenticate(),
+// logout(), evictSession(), and the refresh resurrection guard, whose
+// get-then-set atomicity depends on it. Two fail-OPEN vectors if a store is async:
+//   - get() returning a Promise makes a truthy Promise look like a valid session
+//     (an arbitrary cookie authenticates);
+//   - delete() that defers means logout responds 200 while the session is still
+//     live (a replayed cookie keeps authenticating).
+// So all three methods are probed at construction and a thenable result is
+// rejected fail-closed; logout/eviction additionally confirm the session is
+// provably gone in-turn (destroySessionSync) and fail closed (500, never a 200
+// "logged_out") otherwise. To use a shared backend, wrap it in a synchronous
+// in-process cache. A natively-async shared store is a future item: it needs a
+// CAS/version/tombstone contract, not just `await`.
 export function createInMemorySessionStore() {
   const map = new Map();
   return {
@@ -571,24 +578,35 @@ export function normalizeOidcConfig(options = {}) {
     if (typeof s.get !== "function" || typeof s.set !== "function" || typeof s.delete !== "function") {
       throw new Error("normalizeOidcConfig 'sessionStore' must implement get/set/delete");
     }
-    // The broker requires a SYNCHRONOUS sessionStore: authenticate(), logout(),
-    // and the refresh resurrection guard read get() and act on it in the SAME
-    // event-loop turn (the guard's get-then-set atomicity depends on it). An async
-    // store whose get() returns a Promise would make a truthy Promise look like a
-    // valid session — a fail-OPEN that authenticates an arbitrary cookie. Probe a
-    // non-existent id and reject a thenable result FAIL-CLOSED at construction.
-    // (A shared async/Redis session store is a future item; it needs a CAS/version
-    // contract, not just `await` — wrap an async store in a synchronous cache, or
-    // use the in-memory default.)
-    let probe;
-    try {
-      probe = s.get("__haechi_sessionstore_sync_probe__");
-    } catch (error) {
-      throw new Error(`normalizeOidcConfig 'sessionStore.get' threw during the synchronous-contract probe: ${error?.message ?? error}`);
-    }
-    if (probe && typeof probe.then === "function") {
-      throw new Error("normalizeOidcConfig 'sessionStore' must be SYNCHRONOUS: get() returned a thenable/Promise. An async (Redis/DB) session store is not supported — the refresh resurrection guard requires synchronous get-then-set. Wrap it in a synchronous cache or use the in-memory default.");
-    }
+    // The broker requires a SYNCHRONOUS sessionStore. authenticate(), logout(),
+    // evictSession(), and the refresh resurrection guard read get()/set()/delete()
+    // and act on them in the SAME event-loop turn (the guard's get-then-set
+    // atomicity depends on it). Two fail-OPEN vectors if a store is async:
+    //   - get() returning a Promise makes a truthy Promise look like a valid
+    //     session — an arbitrary cookie authenticates.
+    //   - delete() that defers (async) means logout responds 200 while the session
+    //     is still live in the store — a replayed cookie keeps authenticating.
+    // So probe ALL THREE methods against a reserved id and reject any thenable
+    // result FAIL-CLOSED at construction (set() probes by writing then deleting a
+    // sentinel; the delete() probe also cleans it up). (A shared async/Redis store
+    // is a future item; it needs a CAS/version/tombstone contract, not just
+    // `await` — wrap an async store in a synchronous cache, or use the default.)
+    const PROBE_ID = "__haechi_sessionstore_sync_probe__";
+    const probeSync = (method, run) => {
+      let ret;
+      try {
+        ret = run();
+      } catch (error) {
+        throw new Error(`normalizeOidcConfig 'sessionStore.${method}' threw during the synchronous-contract probe: ${error?.message ?? error}`);
+      }
+      if (ret && typeof ret.then === "function") {
+        throw new Error(`normalizeOidcConfig 'sessionStore' must be SYNCHRONOUS: ${method}() returned a thenable/Promise. An async (Redis/DB) session store is not supported — authenticate()/logout() and the refresh resurrection guard require synchronous get/set/delete (an async delete() leaves a logged-out session replayable). Wrap it in a synchronous cache or use the in-memory default.`);
+      }
+      return ret;
+    };
+    probeSync("get", () => s.get(PROBE_ID));
+    probeSync("set", () => s.set(PROBE_ID, { __haechiSyncProbe: true }));
+    probeSync("delete", () => s.delete(PROBE_ID));
   }
   if (options.pendingStore !== undefined && options.pendingStore !== null) {
     const s = options.pendingStore;
@@ -1302,8 +1320,21 @@ export function createOidcSessionBroker(options = {}) {
         sidHash = await sessionIdHash(sessionId);
         idTokenHint = session.idTokenHint || null;
       }
-      // Destroy the server-side session (replaying the cookie yields nothing).
-      sessionStore.delete(sessionId);
+      // Destroy the server-side session SYNCHRONOUSLY (replaying the cookie must
+      // yield nothing). A store that breaches the sync contract (an async/deferred
+      // delete) would leave the session live and replayable — logout would 200
+      // while the cookie still authenticates. Fail CLOSED: clear the cookie and
+      // 500, never report success. (The construction probe already rejects such a
+      // store; this is the runtime defense-in-depth.)
+      if (!destroySessionSync(sessionId)) {
+        clearCookie(res, cookieNames.session);
+        emit(buildEvent("oidc.session.evict", sidHash ? { sessionIdHash: sidHash, reasonCode: REASON.store_async } : { reasonCode: REASON.store_async }));
+        res.statusCode = 500;
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ error: "logout_failed" }));
+        return;
+      }
     }
     clearCookie(res, cookieNames.session);
 
@@ -1350,12 +1381,30 @@ export function createOidcSessionBroker(options = {}) {
     res.end(JSON.stringify({ status: "logged_out" }));
   }
 
+  // Destroy a server-side session and confirm it is gone in THIS event-loop turn.
+  // Returns true iff the session is provably destroyed synchronously. The sync
+  // sessionStore contract (enforced at construction) guarantees this; the runtime
+  // re-check is defense-in-depth so a store that breaches the contract (an async/
+  // deferred delete whose return is a thenable, or that simply does not remove the
+  // entry synchronously) fails CLOSED rather than leaving a logged-out / evicted
+  // session replayable.
+  function destroySessionSync(sessionId) {
+    const ret = sessionStore.delete(sessionId);
+    if (ret && typeof ret.then === "function") return false; // async/deferred delete
+    const residual = sessionStore.get(sessionId);
+    if (residual && typeof residual.then === "function") return false; // async get
+    return !residual; // gone only if no record remains synchronously
+  }
+
   // Evict a session and emit an evict/refresh-failure audit event (sessionIdHash
   // only — NEVER a token). Centralized so every fail-closed path is identical.
+  // Routes through destroySessionSync so an async-delete contract breach is
+  // recorded (store_async) instead of silently leaving the session live.
   async function evictSession(sessionId, reasonCode) {
-    sessionStore.delete(sessionId);
+    const destroyed = destroySessionSync(sessionId);
     const sidHash = await sessionIdHash(sessionId).catch(() => null);
-    emit(buildEvent("oidc.session.evict", sidHash ? { sessionIdHash: sidHash, reasonCode } : { reasonCode }));
+    const code = destroyed ? reasonCode : REASON.store_async;
+    emit(buildEvent("oidc.session.evict", sidHash ? { sessionIdHash: sidHash, reasonCode: code } : { reasonCode: code }));
   }
 
   // Perform ONE silent refresh for a renewable session. Returns the renewed live
