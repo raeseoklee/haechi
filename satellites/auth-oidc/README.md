@@ -98,6 +98,14 @@ How a silent renewal stays safe:
 
 See `docs/current/release-0.9-implementation-scope.md` §2.2 for the full specification.
 
+## Session store (`sessionStore`) — synchronous contract
+
+The session store is pluggable via `sessionStore` (default: the in-memory `createInMemorySessionStore()`), but it **MUST be synchronous**. `get()` returns the session object (or `null`) in the same event-loop turn — it must **never** return a `Promise`. The broker reads `get()` and acts on it synchronously in `authenticate()`, `logout()`, and the refresh resurrection guard, whose get-then-set atomicity (a logged-out / superseded session must never be silently resurrected by a concurrent refresh) depends on a synchronous read.
+
+An async (Redis/DB) store whose `get()` returns a `Promise` is **rejected fail-closed at construction** (`normalizeOidcConfig` probes a non-existent id and throws if the result is thenable), and `authenticate()` carries a defense-in-depth thenable guard so a store that slips past construction still fails closed rather than treating a truthy `Promise` as a valid session (which would authenticate an arbitrary cookie). To use a shared backend, wrap it in a synchronous in-process cache.
+
+A natively-async shared session store is intentionally **out of scope** for now: it needs a CAS / version / tombstone contract for the resurrection guard, not just `await` — that is a future item.
+
 ## 한국어 (요약)
 
 이 위성에는 별도 `README.ko.md` 형제 파일이 없습니다(저장소의 다른 위성 README도 모두 영문 단독입니다). 영문-주 + 한국어-형제 관례에 따라 새 옵션을 아래에 요약합니다.
@@ -107,3 +115,5 @@ See `docs/current/release-0.9-implementation-scope.md` §2.2 for the full specif
 - **`enableRefresh`** (boolean, 기본 `false`): opt-in silent refresh. `true`이면 `offline_access`를 요청·유지해 IdP가 `refresh_token`을 반환하게 하고, 절대 TTL의 마지막 1/4 구간에 든 세션을 무인 갱신합니다. **`encrypt()`/`decrypt()`를 갖춘 `cryptoProvider`가 필수**이며(없이 `true`로 설정하면 구성 시 fail-closed), refresh token은 절대 평문으로 보관되지 않습니다. refresh token은 **AEAD 봉투(envelope)로만** 저장되고(도메인 분리 AAD), 갱신된 `id_token`은 공유 verifier로 **완전 재검증**되며 로그인 시 핀된 `sub`와 일치해야 합니다(anti-swap). 갱신은 항상 **fail-closed**입니다. `at_hash`/`c_hash`는 갱신이 access token이 아닌 `refresh_token`만 소비하므로 **여전히 범위 외**입니다.
 
 - **`refreshMaxLifetimeSeconds`** (양의 정수, 기본 `604800` = 7일, `MAX_TTL` 30일 이하로 제한): 모든 갱신을 통틀어 **세션 총 수명의 하드 상한**입니다. 어떤 무인 갱신도 `originalCreatedAt + refreshMaxLifetimeSeconds`를 넘기지 못합니다.
+
+- **`sessionStore`** (기본 `createInMemorySessionStore()`): 교체 가능하지만 **반드시 동기(synchronous)** 여야 합니다. `get()`은 같은 이벤트 루프 턴에서 세션 객체(또는 `null`)를 반환해야 하며 **절대 `Promise`를 반환하면 안 됩니다**. 브로커는 `authenticate()`·`logout()`·refresh resurrection 가드에서 `get()`을 동기로 읽고 처리하는데, 이 get-then-set 원자성(로그아웃·교체된 세션이 동시 refresh로 조용히 되살아나지 않도록)이 동기 읽기에 의존합니다. `get()`이 `Promise`를 반환하는 async(Redis/DB) 스토어는 **구성 시 fail-closed로 거부**되며(`normalizeOidcConfig`가 존재하지 않는 id로 probe해 thenable이면 throw), `authenticate()`에도 방어선이 하나 더 있어 구성 검사를 통과해도 truthy `Promise`를 유효 세션으로 취급하지 않고 fail-closed 합니다(임의 쿠키 인증 방지). 공유 백엔드는 동기 in-process 캐시로 감싸 쓰세요. 네이티브 async 공유 세션 스토어는 resurrection 가드용 CAS/버전/tombstone 계약이 필요하므로 **현재 범위 밖**(향후 과제)입니다.
