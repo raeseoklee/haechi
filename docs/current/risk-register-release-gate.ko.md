@@ -14,9 +14,9 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
-| GitHub release/tag | 허용 (`v1.3.2` 릴리스됨) | `v1.3.2` CR2 보완 컷이 태깅·릴리스됨; §5.7 및 §5.8(`CR2-001..008`) 항목이 모두 Resolved이고 G9/G10은 Pass |
-| npm stable | `haechi@1.3.2` publish됨 | CR2 보완이 `haechi@1.3.2` attested OIDC publish(2026-06-16)로 발행됨; 이전 `1.3.1`은 CR2 수정 이전 동작을 담고 있음 |
-| production use | 운영자 게이트; `1.3.2`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; `haechi@1.3.1` 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 CR2 수정(특히 `CR2-001` 프록시 upstream-cancel과 `CR2-002` token-vault audit hygiene)을 반영하도록 `1.3.2`로 업그레이드해야 함 |
+| GitHub release/tag | 허용 (`v1.3.3` 릴리스됨) | `v1.3.3`이 현재 릴리스(CR2 컷 `1.3.2` 위의 선제적 하드닝 패치); §5.7 및 §5.8(`CR2-001..008`) 항목은 모두 Resolved 유지, G9/G10은 Pass |
+| npm stable | `haechi@1.3.3` publish됨 | `1.3.3`은 CR2-보완된 `1.3.2` 기준 위에 response-direction marker-skip 강화 + cosign 서명 GHCR 컨테이너 이미지를 더한 attested OIDC publish |
+| production use | 운영자 게이트; `1.3.3`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 최신 `haechi@1.3.3`(1.3.2의 CR2 수정 + marker-skip 하드닝 포함)을 실행해야 함 |
 
 ## 2. 릴리스 게이트
 
