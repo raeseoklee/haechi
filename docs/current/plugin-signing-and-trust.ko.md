@@ -1,6 +1,6 @@
 # 플러그인 서명 & 신뢰 앵커 큐레이션
 
-- 상태: Living document (코어 1.4.x 추적)
+- 상태: Living document (코어 1.5.x 추적)
 - 날짜: 2026-06-17
 
 Haechi의 기본은 **dependency injection**입니다 — `createRuntime(config, providers)`에

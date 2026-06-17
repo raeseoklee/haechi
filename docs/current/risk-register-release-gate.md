@@ -1,6 +1,6 @@
 # Haechi Risk Register and Release Gates
 
-- Status: Living document (tracks core 1.4.x)
+- Status: Living document (tracks core 1.5.x)
 - Date: 2026-06-16
 - Target version: 1.3.x
 - Branch: `main`
@@ -14,9 +14,9 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | Category | Judgment | Rationale |
 |---|---|---|
 | GitHub public | Allowed | Security limitations, threat model, and shared responsibility are documented |
-| GitHub release/tag | Allowed (`v1.4.0` released) | `v1.4.0` is the current release (additive minor — the signed-plugin authoring CLI); all §5.7 / §5.8 findings remain Resolved and G9/G10/G11 are Pass |
-| npm stable | `haechi@1.4.0` published | `1.4.0` is an attested OIDC publish adding the `plugin-keygen`/`plugin-sign`/`plugin-verify` CLI over the security-remediated `1.3.x` baseline; no config/API break (`configVersion` stays `1`) |
-| Production use | Operator-gated; upgrade to `1.4.0` | Supported only with operator network controls, authz/authn, and key custody; operators should run the latest `haechi@1.4.0` (it carries every `1.3.x` security fix plus the plugin authoring CLI) before routing sensitive third-party upstream traffic through the proxy |
+| GitHub release/tag | Allowed (`v1.5.0` released) | `v1.5.0` is the current release (additive minor — injectable audit/token-vault store seams for horizontal scale); all §5.7 / §5.8 findings remain Resolved and G9–G12 are Pass |
+| npm stable | `haechi@1.5.0` published | `1.5.0` is an attested OIDC publish adding `createAuditSink`/`createTokenVault` store seams (file defaults byte-identical) over the `1.4.x` baseline; no config/API break (`configVersion` stays `1`) |
+| Production use | Operator-gated; upgrade to `1.5.0` | Supported only with operator network controls, authz/authn, and key custody; operators running multiple replicas should inject a shared store (the `haechi-store-redis` satellite) so the audit hash chain and token vault hold across the fleet |
 
 ## 2. Release Gates
 
@@ -34,6 +34,7 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | G9 | 2026-06-16 full code-review remediation gate (shipped in 1.3.1) | `P0-CR-001` and `P1-CR-002` through `P1-CR-005` resolved or formally accepted; P2 items either resolved or scheduled with explicit non-blocking rationale; linked register updated. **All 13 `P*-CR-*` findings are Resolved (§5.7) and shipped in `haechi@1.3.1` (2026-06-16, attested OIDC publish); core bumped 1.3.0 → 1.3.1 (patch, remediation-only — no API/config surface change, `configVersion` stays `1`).** | Pass (`haechi@1.3.1`, 2026-06-16) |
 | G10 | 2026-06-16 code-review round 2 (CR2) remediation gate | The CR2 register (`code-review-risk-register-2026-06-16-round2.md`, §5.8) found **no P0/P1**; its three P2s (`CR2-001` proxy upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply bound) plus the P3 cluster (`CR2-004..008`) are all **Resolved and shipped in `haechi@1.3.2`** (`CR2-009` won't-fix, `CR2-010` accepted) and the linked register is updated. | Pass (`haechi@1.3.2`, 2026-06-16) |
 | G11 | 1.4.0 signed-plugin authoring CLI | First-party CLI for the 1.0 Ed25519 trust gate — `plugin-keygen` (private key `0600`, public key = trust anchor), `plugin-sign` (binds the exact entry bytes), `plugin-verify` (runtime-equivalent verification, fail-closed, `--allow-capability`); no private-key leak to stdout/audit; adversarially verified; the `plugin-signing-and-trust.md` curation runbook closes the P1-SEC-025 "operator must curate anchors" residual. Additive CLI surface (no config/API break, `configVersion` stays `1`); `tests/api-contract.test.mjs` green; core stays zero runtime dependency; core bumped 1.3.3 → 1.4.0 (additive minor). | Pass (`haechi@1.4.0`, 2026-06-17) |
+| G12 | 1.5.0 horizontal-scale store seams | The audit sink and token vault gain an injectable **store** so a shared store can back the sha256 hash chain + token vault across replicas (closes the per-process / single-writer fleet limitations). `createAuditSink({store})` / `createTokenVault({store})` + the default `createFileAuditStore`/`createFileTokenStore`; the security-critical chaining / `sanitizeAudit` / reveal governance / retention stay in core, the store only abstracts the exclusive read-previous+persist (audit) / mutate+read (vault) primitives. Adversarially verified: file defaults byte-identical, chain math diff-identical to prior, the seam works for a non-file store, concurrent appends/tokenize stay non-forked/lossless, CR2-002 audit-no-plaintext intact. New exports frozen in `api-stability.md` + `tests/api-contract.test.mjs`; `createJsonlAuditSink`/`createLocalTokenVault` are back-compat wrappers; core stays zero runtime dependency; core bumped 1.4.0 → 1.5.0 (additive minor). The `haechi-store-redis` satellite is the production consumer. | Pass (`haechi@1.5.0`, 2026-06-17) |
 
 ## 3. P0 Distribution-Blocking Risk Status
 

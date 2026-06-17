@@ -58,7 +58,7 @@ import { normalizeConfig } from "../packages/cli/runtime.mjs";
 const FROZEN_EXPORTS = {
   ".": { module: coreRoot, names: ["createHaechi", "collectStringEntries", "pathToString", "safePathToString", "shapeOnly", "summarize"] },
   "./core": { module: core, names: ["createHaechi", "collectStringEntries", "pathToString", "safePathToString", "shapeOnly", "summarize"] },
-  "./audit": { module: audit, names: ["createJsonlAuditSink", "readAuditSummary", "sanitizeAudit", "verifyAuditChain"] },
+  "./audit": { module: audit, names: ["createJsonlAuditSink", "createAuditSink", "createFileAuditStore", "buildIntegrityRecord", "readAuditSummary", "sanitizeAudit", "verifyAuditChain"] },
   "./crypto": { module: crypto, names: ["createLocalCryptoProvider", "initLocalKeyFile", "assertCryptoProviderConformance", "canonicalize"] },
   "./filter": { module: filter, names: ["createDefaultFilterEngine", "detectEntry"] },
   "./mcp-stdio": { module: mcpStdio, names: ["protectMcpJsonRpcMessage", "runMcpStdioFilter", "wrapMcpChild"] },
@@ -69,7 +69,7 @@ const FROZEN_EXPORTS = {
   "./protocol-adapters": { module: protocolAdapters, names: ["createProtocolAdapter", "knownProtocolAdapters"] },
   "./proxy": { module: proxy, names: ["createHaechiProxy", "assertSafeProxyBind", "DEFAULT_PROXY_PORT"] },
   "./runtime": { module: runtime, names: ["createRuntime", "normalizeConfig", "defaultConfig", "loadConfig", "writeDefaultConfig", "isValidPort", "DEFAULT_CONFIG_PATH"] },
-  "./token-vault": { module: tokenVault, names: ["createLocalTokenVault", "readVault"] },
+  "./token-vault": { module: tokenVault, names: ["createLocalTokenVault", "createTokenVault", "createFileTokenStore", "readVault"] },
   "./stream-filter": { module: streamFilter, names: ["inspectResponseStream", "getByPath", "setByPath", "buildPathObject"] },
   "./auth": { module: authPkg, names: ["createBearerAuthProvider", "buildIdentity", "buildExternalIdentity", "validateLabels", "readAuthStore", "addToken", "listTokens", "revokeToken", "DEFAULT_ALLOWED_LABEL_KEYS"] }
 };
