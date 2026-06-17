@@ -178,6 +178,16 @@ export function createInMemoryPendingStore({ cap = DEFAULT_PENDING_CAP } = {}) {
 }
 
 // sessionStore: opaque-id -> session. Absolute + idle TTL enforced by the broker.
+//
+// CONTRACT: a sessionStore MUST be SYNCHRONOUS. get() returns the session object
+// (or null) in the same event-loop turn — never a Promise. The broker reads
+// get() and acts on it synchronously in authenticate(), logout(), and the refresh
+// resurrection guard, whose get-then-set atomicity depends on it. An async
+// (Redis/DB) store whose get() returns a Promise is rejected fail-closed at
+// construction (a truthy Promise would otherwise look like a valid session and
+// authenticate an arbitrary cookie). To use a shared backend, wrap it in a
+// synchronous in-process cache. A natively-async shared store is a future item:
+// it needs a CAS/version/tombstone contract, not just `await`.
 export function createInMemorySessionStore() {
   const map = new Map();
   return {
@@ -560,6 +570,24 @@ export function normalizeOidcConfig(options = {}) {
     const s = options.sessionStore;
     if (typeof s.get !== "function" || typeof s.set !== "function" || typeof s.delete !== "function") {
       throw new Error("normalizeOidcConfig 'sessionStore' must implement get/set/delete");
+    }
+    // The broker requires a SYNCHRONOUS sessionStore: authenticate(), logout(),
+    // and the refresh resurrection guard read get() and act on it in the SAME
+    // event-loop turn (the guard's get-then-set atomicity depends on it). An async
+    // store whose get() returns a Promise would make a truthy Promise look like a
+    // valid session — a fail-OPEN that authenticates an arbitrary cookie. Probe a
+    // non-existent id and reject a thenable result FAIL-CLOSED at construction.
+    // (A shared async/Redis session store is a future item; it needs a CAS/version
+    // contract, not just `await` — wrap an async store in a synchronous cache, or
+    // use the in-memory default.)
+    let probe;
+    try {
+      probe = s.get("__haechi_sessionstore_sync_probe__");
+    } catch (error) {
+      throw new Error(`normalizeOidcConfig 'sessionStore.get' threw during the synchronous-contract probe: ${error?.message ?? error}`);
+    }
+    if (probe && typeof probe.then === "function") {
+      throw new Error("normalizeOidcConfig 'sessionStore' must be SYNCHRONOUS: get() returned a thenable/Promise. An async (Redis/DB) session store is not supported — the refresh resurrection guard requires synchronous get-then-set. Wrap it in a synchronous cache or use the in-memory default.");
     }
   }
   if (options.pendingStore !== undefined && options.pendingStore !== null) {
@@ -1459,7 +1487,7 @@ export function createOidcSessionBroker(options = {}) {
     // same id. If the live session is gone or changed, stay gone (do NOT resurrect).
     session.identity = renewedIdentity; // keep identity fresh (subjectHash matched)
     const live = sessionStore.get(sessionId);
-    if (!live || (live.gen ?? 0) !== expectedGen) {
+    if (!live || typeof live.then === "function" || (live.gen ?? 0) !== expectedGen) {
       return null;
     }
     session.gen = expectedGen + 1;
@@ -1489,6 +1517,10 @@ export function createOidcSessionBroker(options = {}) {
       const sessionId = cookies.get(cookieNames.session);
       if (!sessionId) return null;
       let session = sessionStore.get(sessionId);
+      // Defense-in-depth: a thenable here means an async store slipped past the
+      // construction probe — fail CLOSED (never treat a truthy Promise as a
+      // session, which would authenticate an arbitrary cookie).
+      if (session && typeof session.then === "function") return null;
       if (!session) return null;
       const t = now();
 

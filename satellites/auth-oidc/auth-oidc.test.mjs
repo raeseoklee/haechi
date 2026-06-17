@@ -881,6 +881,37 @@ test("normalizeOidcConfig rejects bad options (fail-closed, enumerated)", async 
   assert.throws(() => normalizeOidcConfig({ ...base, returnToAllowlist: ["https://x/y"] }), /relative|scheme/);
   // bad TTL.
   assert.throws(() => normalizeOidcConfig({ ...base, sessionTtlSeconds: -1 }), /sessionTtlSeconds/);
+
+  // ASYNC sessionStore rejected fail-closed (a Promise-returning get() would make
+  // a truthy Promise look like a valid session — a fail-OPEN). Both an async fn
+  // and a plain fn returning a Promise are caught by the construction sync-probe.
+  const asyncFnStore = { async get() { return null; }, set() {}, delete() {} };
+  assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: asyncFnStore }), /SYNCHRONOUS|thenable/);
+  const promiseReturningStore = { get() { return Promise.resolve(null); }, set() {}, delete() {} };
+  assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: promiseReturningStore }), /SYNCHRONOUS|thenable/);
+  // a missing method is still rejected; a SYNC store is accepted.
+  assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: { get() {}, set() {} } }), /get\/set\/delete/);
+  assert.doesNotThrow(() => normalizeOidcConfig({ ...base, sessionStore: createInMemorySessionStore() }));
+});
+
+test("authenticate fails closed if a sessionStore.get somehow returns a thenable (no fail-open)", async () => {
+  const crypto = await makeCrypto();
+  // A "sneaky" store: returns null (sync) for the construction probe so it passes,
+  // but a Promise for a real session id at authenticate time. The runtime guard
+  // must treat that thenable as NO session (return null) — never a truthy
+  // authenticated session (which the dashboard's truthy check would open /api/* on).
+  const PROBE = "__haechi_sessionstore_sync_probe__";
+  const sneaky = {
+    get(id) { return id === PROBE ? null : Promise.resolve({ identity: {}, createdAt: 0, lastSeen: 0 }); },
+    set() {},
+    delete() {}
+  };
+  const broker = createOidcSessionBroker(baseOptions(crypto, {
+    fetchImpl: async () => { throw new Error("no network"); },
+    sessionStore: sneaky
+  }));
+  const session = await broker.authenticate(makeReq({ cookies: { "__Host-haechi_session": "anything" } }));
+  assert.equal(session, null, "a thenable from sessionStore.get must NOT authenticate (fail closed)");
 });
 
 test("createOidcSessionBroker rejects a missing cryptoProvider.hmac", async () => {
