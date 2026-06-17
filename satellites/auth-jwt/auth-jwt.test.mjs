@@ -271,4 +271,40 @@ test("construction fails closed on bad config", async () => {
   assert.throws(() => createJwtAuthProvider({ ...base, clockSkewSeconds: 301 }), /clockSkew/);
   assert.throws(() => createJwtAuthProvider({ ...base, algorithms: ["HS256"] }), /unsafe|Unsupported/);
   assert.throws(() => createJwtAuthProvider({ ...base, algorithms: ["none"] }), /unsafe|Unsupported/);
+  // trustedEndpointHosts passes through to the verifier: a URL-shaped / port-
+  // bearing / non-array entry fails closed at construction; a private/loopback
+  // allowlist entry never bypasses the SSRF guard.
+  assert.throws(() => createJwtAuthProvider({ ...base, trustedEndpointHosts: "host" }), /trustedEndpointHosts must be an array/);
+  assert.throws(() => createJwtAuthProvider({ ...base, trustedEndpointHosts: ["https://cdn.other.com"] }), /bare hostname/);
+  assert.throws(() => createJwtAuthProvider({ ...base, trustedEndpointHosts: ["cdn.other.com:443"] }), /bare hostname/);
+  assert.throws(() => createJwtAuthProvider({ issuer: "https://login.contoso.com", audience: AUD, jwksUri: "https://127.0.0.1/jwks", trustedEndpointHosts: ["127.0.0.1"], cryptoProvider }), /blocked/);
+});
+
+test("DEFAULT (provider): a cross-host jwksUri still throws when trustedEndpointHosts is unset", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-jwt-mo-"));
+  const keyFile = join(dir, ".haechi", "dev.keys.json");
+  await initLocalKeyFile(keyFile, { force: true });
+  const cryptoProvider = createLocalCryptoProvider({ keyFile });
+  assert.throws(
+    () => createJwtAuthProvider({ issuer: "https://login.contoso.com", audience: AUD, jwksUri: "https://contoso.b2clogin.com/jwks", cryptoProvider, lookupImpl: PUBLIC_LOOKUP }),
+    /issuer host/
+  );
+});
+
+test("ALLOWLISTED (provider): a trustedEndpointHosts entry lets a different JWKS host authenticate end-to-end", async () => {
+  const keys = makeKeys();
+  const MO_ISSUER = "https://login.contoso.com";
+  const provider = await makeProvider({
+    keys,
+    overrides: {
+      issuer: MO_ISSUER,
+      jwksUri: "https://contoso.b2clogin.com/.well-known/jwks.json",
+      trustedEndpointHosts: ["contoso.b2clogin.com"]
+    }
+  });
+  const jwt = signJwt({ alg: "RS256", kid: "rsa-1", claims: baseClaims({ iss: MO_ISSUER, scope: "read" }), privateKey: keys.rsa.privateKey });
+  const id = await provider.authenticate(req(jwt));
+  assert.ok(id, "expected an identity from the allowlisted JWKS host");
+  assert.equal(id.provider, "jwt");
+  assert.deepEqual(id.scopes, ["read"]);
 });
