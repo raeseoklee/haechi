@@ -33,6 +33,7 @@ The current scope focuses on local adoption:
 - `haechi status`: show what is and is not protected under the current config
 - `haechi audit-verify`: verify the audit hash chain and print its head hash
 - `haechi mcp-wrap -- <command>`: wrap an MCP server with bidirectional stdio protection
+- `haechi plugin-keygen` / `plugin-sign` / `plugin-verify`: author and verify a signed `authProvider` plugin (Ed25519 trust gate)
 
 ## Demo
 

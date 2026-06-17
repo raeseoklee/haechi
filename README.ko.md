@@ -33,6 +33,7 @@ Haechi는 LLM·MCP·vLLM·Ollama 및 에이전트 payload가 모델, 도구, 로
 - `haechi status`: 현재 설정에서 무엇이 보호되고 무엇이 보호되지 않는지 보여 줍니다
 - `haechi audit-verify`: audit hash chain을 검증하고 head hash를 출력합니다
 - `haechi mcp-wrap -- <command>`: MCP 서버를 양방향 stdio 보호로 감쌉니다
+- `haechi plugin-keygen` / `plugin-sign` / `plugin-verify`: 서명된 `authProvider` 플러그인을 저작하고 검증합니다(Ed25519 신뢰 게이트)
 
 ## 데모
 

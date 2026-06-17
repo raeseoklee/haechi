@@ -235,7 +235,7 @@ const runtime = createRuntime(config, { metrics });
 
 ### `auth.plugin` (signed authProvider sandbox)
 
-`auth.provider: "plugin"`일 때 필요합니다. 샌드박스는 **서명된** `authProvider` 플러그인을 capability-gated, 감사되는 런타임에서 로드합니다. 최상위 `plugins.enabled`(기본 `true`)는 kill-switch입니다 — `false`이면 어떤 플러그인 생성도 거부합니다. 동적 로딩은 opt-in이며 기본은 dependency injection입니다. `docs/current/release-1.0-implementation-scope.md`(worker) 및 `release-1.1-implementation-scope.md`(process)를 참고하세요.
+`auth.provider: "plugin"`일 때 필요합니다. 샌드박스는 **서명된** `authProvider` 플러그인을 capability-gated, 감사되는 런타임에서 로드합니다. 최상위 `plugins.enabled`(기본 `true`)는 kill-switch입니다 — `false`이면 어떤 플러그인 생성도 거부합니다. 동적 로딩은 opt-in이며 기본은 dependency injection입니다. `docs/current/release-1.0-implementation-scope.md`(worker) 및 `release-1.1-implementation-scope.md`(process)를 참고하세요. 종단 간 서명 + 신뢰 앵커 큐레이션 흐름(`haechi plugin-keygen`/`plugin-sign`/`plugin-verify` CLI)은 [`plugin-signing-and-trust.md`](plugin-signing-and-trust.md)를 참고하세요.
 
 | Key | Type / values | Default | Notes |
 |---|---|---|---|
