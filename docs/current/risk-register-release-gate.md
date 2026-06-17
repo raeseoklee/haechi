@@ -14,9 +14,9 @@ Haechi has shipped its `1.x` stable line. The developer-preview gate (G2, `haech
 | Category | Judgment | Rationale |
 |---|---|---|
 | GitHub public | Allowed | Security limitations, threat model, and shared responsibility are documented |
-| GitHub release/tag | Allowed (`v1.3.2` released) | The `v1.3.2` CR2 remediation cut is tagged and released; all §5.7 and §5.8 (`CR2-001..008`) findings are Resolved and G9/G10 are Pass |
-| npm stable | `haechi@1.3.2` published | The CR2 remediation shipped in the `haechi@1.3.2` attested OIDC publish (2026-06-16); the prior `1.3.1` carries the pre-CR2-fix behavior |
-| Production use | Operator-gated; upgrade to `1.3.2` | Supported only with operator network controls, authz/authn, and key custody; operators on `haechi@1.3.1` should upgrade to `1.3.2` to pick up the CR2 fixes (notably the `CR2-001` proxy upstream-cancel and `CR2-002` token-vault audit hygiene) before routing sensitive third-party upstream traffic through the proxy |
+| GitHub release/tag | Allowed (`v1.3.3` released) | `v1.3.3` is the current release (a proactive-hardening patch over the CR2 cut `1.3.2`); all §5.7 and §5.8 (`CR2-001..008`) findings remain Resolved and G9/G10 are Pass |
+| npm stable | `haechi@1.3.3` published | `1.3.3` is an attested OIDC publish adding the response-direction marker-skip tightening + a cosign-signed GHCR container image, over the CR2-remediated `1.3.2` baseline |
+| Production use | Operator-gated; upgrade to `1.3.3` | Supported only with operator network controls, authz/authn, and key custody; operators should run the latest `haechi@1.3.3` (it carries the CR2 fixes from `1.3.2` plus the marker-skip hardening) before routing sensitive third-party upstream traffic through the proxy |
 
 ## 2. Release Gates
 

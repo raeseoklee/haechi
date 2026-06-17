@@ -1,6 +1,6 @@
 # Reliability Hardening Track
 
-- Status: Plan (pinned 2026-06-12; grounded in a 5-lens read-only audit of the 1.1.1 core)
+- Status: Shipped — WS1–WS6 all delivered and cut in core 1.2.0 (release gate G7 Pass). This doc is retained as the planning/audit record. (Pinned 2026-06-12; grounded in a 5-lens read-only audit of the 1.1.1 core.)
 - Target line: 1.1.2 (patch) → 1.2.0 (minor); no new product surface
 - Purpose: raise Haechi to **commercial-solution-level reliability** — the trust, operability, and detection-quality density a production AI-security gateway is expected to have. This is a quality objective, not a commercialization plan. Every item **tightens, measures, or documents what already exists**; none adds a new feature.
 
