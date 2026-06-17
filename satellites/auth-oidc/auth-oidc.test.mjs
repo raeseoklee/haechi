@@ -692,6 +692,54 @@ test("after logout, replaying the old session cookie -> authenticate null and th
   assert.equal(after, null);
 });
 
+test("logout fails CLOSED (500, never 200) when sessionStore.delete defers or no-ops the real id", async () => {
+  // A "sneaky" store that passes the construction sync-probe (sync get/set/delete
+  // for the reserved PROBE id) but, for a REAL session id, either (a) returns a
+  // thenable from delete() while removing it only on a later turn, or (b) silently
+  // no-ops the delete. Either way the session is NOT provably gone in-turn — logout
+  // MUST refuse to report success (the reviewer's fail-open: logout 200 while the
+  // replayed cookie still authenticates). destroySessionSync catches both via the
+  // thenable check and the post-delete confirm-get.
+  const PROBE = "__haechi_sessionstore_sync_probe__";
+  const variants = {
+    "deferred (thenable) delete": () => {
+      const map = new Map();
+      return {
+        get(id) { return map.get(id) ?? null; },
+        set(id, s) { map.set(id, s); },
+        delete(id) {
+          if (id === PROBE) { map.delete(id); return undefined; }
+          return Promise.resolve().then(() => { map.delete(id); }); // removed only LATER
+        }
+      };
+    },
+    "silent no-op delete": () => {
+      const map = new Map();
+      return {
+        get(id) { return map.get(id) ?? null; },
+        set(id, s) { map.set(id, s); },
+        delete(id) { if (id === PROBE) { map.delete(id); } return undefined; } // never removes a real id
+      };
+    }
+  };
+  for (const [label, makeStore] of Object.entries(variants)) {
+    const audit = makeAuditSink();
+    const { broker, sessionId } = await fullLogin({ sessionStore: makeStore(), auditSink: audit });
+    const res = makeRes();
+    await broker.handlers["/auth/logout"](
+      makeReq({ method: "POST", url: "/auth/logout", cookies: { "__Host-haechi_session": sessionId }, headers: { "x-haechi-csrf": "1" } }),
+      res
+    );
+    assert.equal(res.statusCode, 500, `${label}: logout must NOT report success when destruction is unconfirmed`);
+    assert.ok(
+      audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "store_async"),
+      `${label}: a store_async breach must be audited`
+    );
+    // And the success event must NOT have been emitted.
+    assert.ok(!audit.events.some((e) => e.type === "oidc.logout"), `${label}: no success oidc.logout on a failed destroy`);
+  }
+});
+
 test("logout without the CSRF header -> 403; session survives", async () => {
   const { broker, sessionId } = await fullLogin();
   const res = makeRes();
@@ -889,6 +937,16 @@ test("normalizeOidcConfig rejects bad options (fail-closed, enumerated)", async 
   assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: asyncFnStore }), /SYNCHRONOUS|thenable/);
   const promiseReturningStore = { get() { return Promise.resolve(null); }, set() {}, delete() {} };
   assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: promiseReturningStore }), /SYNCHRONOUS|thenable/);
+  // The sync contract covers ALL THREE methods, not just get(): an async set() or
+  // delete() is also rejected at construction (an async/deferred delete() would let
+  // logout 200 while the cookie stays replayable — a fail-OPEN).
+  const asyncSetStore = { get() { return null; }, set() { return Promise.resolve(); }, delete() {} };
+  assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: asyncSetStore }), /SYNCHRONOUS|thenable/);
+  const asyncDeleteStore = { get() { return null; }, set() {}, async delete() {} };
+  assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: asyncDeleteStore }), /SYNCHRONOUS|thenable/);
+  // a probe method that THROWS is also rejected fail-closed (never silently used).
+  const throwingDeleteStore = { get() { return null; }, set() {}, delete() { throw new Error("boom"); } };
+  assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: throwingDeleteStore }), /threw during the synchronous-contract probe/);
   // a missing method is still rejected; a SYNC store is accepted.
   assert.throws(() => normalizeOidcConfig({ ...base, sessionStore: { get() {}, set() {} } }), /get\/set\/delete/);
   assert.doesNotThrow(() => normalizeOidcConfig({ ...base, sessionStore: createInMemorySessionStore() }));
