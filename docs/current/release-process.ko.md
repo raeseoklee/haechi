@@ -68,6 +68,7 @@ npm audit signatures
 |---|---|---|---|
 | `.github/workflows/ci.yml` | — | 모든 push/PR | test, release preflight, SBOM artifact |
 | `.github/workflows/npm-publish.yml` | `haechi` | `v<semver>` | npm provenance publish + 체크섬/증명 release 자산 |
+| `.github/workflows/container-publish.yml` | `ghcr.io/<owner>/haechi` 이미지 | `v<semver>` | 루트 Dockerfile 빌드, GHCR로 push, digest 기준 keyless cosign 서명 + sigstore build-provenance 증명 |
 | `.github/workflows/crypto-kms-publish.yml` | `haechi-crypto-kms` | `crypto-kms-v<semver>` | satellite publish, 동일한 서명 아티팩트 경로 |
 | `.github/workflows/auth-jwt-publish.yml` | `haechi-auth-jwt` | `auth-jwt-v<semver>` | satellite publish, 동일한 서명 아티팩트 경로 |
 | `.github/workflows/dashboard-publish.yml` | `haechi-dashboard` | `dashboard-v<semver>` | satellite publish, 동일한 서명 아티팩트 경로 |

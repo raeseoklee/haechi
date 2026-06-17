@@ -34,7 +34,17 @@ COPY haechi.config.example.json ./
 # Provide a default config unless one is mounted. An operator mounts their own
 # haechi.config.json over this (and supplies secrets via the mounted file /
 # injected providers, NEVER via env — see the env-overlay table in the runbook).
-RUN cp haechi.config.example.json haechi.config.json \
+#
+# The image binds 0.0.0.0 (required so the mapped port is reachable) behind a
+# TLS-terminating reverse proxy, so the baked config sets proxy.trustForwardedProto
+# = true: that is the WS6 acknowledgement that a trusted front terminates TLS, and
+# without it assertSafeProxyTransport refuses the remote bind (the container would
+# not boot). Haechi then requires X-Forwarded-Proto: https on every PROTECTED
+# request (the /__haechi/* liveness/readiness routes are exempt, so HEALTHCHECK
+# still works). trustForwardedProto is intentionally NOT settable via the env
+# overlay (no security toggle via env), so it is baked here. An operator who
+# terminates TLS in Haechi instead should mount a config with proxy.tls set.
+RUN node -e "const c=require('./haechi.config.example.json'); c.proxy={...(c.proxy||{}),trustForwardedProto:true}; require('fs').writeFileSync('haechi.config.json', JSON.stringify(c,null,2));" \
     && chown -R node:node /app
 
 # A writable state dir for the audit chain, local key file, and token vault.

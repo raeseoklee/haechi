@@ -21,6 +21,17 @@ docker compose up -d        # 참조 스택 빌드 + 실행
 docker compose logs -f haechi
 ```
 
+**사전 빌드 이미지(GHCR).** 각 `v<semver>` 릴리스는 cosign 서명된 이미지를 `ghcr.io/<owner>/haechi`에 발행하며(태그 `<major>.<minor>.<patch>`, `<major>.<minor>`, `<major>`, `latest`), 실행 전에 검증하십시오 — 서명과 provenance가 이미지를 이 repo의 release workflow에 묶습니다:
+
+```bash
+cosign verify ghcr.io/<owner>/haechi:1.3.3 \
+  --certificate-identity-regexp '^https://github.com/<owner>/haechi/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/<owner>/haechi:1.3.3 --repo <owner>/haechi
+```
+
+이미지는 `proxy.trustForwardedProto: true`를 구워 넣으므로(TLS를 종단하는 리버스 프록시 뒤에서 `0.0.0.0`에 바인딩 — 아래 참조), Haechi는 보호되는 모든 요청에 `X-Forwarded-Proto: https`를 요구합니다. Haechi가 직접 TLS를 종단하게 하려면 `proxy.tls`가 설정된 본인의 설정을 마운트하십시오.
+
 **TLS + 인증으로 앞단을 보호하십시오.** Haechi는 자체 TLS가 없습니다. 포트는 TLS를 종단하고 인증하는 리버스 프록시(nginx / Caddy / Traefik / API 게이트웨이)에만 공개하고, 원시 Haechi 포트를 공개 인터페이스에 절대 노출하지 마십시오. compose 예제는 바로 이 이유로 호스트 loopback(`127.0.0.1:11016`)에만 공개합니다.
 
 **Loopback 너머 바인딩.** 컨테이너 내부에서는 매핑된 포트가 도달 가능하도록 Haechi가 `0.0.0.0`에 바인딩해야 하며, 이는 `--allow-remote-bind`를 요구합니다(참조 `CMD`가 전달합니다). 호스트에서는 기본 loopback 바인딩을 선호하고 리버스 프록시를 통해 Haechi에 접근하십시오. [Loopback 너머 바인딩](./configuration.ko.md)을 참고하십시오.
