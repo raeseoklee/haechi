@@ -167,3 +167,81 @@ test("construction fails closed on bad config (no cryptoProvider involved)", asy
   assert.throws(() => createJwtVerifier({ ...base, algorithms: ["HS256"] }), /unsafe|Unsupported/);
   assert.throws(() => createJwtVerifier({ ...base, algorithms: ["none"] }), /unsafe|Unsupported/);
 });
+
+// --- multi-origin trustedEndpointHosts allowlist (P1-SEC-026 residual) ------
+// An operator-declared PINNED allowlist relaxes the SAME-HOST requirement only;
+// https + SSRF guards still run unconditionally and the pin (not the discovery
+// doc) decides which hosts are accepted.
+
+const MO_ISSUER = "https://login.contoso.com/tenant";
+const MO_JWKS = "https://contoso.b2clogin.com/tenant/.well-known/jwks.json";
+
+test("DEFAULT (no trustedEndpointHosts): a cross-host jwksUri still throws (single-origin preserved)", async () => {
+  assert.throws(
+    () => createJwtVerifier({ issuer: MO_ISSUER, audience: AUD, jwksUri: MO_JWKS, fetchImpl: jwksFetch({ keys: [] }), lookupImpl: PUBLIC_LOOKUP, now: () => NOW_MS }),
+    /issuer host/,
+    "an unlisted cross-host jwksUri must throw when trustedEndpointHosts is unset"
+  );
+});
+
+test("ALLOWLISTED: a trustedEndpointHosts entry lets a different JWKS host construct and verify", async () => {
+  const keys = makeKeys();
+  const verifier = createJwtVerifier({
+    issuer: MO_ISSUER, audience: AUD, jwksUri: MO_JWKS,
+    trustedEndpointHosts: ["contoso.b2clogin.com"],
+    fetchImpl: jwksFetch({ keys: [keys.rsaJwk, keys.ecJwk] }),
+    lookupImpl: PUBLIC_LOOKUP,
+    now: () => NOW_MS
+  });
+  const jwt = signJwt({ alg: "RS256", kid: "rsa-1", claims: baseClaims({ iss: MO_ISSUER }), privateKey: keys.rsa.privateKey });
+  const claims = await verifier.verify(jwt);
+  assert.ok(claims, "expected the token to verify against the allowlisted JWKS host");
+  assert.equal(claims.iss, MO_ISSUER);
+});
+
+test("ALLOWLIST membership is case-insensitive (entries normalized to lowercase)", async () => {
+  const keys = makeKeys();
+  const verifier = createJwtVerifier({
+    issuer: MO_ISSUER, audience: AUD, jwksUri: MO_JWKS,
+    trustedEndpointHosts: ["Contoso.B2CLogin.com"],
+    fetchImpl: jwksFetch({ keys: [keys.rsaJwk] }),
+    lookupImpl: PUBLIC_LOOKUP,
+    now: () => NOW_MS
+  });
+  assert.ok(await verifier.verify(signJwt({ alg: "RS256", kid: "rsa-1", claims: baseClaims({ iss: MO_ISSUER }), privateKey: keys.rsa.privateKey })));
+});
+
+test("a non-allowlisted THIRD host still throws even when another host IS allowlisted", async () => {
+  assert.throws(
+    () => createJwtVerifier({
+      issuer: MO_ISSUER, audience: AUD, jwksUri: "https://evil.attacker.example/jwks",
+      trustedEndpointHosts: ["contoso.b2clogin.com"],
+      fetchImpl: jwksFetch({ keys: [] }), lookupImpl: PUBLIC_LOOKUP, now: () => NOW_MS
+    }),
+    /trustedEndpointHosts/,
+    "a host outside the issuer host and the allowlist must throw"
+  );
+});
+
+test("SSRF STILL ENFORCED: an allowlisted private/loopback host is still blocked", async () => {
+  assert.throws(
+    () => createJwtVerifier({
+      issuer: MO_ISSUER, audience: AUD, jwksUri: "https://127.0.0.1/jwks",
+      trustedEndpointHosts: ["127.0.0.1"],
+      fetchImpl: jwksFetch({ keys: [] }), lookupImpl: PUBLIC_LOOKUP, now: () => NOW_MS
+    }),
+    /blocked/,
+    "the allowlist must not bypass isBlockedAddress"
+  );
+});
+
+test("trustedEndpointHosts validation: URL-shaped / port-bearing / non-array entries throw at construction", async () => {
+  const base = { issuer: MO_ISSUER, audience: AUD, jwksUri: MO_JWKS, fetchImpl: jwksFetch({ keys: [] }), lookupImpl: PUBLIC_LOOKUP, now: () => NOW_MS };
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: "contoso.b2clogin.com" }), /trustedEndpointHosts must be an array/);
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: ["https://contoso.b2clogin.com"] }), /bare hostname/);
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: ["contoso.b2clogin.com/jwks"] }), /bare hostname/);
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: ["contoso.b2clogin.com:443"] }), /bare hostname/);
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: ["contoso b2clogin"] }), /bare hostname/);
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: [""] }), /non-empty hostname/);
+  assert.throws(() => createJwtVerifier({ ...base, trustedEndpointHosts: [123] }), /non-empty hostname/);
+});

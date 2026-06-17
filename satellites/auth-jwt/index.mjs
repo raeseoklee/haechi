@@ -213,6 +213,7 @@ export function createJwtVerifier(options = {}) {
     issuer,
     audience,
     jwksUri,
+    trustedEndpointHosts = [],
     algorithms = DEFAULT_ALGORITHMS,
     clockSkewSeconds = DEFAULT_CLOCK_SKEW_SECONDS,
     jwksTtlMs = DEFAULT_JWKS_TTL_MS,
@@ -232,9 +233,32 @@ export function createJwtVerifier(options = {}) {
     throw new Error("createJwtVerifier requires a non-empty audience");
   }
   const jwksUrl = parseHttpsUrl(jwksUri, "jwksUri");
-  if (jwksUrl.hostname.toLowerCase() !== issuerUrl.hostname.toLowerCase()) {
-    throw new Error("jwksUri host must equal the issuer host (single-origin issuers only in 0.8)");
+  // Operator-declared PINNED allowlist of additional hostnames permitted to
+  // serve this IdP's endpoints (e.g. an Azure AD B2C / Auth0 custom-domain JWKS
+  // host that differs from the issuer host). It RELAXES the same-host
+  // requirement ONLY — never the https or SSRF guards below — and is a fixed
+  // operator pin, so an attacker controlling the discovery/JWKS content cannot
+  // introduce a new host (the mix-up / SSRF defence stands). Empty/absent =>
+  // today's strict single-origin behavior (zero behavior change by default).
+  if (!Array.isArray(trustedEndpointHosts)) {
+    throw new Error("trustedEndpointHosts must be an array of bare hostnames");
   }
+  const trustedHostSet = new Set();
+  for (const entry of trustedEndpointHosts) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new Error("each trustedEndpointHosts entry must be a non-empty hostname string");
+    }
+    if (/[\s/:]/.test(entry) || entry.includes("://")) {
+      throw new Error("each trustedEndpointHosts entry must be a bare hostname (no scheme, path, port, or whitespace)");
+    }
+    trustedHostSet.add(entry.toLowerCase());
+  }
+  const jwksHost = jwksUrl.hostname.toLowerCase();
+  if (jwksHost !== issuerUrl.hostname.toLowerCase() && !trustedHostSet.has(jwksHost)) {
+    throw new Error("jwksUri host must equal the issuer host or be listed in trustedEndpointHosts");
+  }
+  // https (above) and SSRF (here) run UNCONDITIONALLY — the allowlist never
+  // bypasses them: an operator cannot allowlist 169.254.169.254 / loopback.
   if (isBlockedAddress(jwksUrl.hostname)) {
     throw new Error("jwksUri host resolves to a blocked (private/loopback/link-local/metadata) address");
   }
