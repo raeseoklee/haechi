@@ -30,9 +30,73 @@ const FORBIDDEN_KEYS = new Set([
   "scopes", "labels"
 ]);
 
-export function createJsonlAuditSink({ path, anchor = null }) {
+// An audit STORE abstracts the exclusive "read-previous + persist" primitive so
+// the SAME core-owned sha256 hash chain can sit on top of a file today and a
+// shared store (e.g. Redis) in a future satellite. The contract is:
+//
+//   async transaction(fn) — runs `fn` inside an EXCLUSIVE critical section that
+//     serializes concurrent appends. `fn` receives { readLastIntegrity, persist }
+//     where readLastIntegrity() -> the last record's auditIntegrity (or null) and
+//     persist(record) durably appends the built record. transaction() returns
+//     fn's return value.
+//   async ready() — OPTIONAL health/writability probe returning { ok, reason? };
+//     the sink falls back to { ok: true } when the store omits it.
+//
+// The store deliberately knows NOTHING about anchoring, sanitization, or the
+// chain math — those stay core-owned in createAuditSink so a non-core store can
+// never fork or weaken the chain.
+
+// createFileAuditStore implements the store contract over the CURRENT JSONL
+// mechanism: a `${path}.lock` exclusive section wrapping mkdir + the critical
+// section, a tail-read for the previous integrity, and an appendFile persist.
+// The on-disk bytes are identical to the pre-seam sink.
+export function createFileAuditStore({ path }) {
   if (!path) {
-    throw new Error("JSONL audit sink requires path");
+    throw new Error("file audit store requires path");
+  }
+
+  return {
+    async transaction(fn) {
+      await mkdir(dirname(path), { recursive: true });
+      return withFileLock(`${path}.lock`, () => fn({
+        readLastIntegrity: () => readLastIntegrity(path),
+        persist: (record) => appendFile(path, `${JSON.stringify(record)}\n`, "utf8")
+      }));
+    },
+
+    // WS4-A readiness probe: a CHEAP writability check used by /__haechi/ready.
+    // A security gateway that cannot append to its audit log is NOT ready
+    // (fail-closed), so this confirms the audit directory exists and is writable
+    // WITHOUT writing an event (no audit-chain side effect). It returns the bare
+    // boolean and an enum reason — never a path value or any payload/PII.
+    async ready() {
+      try {
+        const dir = dirname(path);
+        await mkdir(dir, { recursive: true });
+        await access(dir, fsConstants.W_OK);
+        // If the audit file already exists, confirm it is writable too.
+        try {
+          await access(path, fsConstants.W_OK);
+        } catch (error) {
+          if (error.code !== "ENOENT") {
+            return { ok: false, reason: "audit_file_not_writable" };
+          }
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, reason: "audit_dir_not_writable" };
+      }
+    }
+  };
+}
+
+// createAuditSink holds the SECURITY-CRITICAL, core-owned logic: writeQueue
+// serialization, sanitizeAudit, the sha256 chain build, the anchor stream, and
+// the capabilities object. The store only supplies the exclusive
+// read-previous + persist primitive; anchor config never leaks into it.
+export function createAuditSink({ store, anchor = null }) {
+  if (!store || typeof store.transaction !== "function") {
+    throw new Error("audit sink requires a store with a transaction(fn) method");
   }
   const anchorMode = anchor?.mode ?? "none";
   const anchorPath = anchor?.path ?? null;
@@ -81,42 +145,39 @@ export function createJsonlAuditSink({ path, anchor = null }) {
       integrity: anchorMode === "none" ? "sha256-hash-chain" : "sha256-hash-chain+anchor"
     },
     async record(event) {
-      const write = writeQueue.then(async () => {
-        await mkdir(dirname(path), { recursive: true });
-        await withFileLock(`${path}.lock`, async () => {
-          const record = await buildIntegrityRecord(path, sanitizeAudit(event));
-          await appendFile(path, `${JSON.stringify(record)}\n`, "utf8");
-          await writeAnchor(record);
-        });
-      });
+      // The writeQueue serializes record() calls on this sink, and the store's
+      // transaction() adds the exclusive critical section; together they keep
+      // the chain strictly sequential and never forked under concurrency.
+      const write = writeQueue.then(() => store.transaction(async ({ readLastIntegrity, persist }) => {
+        const record = buildIntegrityRecord(await readLastIntegrity(), sanitizeAudit(event));
+        await persist(record);
+        await writeAnchor(record);
+        return record;
+      }));
       writeQueue = write.catch(() => {});
       await write;
     },
 
-    // WS4-A readiness probe: a CHEAP writability check used by /__haechi/ready.
-    // A security gateway that cannot append to its audit log is NOT ready
-    // (fail-closed), so this confirms the audit directory exists and is writable
-    // WITHOUT writing an event (no audit-chain side effect). It returns the bare
-    // boolean and an enum reason — never a path value or any payload/PII.
     async ready() {
-      try {
-        const dir = dirname(path);
-        await mkdir(dir, { recursive: true });
-        await access(dir, fsConstants.W_OK);
-        // If the audit file already exists, confirm it is writable too.
-        try {
-          await access(path, fsConstants.W_OK);
-        } catch (error) {
-          if (error.code !== "ENOENT") {
-            return { ok: false, reason: "audit_file_not_writable" };
-          }
-        }
-        return { ok: true };
-      } catch {
-        return { ok: false, reason: "audit_dir_not_writable" };
+      // Delegate to the store's writability probe; a store that omits it is
+      // treated as ready (the chain math has no readiness side effect of its own).
+      if (typeof store.ready === "function") {
+        return store.ready();
       }
+      return { ok: true };
     }
   };
+}
+
+// Thin back-compat wrapper: the original file-backed sink is now createAuditSink
+// over createFileAuditStore. Its returned shape (id, version, capabilities,
+// record, ready) and on-disk bytes are unchanged, so existing call sites
+// (runtime.mjs injection, tests) keep working untouched.
+export function createJsonlAuditSink({ path, anchor = null }) {
+  if (!path) {
+    throw new Error("JSONL audit sink requires path");
+  }
+  return createAuditSink({ store: createFileAuditStore({ path }), anchor });
 }
 
 export async function readAuditSummary(path) {
@@ -272,8 +333,13 @@ async function readAnchors(anchorPath) {
   return { bySequence, lastSequence };
 }
 
-async function buildIntegrityRecord(path, event) {
-  const previous = await readLastIntegrity(path);
+// PURE chain math: given the previous record's auditIntegrity (or null) and a
+// sanitized event, deterministically computes the next chained record. No fs,
+// no IO — the store supplies `previousIntegrity` (via its read-previous
+// primitive) so the SAME computation backs a file or a shared store. Exported
+// for store/satellite tests.
+export function buildIntegrityRecord(previousIntegrity, event) {
+  const previous = previousIntegrity ?? null;
   const sequence = previous ? previous.sequence + 1 : 1;
   const unsigned = {
     ...event,
