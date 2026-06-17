@@ -1,8 +1,8 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Living document(core 1.3.x 추적)
+- 문서 상태: Living document(core 1.4.x 추적)
 - 작성일: 2026-06-16
-- 기준 버전: 1.3.x
+- 기준 버전: 1.4.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -14,9 +14,9 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
-| GitHub release/tag | 허용 (`v1.3.3` 릴리스됨) | `v1.3.3`이 현재 릴리스(CR2 컷 `1.3.2` 위의 선제적 하드닝 패치); §5.7 및 §5.8(`CR2-001..008`) 항목은 모두 Resolved 유지, G9/G10은 Pass |
-| npm stable | `haechi@1.3.3` publish됨 | `1.3.3`은 CR2-보완된 `1.3.2` 기준 위에 response-direction marker-skip 강화 + cosign 서명 GHCR 컨테이너 이미지를 더한 attested OIDC publish |
-| production use | 운영자 게이트; `1.3.3`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 최신 `haechi@1.3.3`(1.3.2의 CR2 수정 + marker-skip 하드닝 포함)을 실행해야 함 |
+| GitHub release/tag | 허용 (`v1.4.0` 릴리스됨) | `v1.4.0`이 현재 릴리스(additive minor — signed-plugin 저작 CLI); §5.7 / §5.8 항목은 모두 Resolved 유지, G9/G10/G11은 Pass |
+| npm stable | `haechi@1.4.0` publish됨 | `1.4.0`은 보안 교정된 `1.3.x` 기준 위에 `plugin-keygen`/`plugin-sign`/`plugin-verify` CLI를 더한 attested OIDC publish; config/API 파괴 없음(`configVersion`은 `1` 유지) |
+| production use | 운영자 게이트; `1.4.0`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 운영자는 민감한 제3자 업스트림 트래픽을 프록시로 라우팅하기 전에 최신 `haechi@1.4.0`(모든 `1.3.x` 보안 수정 + 플러그인 저작 CLI 포함)을 실행해야 함 |
 
 ## 2. 릴리스 게이트
 
@@ -33,6 +33,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G8 | 1.3.0 백엔드 + 탐지 커버리지 확장 | **Anthropic Messages API**(`/v1/messages`, content-block + SSE `delta.text`, `event:` 라인 보존 재직렬화)와 **Google Gemini API**(model-in-path `:generateContent`/`:streamGenerateContent`, 기존 정확-매칭 어댑터를 바이트 동일하게 두는 additive `:method`-suffix 라우트 매처) 프로토콜 어댑터 추가; 탐지 커버리지 확장 — 클라우드/SaaS provider 키(OpenAI/Anthropic/Google-OAuth/SendGrid/Twilio/npm/Azure, anchored)와 국제 PII(FR/ES/JP + IT/SG/IN/DE/NL 국가 ID, 체크섬 validator), 각 하드블록-대-dial-eligible 결정은 측정된 충돌률 기반(하드블록은 비숫자 앵커 또는 비현실적으로 드문 형태가 필요; 흔한 길이의 bare-digit run은 allowlist로 정리 가능 유지); `bench:throughput` proxy 부하 벤치; `haechi-ratelimit-redis` 공유 저장소 rate-limiter 위성(WS3 시임의 운영 소비자; proxy가 이제 `rateLimiter.allow`를 `await`); `haechi-dashboard`가 요청별 `correlationId` 노출. 모든 변경은 additive — 새 `target.type`/탐지타입/`privacy.profile` *값*이며 새 config 키가 아님(`configVersion`은 `1` 유지); `tests/api-contract.test.mjs` 통과; core는 zero runtime dependency 유지; core 1.3.0 bump(additive 마이너) | Pass |
 | G9 | 2026-06-16 전체 코드리뷰 보완 게이트 (1.3.1로 발행) | `P0-CR-001` 및 `P1-CR-002`부터 `P1-CR-005`까지 해결 또는 책임자 명시 수용; P2 항목은 해결 또는 명시적 non-blocking 근거와 일정 기록; 연결된 등록부 갱신. **13개 `P*-CR-*` 항목이 모두 Resolved이며(§5.7) `haechi@1.3.1`(2026-06-16, attested OIDC publish)로 발행되었습니다; core가 1.3.0 → 1.3.1로 bump(patch, 보완 전용 — API/config 표면 변경 없음, `configVersion`은 `1` 유지)되었습니다.** | Pass (`haechi@1.3.1`, 2026-06-16) |
 | G10 | 2026-06-16 코드리뷰 round 2 (CR2) 보완 게이트 | CR2 등록부(`code-review-risk-register-2026-06-16-round2.md`, §5.8)는 **P0/P1을 발견하지 못했습니다**; 세 개의 P2(`CR2-001` 프록시 upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply 경계)와 P3 묶음(`CR2-004..008`)이 모두 **Resolved이며 `haechi@1.3.2`로 발행되었고**(`CR2-009` won't-fix, `CR2-010` accepted) 연결된 등록부가 갱신되었습니다. | Pass (`haechi@1.3.2`, 2026-06-16) |
+| G11 | 1.4.0 signed-plugin 저작 CLI | 1.0 Ed25519 trust gate를 위한 1차 저작 CLI — `plugin-keygen`(개인키 `0600`, 공개키 = trust anchor), `plugin-sign`(정확한 entry 바이트 바인딩), `plugin-verify`(런타임 동등 검증, fail-closed, `--allow-capability`); 개인키가 stdout/audit로 유출되지 않음; 적대적 검증 완료; `plugin-signing-and-trust.md` 큐레이션 런북이 P1-SEC-025 "운영자가 앵커를 큐레이션해야 함" 잔여를 해소. additive CLI 표면(config/API 파괴 없음, `configVersion`은 `1` 유지); `tests/api-contract.test.mjs` green; 코어는 zero runtime dependency 유지; 코어 1.3.3 → 1.4.0(additive minor)로 bump. | Pass (`haechi@1.4.0`, 2026-06-17) |
 
 ## 3. P0 배포 차단 리스크 상태
 
