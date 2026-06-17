@@ -17,7 +17,7 @@ Every page must be listed here with a one-line summary. Update this index on eve
 - [[key-management]] — key file format, kid-based rotation, and domain-separated key derivation
 - [[streaming-protection-gap]] — streaming inspection (0.5), the Ollama implicit-streaming trap, and non-JSON CONTENT-frame text inspection (P1-CR-005)
 - [[dashboard-audit-viewer]] — the zero-dep read-only audit viewer satellite and its security model (loopback/Host-allowlist/CSP/sessionGuard seam)
-- [[oidc-session-broker]] — the interactive OIDC session broker satellite (authorization-code + PKCE, state-first callback, shared JWS verifier, PII-safe audit)
+- [[oidc-session-broker]] — the interactive OIDC session broker satellite (authorization-code + PKCE, state-first callback, shared JWS verifier, PII-safe audit, opt-in silent refresh, multi-origin IdPs, synchronous sessionStore contract)
 - [[plugin-sandbox]] — the 1.0 signed `authProvider` plugin sandbox: Ed25519 trust gate, worker_threads isolation (honest residual), lifecycle audit, conformance gate
 - [[operability-day2]] — WS4 operability: health split + `/metrics` + structured logs/correlationId (WS4-A) and graceful drain + backpressure + tuned timeouts + env overlay + Docker/compose/runbook + configVersion (WS4-B)
 - [[trust-assets-ws6]] — WS6 trust assets: proxy TLS / remote-bind hardening (`proxy.tls`/`trustForwardedProto`, fail-closed `assertSafeProxyTransport`, https-vs-http selection, `X-Forwarded-Proto` enforcement) + the security whitepaper, security.txt, SECURITY.md disclosure, and compliance/DSAR mapping
