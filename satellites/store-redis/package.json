@@ -1,0 +1,61 @@
+{
+  "name": "haechi-store-redis",
+  "version": "0.1.0",
+  "description": "Shared-store (Redis-backed) audit + token-vault satellites for Haechi (the 1.5.0 store seams) — the sha256 audit chain and the tokenization vault held across replicas over an injected store/client.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raeseoklee/haechi.git",
+    "directory": "satellites/store-redis"
+  },
+  "homepage": "https://github.com/raeseoklee/haechi/tree/main/satellites/store-redis#readme",
+  "bugs": {
+    "url": "https://github.com/raeseoklee/haechi/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "haechi",
+    "audit",
+    "token-vault",
+    "redis",
+    "shared-store",
+    "hash-chain"
+  ],
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./audit": "./audit.mjs",
+    "./token-vault": "./token-vault.mjs",
+    "./memory": "./memory.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "audit.mjs",
+    "token-vault.mjs",
+    "memory.mjs",
+    "lock.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "haechi": ">=1.5.0 <2.0.0",
+    "redis": "^4 || ^5"
+  },
+  "peerDependenciesMeta": {
+    "redis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "haechi": "*"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -61,6 +61,10 @@ jobs:
         env:
           HAECHI_REDIS_URL: redis://127.0.0.1:6379
         run: node --test satellites/ratelimit-redis/ratelimit-redis.integration.test.mjs
+      - name: store-redis cross-replica integration (real Redis)
+        env:
+          HAECHI_REDIS_URL: redis://127.0.0.1:6379
+        run: node --test satellites/store-redis/store-redis.integration.test.mjs
       - name: local-inference integration (OpenAI/Ollama protocol stub)
         env:
           HAECHI_VLLM_URL: http://127.0.0.1:8717
