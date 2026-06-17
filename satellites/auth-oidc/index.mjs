@@ -43,10 +43,17 @@ const CODE_VERIFIER_BYTES = 32;       // 32 bytes -> 43-char base64url verifier
 const PREAUTH_ID_BYTES = 32;
 
 const SESSION_ID_HASH_DOMAIN = "haechi:oidc:session-id:hash:v1";
+// AAD domain binding the stored refresh-token ciphertext to this satellite +
+// purpose. encrypt/decrypt MUST use the identical aad or the AEAD fails closed.
+const REFRESH_TOKEN_AAD_DOMAIN = "haechi:oidc:refresh-token:v1";
 
 const DEFAULT_SESSION_TTL_SECONDS = 8 * 60 * 60;   // 8h absolute
 const DEFAULT_IDLE_TTL_SECONDS = 30 * 60;          // 30m idle
 const MAX_TTL_SECONDS = 30 * 24 * 60 * 60;         // 30d ceiling
+const DEFAULT_REFRESH_MAX_LIFETIME_SECONDS = 7 * 24 * 60 * 60; // 7d hard ceiling
+// Silent-renewal window: attempt a refresh once the session is within this
+// fraction of its absolute TTL of expiring (the last 25%).
+const REFRESH_WINDOW_FRACTION = 0.25;
 const DEFAULT_PENDING_TTL_SECONDS = 600;           // 10m to complete a login
 const DEFAULT_PENDING_CAP = 1024;                  // hard pending-auth cap
 const DEFAULT_RATE_MAX = 60;                       // /auth/login+/auth/callback per source per window
@@ -67,7 +74,12 @@ const REASON = {
   token_invalid: "token_invalid",
   exchange_failed: "exchange_failed",
   host_blocked: "host_blocked",
-  expired: "expired"
+  expired: "expired",
+  // Refresh-flow coarse reasons (NEVER a free-form string; no IdP detail echoed).
+  refresh_failed: "refresh_failed",          // network / non-2xx / parse at the token endpoint
+  refresh_token_invalid: "refresh_token_invalid", // new id_token failed verification
+  refresh_subject_mismatch: "refresh_subject_mismatch", // anti-swap: new sub != pinned sub
+  refresh_ceiling: "refresh_ceiling"         // hard lifetime ceiling reached
 };
 
 // --- small utilities -------------------------------------------------------
@@ -232,6 +244,8 @@ const KNOWN_KEYS = new Set([
   "sessionTtlSeconds",
   "idleTtlSeconds",
   "maxAgeSeconds",
+  "enableRefresh",
+  "refreshMaxLifetimeSeconds",
   "tokenEndpointAuthMethod",
   "secureCookies",
   "trustProxy",
@@ -273,6 +287,13 @@ export function normalizeOidcConfig(options = {}) {
   if (typeof cryptoProvider?.hmac !== "function") {
     throw new Error("normalizeOidcConfig requires a cryptoProvider with hmac() (for a PII-safe identity)");
   }
+  // enableRefresh additionally requires encrypt/decrypt: the refresh token is
+  // stored ONLY as ciphertext. Fail closed at construction when the feature is
+  // requested without the capability (never silently degrade to plaintext).
+  const refreshRequested = options.enableRefresh === true;
+  if (refreshRequested && (typeof cryptoProvider.encrypt !== "function" || typeof cryptoProvider.decrypt !== "function")) {
+    throw new Error("normalizeOidcConfig 'enableRefresh' requires a cryptoProvider with encrypt() and decrypt() (refresh tokens are stored only as ciphertext)");
+  }
 
   // issuer: valid HTTPS URL.
   if (typeof options.issuer !== "string" || !options.issuer) {
@@ -299,6 +320,18 @@ export function normalizeOidcConfig(options = {}) {
     clientSecret = options.clientSecret;
   }
   const isConfidential = clientSecret !== null;
+
+  // enableRefresh: opt-in (default FALSE). When false the broker is byte-behavior-
+  // identical to pre-refresh: offline_access is stripped, no refresh token is
+  // stored, and there is no silent renewal. Validated here (before the scope
+  // normalization) because it gates whether offline_access survives.
+  let enableRefresh = false;
+  if (options.enableRefresh !== undefined && options.enableRefresh !== null) {
+    if (typeof options.enableRefresh !== "boolean") {
+      throw new Error("normalizeOidcConfig 'enableRefresh' must be a boolean");
+    }
+    enableRefresh = options.enableRefresh;
+  }
 
   // tokenEndpointAuthMethod: never "none" for a confidential client.
   let tokenEndpointAuthMethod = "client_secret_basic";
@@ -369,7 +402,9 @@ export function normalizeOidcConfig(options = {}) {
     );
   }
 
-  // scopes: array; force-include "openid" (dedup); strip "offline_access".
+  // scopes: array; force-include "openid" (dedup). offline_access is KEPT (and
+  // force-included so the IdP returns a refresh_token) ONLY when enableRefresh
+  // is true; otherwise it is stripped exactly as before (refresh out of scope).
   let scopesInput = ["openid"];
   if (options.scopes !== undefined) {
     if (!Array.isArray(options.scopes) || !options.scopes.every((s) => typeof s === "string" && s.trim())) {
@@ -377,10 +412,13 @@ export function normalizeOidcConfig(options = {}) {
     }
     scopesInput = options.scopes;
   }
+  // When refresh is enabled, force-include offline_access; when disabled, never
+  // emit it even if the operator listed it (strip preserves today's behavior).
+  const forcedScopes = enableRefresh ? ["openid", "offline_access"] : ["openid"];
   const scopeSet = [];
   const seen = new Set();
-  for (const s of ["openid", ...scopesInput]) {
-    if (s === "offline_access") continue; // refresh out of scope
+  for (const s of [...forcedScopes, ...scopesInput]) {
+    if (s === "offline_access" && !enableRefresh) continue; // refresh out of scope
     if (seen.has(s)) continue;
     seen.add(s);
     scopeSet.push(s);
@@ -451,6 +489,17 @@ export function normalizeOidcConfig(options = {}) {
   if (options.maxAgeSeconds !== undefined && options.maxAgeSeconds !== null) {
     maxAgeSeconds = boundedIntField(options.maxAgeSeconds, "maxAgeSeconds", { min: 1, max: MAX_TTL_SECONDS, def: null });
   }
+
+  // refreshMaxLifetimeSeconds: the ABSOLUTE hard ceiling on total session age
+  // across all silent refreshes. No refresh may extend a session beyond
+  // originalCreatedAt + refreshMaxLifetimeSeconds. Always validated (so an
+  // invalid value fails closed regardless of enableRefresh), but only consulted
+  // when enableRefresh is true.
+  const refreshMaxLifetimeSeconds = boundedIntField(options.refreshMaxLifetimeSeconds, "refreshMaxLifetimeSeconds", {
+    min: 1,
+    max: MAX_TTL_SECONDS,
+    def: DEFAULT_REFRESH_MAX_LIFETIME_SECONDS
+  });
 
   // algorithms / clockSkew pass through to the verifier (validated there too).
   let algorithms = DEFAULT_ALGORITHMS;
@@ -541,6 +590,8 @@ export function normalizeOidcConfig(options = {}) {
     sessionTtlSeconds,
     idleTtlSeconds,
     maxAgeSeconds,
+    enableRefresh,
+    refreshMaxLifetimeSeconds,
     tokenEndpointAuthMethod,
     secureScheme,
     secureCookies,
@@ -581,6 +632,8 @@ export function createOidcSessionBroker(options = {}) {
     sessionTtlSeconds,
     idleTtlSeconds,
     maxAgeSeconds,
+    enableRefresh,
+    refreshMaxLifetimeSeconds,
     tokenEndpointAuthMethod,
     secureScheme,
     algorithms,
@@ -599,6 +652,12 @@ export function createOidcSessionBroker(options = {}) {
   const sessionStore = config.sessionStore || createInMemorySessionStore();
   const pendingStore = config.pendingStore || createInMemoryPendingStore({ cap: config.pendingCap });
   const rateLimiter = createRateLimiter({ max: config.rateLimitMax });
+
+  // Single-flight refresh: concurrent authenticate() calls that land in the
+  // renewal window for the SAME session share ONE inflight refresh promise so
+  // they never stampede the token endpoint. Keyed by sessionId; cleared in a
+  // finally (the entry only lives for the duration of one refresh attempt).
+  const refreshInflight = new Map();
 
   const auditSinkRaw = config.auditSink;
   function emit(event) {
@@ -821,6 +880,20 @@ export function createOidcSessionBroker(options = {}) {
     return cryptoProvider.hmac({ data: sessionId, domain: SESSION_ID_HASH_DOMAIN });
   }
 
+  // --- refresh-token custody (ciphertext only; never plaintext at rest) ---
+  //
+  // The refresh token is a sensitive long-lived credential. It is held in the
+  // session record ONLY as an AEAD envelope (cryptoProvider.encrypt), bound to a
+  // domain-separated AAD; the plaintext exists only transiently inside a refresh
+  // attempt and is never logged or audited. Both helpers throw on any crypto
+  // failure so the caller fails closed.
+  async function encryptRefreshToken(refreshToken) {
+    return cryptoProvider.encrypt({ plaintext: refreshToken, aad: { domain: REFRESH_TOKEN_AAD_DOMAIN } });
+  }
+  async function decryptRefreshToken(envelope) {
+    return cryptoProvider.decrypt({ envelope, aad: { domain: REFRESH_TOKEN_AAD_DOMAIN } });
+  }
+
   // --- /auth/login ---
 
   async function handleLogin(req, res) {
@@ -1030,7 +1103,32 @@ export function createOidcSessionBroker(options = {}) {
 
     const sessionId = randomToken(SESSION_ID_BYTES);
     const createdAt = now();
-    sessionStore.set(sessionId, { identity, createdAt, lastSeen: createdAt });
+    const session = { identity, createdAt, lastSeen: createdAt };
+
+    // --- refresh custody: store the refresh token as CIPHERTEXT only ---
+    //
+    // Only when enableRefresh AND the IdP actually returned a non-empty
+    // refresh_token (RFC 6749 §5.1). The plaintext token is encrypted with the
+    // domain-separated AAD and only the envelope is persisted; originalCreatedAt
+    // pins the hard-ceiling anchor and subject pins the anti-swap subject. The
+    // access/id token is NEVER stored. If the IdP returned no refresh_token, this
+    // is a normal (non-renewable) session — proceed exactly as before. A failure
+    // to encrypt fails closed (no session can be minted with a plaintext token).
+    if (enableRefresh && typeof tokenResponse.refresh_token === "string" && tokenResponse.refresh_token.length > 0) {
+      let refreshEnvelope;
+      try {
+        refreshEnvelope = await encryptRefreshToken(tokenResponse.refresh_token);
+      } catch {
+        emit(buildEvent("oidc.login.failure", { reasonCode: REASON.token_invalid }));
+        denyCallback(res);
+        return;
+      }
+      session.refreshTokenEnvelope = refreshEnvelope;
+      session.originalCreatedAt = createdAt;
+      session.subject = claims.sub; // anti-swap pin (raw sub stays server-side only)
+    }
+
+    sessionStore.set(sessionId, session);
 
     setCookie(res, cookieNames.session, sessionId, {});
 
@@ -1059,6 +1157,52 @@ export function createOidcSessionBroker(options = {}) {
     return false;
   }
 
+  // Apply the configured client authentication to a token-endpoint request,
+  // IDENTICALLY for the authorization_code exchange and the refresh_token grant:
+  // client_secret_basic puts the secret in the Authorization header; _post puts
+  // it in the body — NEVER the URL/query. Shared so refresh cannot drift from the
+  // exchange's client-auth posture.
+  function applyClientAuth(body, headers) {
+    if (!isConfidential) return;
+    if (tokenEndpointAuthMethod === "client_secret_basic") {
+      const basic = Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`, "utf8").toString(
+        "base64"
+      );
+      headers.Authorization = `Basic ${basic}`;
+    } else {
+      body.set("client_secret", clientSecret);
+    }
+  }
+
+  // POST to the PINNED token endpoint via the SSRF-guarded guardedFetch (the same
+  // machinery the exchange uses: https-only, literal + post-DNS isBlockedAddress
+  // re-check, bounded body, redirect:"error"). reasonCode is the supplied coarse
+  // code on any transport/non-2xx/parse failure.
+  async function postToken(tokenEndpoint, body, failReason) {
+    const headers = {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json"
+    };
+    applyClientAuth(body, headers);
+    const { res, text } = await guardedFetch(
+      tokenEndpoint,
+      { method: "POST", headers, body: body.toString() },
+      MAX_TOKEN_RESPONSE_BYTES
+    );
+    if (!res.ok) {
+      const e = new Error("token endpoint returned a non-2xx status");
+      e.reasonCode = failReason;
+      throw e;
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      const e = new Error("token response is not valid JSON");
+      e.reasonCode = failReason;
+      throw e;
+    }
+  }
+
   async function exchangeCode(record, code) {
     const body = new URLSearchParams();
     body.set("grant_type", "authorization_code");
@@ -1066,43 +1210,24 @@ export function createOidcSessionBroker(options = {}) {
     body.set("redirect_uri", redirectUri); // IDENTICAL redirect_uri as on authorize
     body.set("code_verifier", record.codeVerifier);
     body.set("client_id", clientId);
+    return postToken(record.tokenEndpoint, body, REASON.exchange_failed);
+  }
 
-    const headers = {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
-    };
-
-    if (isConfidential) {
-      if (tokenEndpointAuthMethod === "client_secret_basic") {
-        const basic = Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`, "utf8").toString(
-          "base64"
-        );
-        headers.Authorization = `Basic ${basic}`;
-      } else {
-        // client_secret_post — secret in the body, NEVER the URL/query.
-        body.set("client_secret", clientSecret);
-      }
-    }
-
-    const { res, text } = await guardedFetch(
-      record.tokenEndpoint,
-      { method: "POST", headers, body: body.toString() },
-      MAX_TOKEN_RESPONSE_BYTES
-    );
-    if (!res.ok) {
-      const e = new Error("token exchange failed");
-      e.reasonCode = REASON.exchange_failed;
-      throw e;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const e = new Error("token response is not valid JSON");
-      e.reasonCode = REASON.exchange_failed;
-      throw e;
-    }
-    return parsed;
+  // Exchange a refresh token for a fresh token set at the PINNED token endpoint.
+  // SSRF-guarded (postToken -> guardedFetch) with the SAME client-auth as the
+  // authorization_code exchange. NOTE: the broker still never USES the access
+  // token — refresh consumes the refresh_token only; this is why the at_hash/
+  // c_hash exclusion on the verifier REMAINS valid (no access/code is bound to
+  // the renewed id_token's hash claims because the broker never reads them).
+  async function refreshGrant(tokenEndpoint, refreshToken) {
+    const body = new URLSearchParams();
+    body.set("grant_type", "refresh_token");
+    body.set("refresh_token", refreshToken);
+    body.set("client_id", clientId);
+    // Keep the original consented scope (offline_access included) so a compliant
+    // IdP does not silently narrow the grant on renewal.
+    body.set("scope", scopes.join(" "));
+    return postToken(tokenEndpoint, body, REASON.refresh_failed);
   }
 
   function resolveReturnTo(raw) {
@@ -1193,6 +1318,135 @@ export function createOidcSessionBroker(options = {}) {
     res.end(JSON.stringify({ status: "logged_out" }));
   }
 
+  // Evict a session and emit an evict/refresh-failure audit event (sessionIdHash
+  // only — NEVER a token). Centralized so every fail-closed path is identical.
+  async function evictSession(sessionId, reasonCode) {
+    sessionStore.delete(sessionId);
+    const sidHash = await sessionIdHash(sessionId).catch(() => null);
+    emit(buildEvent("oidc.session.evict", sidHash ? { sessionIdHash: sidHash, reasonCode } : { reasonCode }));
+  }
+
+  // Perform ONE silent refresh for a renewable session. Returns the renewed live
+  // session record on success, or null on any failure (after evicting, fail
+  // closed). Concurrency-safe at the call site via the single-flight map; this
+  // function assumes it is the sole in-flight refresh for sessionId.
+  //
+  // SECURITY ORDER:
+  //   1. Hard ceiling FIRST (originalCreatedAt + refreshMaxLifetimeSeconds) —
+  //      absolute, no refresh crosses it.
+  //   2. Decrypt the stored refresh token, POST grant_type=refresh_token to the
+  //      PINNED token endpoint (SSRF-guarded).
+  //   3. Fully re-verify the NEW id_token (issuer/aud/azp/signature) with NO
+  //      expectedNonce (refresh responses carry no nonce) + the aud/azp profile.
+  //   4. ANTI-SWAP: the new sub MUST equal the pinned subject.
+  //   5. On success: reset createdAt (new absolute window), keep originalCreatedAt
+  //      + the ceiling, rotate the stored ciphertext if the IdP rotated the token.
+  async function performRefresh(sessionId, session, t) {
+    // (1) Hard lifetime ceiling — absolute. No refresh may cross it.
+    const ceiling = session.originalCreatedAt + refreshMaxLifetimeSeconds * 1000;
+    if (t >= ceiling) {
+      await evictSession(sessionId, REASON.refresh_ceiling);
+      return null;
+    }
+
+    // Resolve the PINNED token endpoint + verifier (cached; SSRF-guarded).
+    let meta;
+    try {
+      meta = await discover();
+    } catch {
+      await evictSession(sessionId, REASON.refresh_failed);
+      return null;
+    }
+
+    // (2) Decrypt the stored refresh token (plaintext is transient + local).
+    let refreshToken;
+    try {
+      refreshToken = await decryptRefreshToken(session.refreshTokenEnvelope);
+    } catch {
+      await evictSession(sessionId, REASON.refresh_failed);
+      return null;
+    }
+
+    // POST grant_type=refresh_token to the pinned endpoint.
+    let tokenResponse;
+    try {
+      tokenResponse = await refreshGrant(meta.tokenEndpoint, refreshToken);
+    } catch {
+      await evictSession(sessionId, REASON.refresh_failed);
+      return null;
+    }
+
+    // RFC 9207: an iss in the refresh response must equal the pinned issuer.
+    if (typeof tokenResponse.iss === "string" && tokenResponse.iss !== issuer) {
+      await evictSession(sessionId, REASON.refresh_token_invalid);
+      return null;
+    }
+
+    const newIdToken = tokenResponse.id_token;
+    if (typeof newIdToken !== "string" || !newIdToken) {
+      await evictSession(sessionId, REASON.refresh_token_invalid);
+      return null;
+    }
+
+    // (3) FULLY re-verify the new id_token. No expectedNonce on a refresh.
+    let claims;
+    try {
+      claims = await verifier.verify(newIdToken, {});
+    } catch {
+      claims = null;
+    }
+    if (!claims || !oidcAudienceProfileOk(claims)) {
+      await evictSession(sessionId, REASON.refresh_token_invalid);
+      return null;
+    }
+
+    // (4) ANTI-SWAP: the renewed subject MUST equal the pinned subject. A refresh
+    // returning a different subject is rejected (fail closed, evict).
+    if (typeof claims.sub !== "string" || claims.sub !== session.subject) {
+      await evictSession(sessionId, REASON.refresh_subject_mismatch);
+      return null;
+    }
+
+    // (5) Success. Reset the absolute window (createdAt = t); originalCreatedAt
+    // and the ceiling are UNCHANGED. Refresh lastSeen.
+    session.createdAt = t;
+    session.lastSeen = t;
+
+    // RFC 6749 §10.4 rotation: if the IdP returned a NEW refresh_token, re-encrypt
+    // and replace the stored ciphertext (the old envelope is discarded by being
+    // overwritten — nothing else references it). If absent, keep the existing one.
+    if (typeof tokenResponse.refresh_token === "string" && tokenResponse.refresh_token.length > 0) {
+      let rotated;
+      try {
+        rotated = await encryptRefreshToken(tokenResponse.refresh_token);
+      } catch {
+        // A rotated token we cannot persist as ciphertext => fail closed.
+        await evictSession(sessionId, REASON.refresh_failed);
+        return null;
+      }
+      session.refreshTokenEnvelope = rotated;
+    }
+
+    // Identity is rebuilt only if needed; sub is pinned/unchanged so the existing
+    // keyed-HMAC identity stays valid. Persist and audit (sessionIdHash only).
+    sessionStore.set(sessionId, session);
+    const sidHash = await sessionIdHash(sessionId).catch(() => null);
+    emit(buildEvent("oidc.session.refresh", sidHash ? { identity: session.identity, sessionIdHash: sidHash } : { identity: session.identity }));
+    return session;
+  }
+
+  // Single-flight wrapper: concurrent authenticate() calls in the window for the
+  // SAME session share ONE inflight refresh promise (no token-endpoint stampede).
+  function refreshSingleFlight(sessionId, session, t) {
+    const existing = refreshInflight.get(sessionId);
+    if (existing) return existing;
+    const promise = performRefresh(sessionId, session, t).finally(() => {
+      refreshInflight.delete(sessionId);
+    });
+    refreshInflight.set(sessionId, promise);
+    return promise;
+  }
+
   // --- authenticate(req) -> session|null (read-only; never throws) ---
 
   async function authenticate(req) {
@@ -1200,17 +1454,42 @@ export function createOidcSessionBroker(options = {}) {
       const cookies = parseCookies(req?.headers?.cookie);
       const sessionId = cookies.get(cookieNames.session);
       if (!sessionId) return null;
-      const session = sessionStore.get(sessionId);
+      let session = sessionStore.get(sessionId);
       if (!session) return null;
       const t = now();
-      const absoluteExpiry = session.createdAt + sessionTtlSeconds * 1000;
+
+      // Idle TTL ALWAYS applies, including to a renewable session — an idle
+      // session is evicted and never silently renewed.
       const idleExpiry = session.lastSeen + idleTtlSeconds * 1000;
-      if (t >= absoluteExpiry || t >= idleExpiry) {
-        sessionStore.delete(sessionId);
-        const sidHash = await sessionIdHash(sessionId).catch(() => null);
-        emit(buildEvent("oidc.session.evict", sidHash ? { sessionIdHash: sidHash, reasonCode: REASON.expired } : { reasonCode: REASON.expired }));
+      if (t >= idleExpiry) {
+        await evictSession(sessionId, REASON.expired);
         return null;
       }
+
+      const absoluteExpiry = session.createdAt + sessionTtlSeconds * 1000;
+      const renewable = enableRefresh && session.refreshTokenEnvelope !== undefined;
+
+      // SILENT RENEWAL: a renewable session within the renewal window (the last
+      // REFRESH_WINDOW_FRACTION of its absolute TTL) attempts a refresh BEFORE the
+      // absolute-expiry eviction. The hard ceiling is enforced inside performRefresh.
+      if (renewable && !(t >= absoluteExpiry)) {
+        const windowMs = Math.ceil(sessionTtlSeconds * 1000 * REFRESH_WINDOW_FRACTION);
+        const renewAt = absoluteExpiry - windowMs;
+        if (t >= renewAt) {
+          const renewed = await refreshSingleFlight(sessionId, session, t);
+          if (!renewed) return null; // refresh failed -> evicted, fail closed
+          session = renewed;
+          // createdAt was reset to t inside the refresh; lastSeen already = t.
+          return { identity: session.identity, createdAt: session.createdAt, lastSeen: session.lastSeen };
+        }
+      }
+
+      // Absolute TTL eviction (no renewal applied / not renewable / past window).
+      if (t >= absoluteExpiry) {
+        await evictSession(sessionId, REASON.expired);
+        return null;
+      }
+
       session.lastSeen = t;
       sessionStore.set(sessionId, session);
       // Return a fresh shallow copy so callers cannot mutate the live store entry.

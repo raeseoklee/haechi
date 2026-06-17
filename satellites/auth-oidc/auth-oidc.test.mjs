@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocalCryptoProvider, initLocalKeyFile } from "haechi/crypto";
 import { createDashboardServer } from "haechi-dashboard";
-import { createOidcSessionBroker, normalizeOidcConfig } from "./index.mjs";
+import { createOidcSessionBroker, normalizeOidcConfig, createInMemorySessionStore } from "./index.mjs";
 
 // ---------------------------------------------------------------------------
 // Offline harness
@@ -1281,4 +1281,458 @@ test("PR-2 (f) trustedEndpointHosts validation is fail-closed; unknown-key rejec
   // Absent: default empty array (zero behavior change).
   const dflt = normalizeOidcConfig({ ...base });
   assert.deepEqual(dflt.trustedEndpointHosts, []);
+});
+
+// ---------------------------------------------------------------------------
+// PR-3: opt-in refresh-token rotation / silent renewal.
+//
+// enableRefresh (default FALSE) is byte-behavior-identical to today. When true:
+// offline_access is requested, a refresh_token is stored ONLY as ciphertext, and
+// an ACTIVE session within the renewal window silently renews via the stored
+// refresh token — bounded by an absolute hard ceiling (originalCreatedAt +
+// refreshMaxLifetimeSeconds). A refresh failure fails closed (evict + re-login).
+// SYNTHETIC tokens/keys; the token endpoint / JWKS / discovery are mocked.
+// ---------------------------------------------------------------------------
+
+// id-token claims relative to a given clock value (ms) so the verifier's exp/nbf
+// checks pass against the advanced clock.
+function idClaimsAt(clockMs, extra = {}) {
+  const s = Math.floor(clockMs / 1000);
+  return { iss: ISSUER, aud: CLIENT_ID, sub: "user-789", exp: s + 3600, nbf: s - 10, iat: s - 10, ...extra };
+}
+
+// A refresh-aware fetch stub. Dispatches by URL; at the token endpoint it reads
+// the form body to distinguish the authorization_code exchange from a
+// refresh_token grant. The refresh-grant id_token is built by refreshIdToken()
+// (caller-controlled per call) and the response may carry a rotated refresh_token.
+function makeRefreshFetch({ key, getClock, getNonce, refreshIdToken, refreshResponse, refreshStatus = 200 } = {}) {
+  const calls = { discovery: 0, jwks: 0, exchange: 0, refresh: 0, refreshTokensSent: [], urls: [] };
+  const fetchImpl = async (url, init = {}) => {
+    const u = String(url);
+    calls.urls.push(u);
+    if (u.endsWith("/.well-known/openid-configuration")) {
+      calls.discovery += 1;
+      return new Response(JSON.stringify(discoveryDoc()), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === JWKS) {
+      calls.jwks += 1;
+      return new Response(JSON.stringify({ keys: [key.jwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === TOKEN) {
+      const body = new URLSearchParams(String(init.body || ""));
+      const grant = body.get("grant_type");
+      if (grant === "refresh_token") {
+        calls.refresh += 1;
+        calls.refreshTokensSent.push(body.get("refresh_token"));
+        if (refreshResponse) {
+          return new Response(JSON.stringify(refreshResponse(calls.refresh)), { status: refreshStatus, headers: { "content-type": "application/json" } });
+        }
+        const idToken = refreshIdToken
+          ? refreshIdToken({ key, clockMs: getClock(), n: calls.refresh })
+          : signIdToken({ claims: idClaimsAt(getClock()), privateKey: key.rsa.privateKey });
+        const resp = { id_token: idToken, access_token: `ACCESS-REFRESH-${calls.refresh}`, token_type: "Bearer" };
+        return new Response(JSON.stringify(resp), { status: refreshStatus, headers: { "content-type": "application/json" } });
+      }
+      // authorization_code exchange.
+      calls.exchange += 1;
+      const idToken = signIdToken({ claims: idClaimsAt(getClock(), { nonce: getNonce() }), privateKey: key.rsa.privateKey });
+      const resp = { id_token: idToken, access_token: "ACCESS-INITIAL", refresh_token: "REFRESH-INITIAL", token_type: "Bearer" };
+      return new Response(JSON.stringify(resp), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    throw new Error(`unexpected fetch URL: ${u}`);
+  };
+  return { fetchImpl, calls };
+}
+
+// Drive a full login+callback under enableRefresh, returning the broker, the
+// session id, the live session store (to inspect the stored ciphertext), the
+// audit sink, and the call tracker.
+async function refreshLogin(overrides = {}) {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const audit = makeAuditSink();
+  const sessionStore = createInMemorySessionStore();
+  let clock = NOW_MS;
+  let capturedNonce = null;
+  const { fetchImpl, calls } = makeRefreshFetch({
+    key,
+    getClock: () => clock,
+    getNonce: () => capturedNonce,
+    ...overrides.fetchArgs
+  });
+  const broker = createOidcSessionBroker(
+    baseOptions(crypto, {
+      fetchImpl,
+      auditSink: audit,
+      sessionStore,
+      now: () => clock,
+      enableRefresh: true,
+      sessionTtlSeconds: 1000,
+      idleTtlSeconds: 1000,
+      refreshMaxLifetimeSeconds: 5000,
+      ...overrides.brokerOverrides
+    })
+  );
+  const login = await doLogin(broker);
+  capturedNonce = login.nonce;
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({
+      url: `/auth/callback?code=AUTH_CODE&state=${encodeURIComponent(login.state)}`,
+      cookies: { [login.preauthName]: login.preauthValue }
+    }),
+    cbRes
+  );
+  const sessionCookie = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c));
+  const sessionId = sessionCookie ? sessionCookie.split("=")[1].split(";")[0] : null;
+  return {
+    broker,
+    key,
+    audit,
+    calls,
+    sessionStore,
+    sessionId,
+    cbRes,
+    crypto,
+    setClock: (v) => {
+      clock = v;
+    },
+    getClock: () => clock
+  };
+}
+
+const SESSION_COOKIE_NAME = "__Host-haechi_session";
+const REFRESH_AAD = { domain: "haechi:oidc:refresh-token:v1" };
+
+// (a) DEFAULT enableRefresh:false unchanged — offline_access still stripped,
+// no refresh stored, session hard-expires at the absolute TTL (no renewal).
+test("PR-3 (a) DEFAULT enableRefresh:false — offline_access stripped, no refresh stored, hard-expires at absolute TTL", async () => {
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const sessionStore = createInMemorySessionStore();
+  let clock = NOW_MS;
+  let capturedNonce = null;
+  const { fetchImpl, calls } = makeRefreshFetch({ key, getClock: () => clock, getNonce: () => capturedNonce });
+  const broker = createOidcSessionBroker(
+    baseOptions(crypto, {
+      fetchImpl,
+      sessionStore,
+      now: () => clock,
+      scopes: ["openid", "profile", "offline_access"], // operator asks for it
+      sessionTtlSeconds: 1000,
+      idleTtlSeconds: 1000
+      // enableRefresh omitted -> false
+    })
+  );
+  // offline_access STRIPPED from the authorize scope even though it was requested.
+  const login = await doLogin(broker);
+  capturedNonce = login.nonce;
+  const scope = login.authUrl.searchParams.get("scope").split(" ");
+  assert.ok(scope.includes("openid"));
+  assert.ok(!scope.includes("offline_access"), "offline_access must be stripped when enableRefresh is false");
+
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({ url: `/auth/callback?code=AUTH_CODE&state=${encodeURIComponent(login.state)}`, cookies: { [login.preauthName]: login.preauthValue } }),
+    cbRes
+  );
+  const sessionId = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c)).split("=")[1].split(";")[0];
+  // No refresh token stored on the session record.
+  const stored = sessionStore.get(sessionId);
+  assert.ok(stored, "session minted");
+  assert.equal(stored.refreshTokenEnvelope, undefined, "no refresh token stored when disabled");
+  assert.equal(stored.originalCreatedAt, undefined);
+  assert.equal(stored.subject, undefined);
+
+  // Within the absolute TTL: ok.
+  assert.ok(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })));
+  // Past the absolute TTL: hard-expires (no renewal), no refresh POST ever made.
+  clock = NOW_MS + 1001 * 1000;
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null);
+  assert.equal(calls.refresh, 0, "no refresh grant when disabled");
+});
+
+// (b) enableRefresh:true — a session within the renewal window silently renews;
+// createdAt advances; the session survives past the original absolute TTL.
+test("PR-3 (b) enableRefresh:true — silent renewal in the window advances createdAt and survives past the original absolute TTL", async () => {
+  const ctx = await refreshLogin();
+  const { broker, sessionId, sessionStore, calls } = ctx;
+  assert.ok(sessionId, "session minted");
+
+  // offline_access was requested on the authorize URL (verify via a fresh login
+  // is unnecessary: the stored refresh token proves the round-trip). Stored as
+  // ciphertext (asserted in test g). createdAt == NOW_MS initially.
+  const before = sessionStore.get(sessionId);
+  assert.equal(before.createdAt, NOW_MS);
+
+  // Advance into the renewal window: ttl=1000s, window=250s -> renewAt at 750s.
+  ctx.setClock(NOW_MS + 800 * 1000);
+  const renewed = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.ok(renewed, "an in-window renewable session must silently renew, not 401");
+  assert.equal(calls.refresh, 1, "exactly one refresh grant fired");
+  // createdAt advanced to the refresh time (new absolute window).
+  assert.equal(renewed.createdAt, NOW_MS + 800 * 1000, "createdAt resets to the refresh time");
+
+  // The session now survives PAST the ORIGINAL absolute TTL (NOW_MS + 1000s).
+  ctx.setClock(NOW_MS + 1100 * 1000); // beyond the original absolute expiry
+  const stillAlive = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.ok(stillAlive, "the renewed session survives past the original absolute TTL");
+  // A success refresh audit event was emitted (sessionIdHash only, no token).
+  assert.ok(ctx.audit.events.some((e) => e.type === "oidc.session.refresh"), "a refresh success event must be emitted");
+});
+
+// (c) HARD CEILING — renewal is refused once past originalCreatedAt +
+// refreshMaxLifetimeSeconds (session evicted, re-login). The ceiling is absolute:
+// successive renewals keep advancing createdAt (a new 1000s absolute window each),
+// but NO renewal may extend the session beyond originalCreatedAt + 5000s.
+test("PR-3 (c) HARD CEILING — no refresh past originalCreatedAt + refreshMaxLifetimeSeconds (evict + re-login)", async () => {
+  // ttl=1000s, window=250s (renewAt 750s into each window), ceiling=5000s.
+  const ctx = await refreshLogin();
+  const { broker, sessionId, calls } = ctx;
+
+  // Step the clock in 800s increments (inside each successive renewal window:
+  // 800 >= 750 and 800 < 1000) so each authenticate() renews and advances
+  // createdAt to the current clock. After k renewals createdAt = NOW_MS + 800k·s.
+  // Stay strictly below the ceiling (5000s) on every renewal: k = 1..5 lands
+  // createdAt at 800,1600,2400,3200,4000 (< 5000) — all renew.
+  let renews = 0;
+  for (let k = 1; k <= 5; k += 1) {
+    ctx.setClock(NOW_MS + 800 * k * 1000);
+    const r = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+    assert.ok(r, `renewal ${k} must succeed (createdAt advances, still under the ceiling)`);
+    renews += 1;
+  }
+  assert.equal(calls.refresh, renews, "each in-window, under-ceiling authenticate renewed once");
+  // createdAt is now NOW_MS + 4000s -> renewAt=4750s, absoluteExpiry=5000s. Do one
+  // more renewal (land at 4800s: in-window, still < the 5000s ceiling) to push
+  // createdAt to 4800s so its NEXT window [5550s, 5800s] lies fully past the ceiling.
+  ctx.setClock(NOW_MS + 4800 * 1000);
+  assert.ok(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), "renew to push createdAt to 4800s");
+  const refreshesBeforeCeiling = calls.refresh;
+
+  // createdAt=4800s -> renewAt=5550s, absoluteExpiry=5800s. Land at 5600s: in the
+  // renewal window (5600 >= 5550, 5600 < 5800) AND past the ceiling (5600 >=
+  // originalCreatedAt + 5000s). The ceiling check (evaluated FIRST inside the
+  // refresh) must refuse and evict — NO refresh grant fires.
+  ctx.setClock(NOW_MS + 5600 * 1000);
+  const denied = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.equal(denied, null, "no refresh may cross the hard lifetime ceiling");
+  assert.equal(calls.refresh, refreshesBeforeCeiling, "no refresh grant fired past the ceiling");
+  assert.ok(
+    ctx.audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "refresh_ceiling"),
+    "a refresh_ceiling evict event must be emitted"
+  );
+  // The session is gone (re-login required).
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null);
+});
+
+// (d) ROTATION — a rotated refresh_token replaces the stored one; the old
+// ciphertext is gone.
+test("PR-3 (d) ROTATION — a rotated refresh_token replaces the stored ciphertext (old one discarded)", async () => {
+  // The refresh response carries BOTH a valid (signed) id_token and a NEW
+  // refresh_token (RFC 6749 §10.4 rotation). Build a dedicated rotating stub
+  // (refreshLogin's default stub does not rotate). The stub closes over its key.
+  const crypto = await makeCrypto();
+  const key = makeKey();
+  const sessionStore = createInMemorySessionStore();
+  let clock = NOW_MS;
+  let nonce = null;
+  const { fetchImpl, calls } = makeRefreshFetch({
+    key,
+    getClock: () => clock,
+    getNonce: () => nonce,
+    refreshResponse: (n) => ({
+      id_token: signIdToken({ claims: idClaimsAt(clock), privateKey: key.rsa.privateKey }),
+      access_token: `A${n}`,
+      refresh_token: `ROTATED-${n}`,
+      token_type: "Bearer"
+    })
+  });
+  const broker = createOidcSessionBroker(
+    baseOptions(crypto, {
+      fetchImpl,
+      sessionStore,
+      now: () => clock,
+      enableRefresh: true,
+      sessionTtlSeconds: 1000,
+      idleTtlSeconds: 1000,
+      refreshMaxLifetimeSeconds: 5000
+    })
+  );
+  const login = await doLogin(broker);
+  nonce = login.nonce;
+  const cbRes = makeRes();
+  await broker.handlers["/auth/callback"](
+    makeReq({ url: `/auth/callback?code=C&state=${encodeURIComponent(login.state)}`, cookies: { [login.preauthName]: login.preauthValue } }),
+    cbRes
+  );
+  const sid = cbRes.setCookies().find((c) => /session/.test(c) && !/preauth/.test(c)).split("=")[1].split(";")[0];
+
+  const envBefore = sessionStore.get(sid).refreshTokenEnvelope;
+  const plainBefore = await crypto.decrypt({ envelope: envBefore, aad: REFRESH_AAD });
+  assert.equal(plainBefore, "REFRESH-INITIAL", "the initial stored token decrypts to the initial refresh token");
+
+  clock = NOW_MS + 800 * 1000; // renewal window
+  assert.ok(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sid } })));
+  assert.equal(calls.refresh, 1);
+  const envAfter = sessionStore.get(sid).refreshTokenEnvelope;
+  const plainAfter = await crypto.decrypt({ envelope: envAfter, aad: REFRESH_AAD });
+  assert.equal(plainAfter, "ROTATED-1", "the stored ciphertext now decrypts to the rotated refresh token");
+  assert.notEqual(JSON.stringify(envAfter), JSON.stringify(envBefore), "the stored envelope changed (old ciphertext discarded)");
+});
+
+// (e) ANTI-SWAP — a refresh whose new id_token has a different sub is rejected
+// (evict + re-login).
+test("PR-3 (e) ANTI-SWAP — a refresh returning a different sub is rejected (evict)", async () => {
+  const ctx = await refreshLogin({
+    fetchArgs: {
+      refreshIdToken: ({ key, clockMs }) =>
+        signIdToken({ claims: idClaimsAt(clockMs, { sub: "attacker-sub" }), privateKey: key.rsa.privateKey })
+    }
+  });
+  const { broker, sessionId, calls } = ctx;
+  ctx.setClock(NOW_MS + 800 * 1000);
+  const denied = await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+  assert.equal(denied, null, "a subject swap on refresh must be rejected (fail closed)");
+  assert.equal(calls.refresh, 1, "the refresh grant was attempted once");
+  assert.ok(
+    ctx.audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "refresh_subject_mismatch"),
+    "a refresh_subject_mismatch evict event must be emitted"
+  );
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null, "session is gone");
+});
+
+// (f) FAIL-CLOSED — a refresh returning non-2xx OR an unverifiable id_token
+// evicts the session (authenticate returns null).
+test("PR-3 (f) FAIL-CLOSED — a non-2xx refresh evicts the session", async () => {
+  const ctx = await refreshLogin({
+    fetchArgs: { refreshStatus: 400, refreshResponse: () => ({ error: "invalid_grant" }) }
+  });
+  const { broker, sessionId } = ctx;
+  ctx.setClock(NOW_MS + 800 * 1000);
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null, "a non-2xx refresh fails closed");
+  assert.ok(ctx.audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "refresh_failed"));
+  // No stale/extended session left behind.
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null);
+});
+
+test("PR-3 (f) FAIL-CLOSED — an unverifiable refresh id_token (bad signature) evicts the session", async () => {
+  const ctx = await refreshLogin({
+    fetchArgs: {
+      // Sign the refresh id_token with an UNRELATED key -> verification fails.
+      refreshIdToken: ({ clockMs }) => {
+        const wrong = makeKey();
+        return signIdToken({ claims: idClaimsAt(clockMs), privateKey: wrong.rsa.privateKey });
+      }
+    }
+  });
+  const { broker, sessionId } = ctx;
+  ctx.setClock(NOW_MS + 800 * 1000);
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null, "an unverifiable refresh id_token fails closed");
+  assert.ok(ctx.audit.events.some((e) => e.type === "oidc.session.evict" && e.reasonCode === "refresh_token_invalid"));
+});
+
+// (g) NO-PLAINTEXT — the stored refresh field is ciphertext (not the raw token)
+// and no emitted audit event contains the raw refresh/access/id token string.
+test("PR-3 (g) NO-PLAINTEXT — refresh stored only as ciphertext; no token in any audit event", async () => {
+  const ctx = await refreshLogin();
+  const { sessionStore, sessionId, audit, crypto } = ctx;
+
+  // Drive one renewal so a refresh-success event also exists.
+  ctx.setClock(NOW_MS + 800 * 1000);
+  await ctx.broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } }));
+
+  const stored = sessionStore.get(sessionId);
+  // The stored field is an AEAD envelope object, NOT the raw token string.
+  assert.ok(stored.refreshTokenEnvelope && typeof stored.refreshTokenEnvelope === "object", "stored as an envelope object");
+  const serialized = JSON.stringify(stored.refreshTokenEnvelope);
+  assert.ok(!serialized.includes("REFRESH-INITIAL"), "the raw refresh token must not appear in the stored envelope");
+  // It must round-trip back to the plaintext under the bound AAD (proves it is
+  // ciphertext of the real token, not the token itself).
+  const back = await crypto.decrypt({ envelope: stored.refreshTokenEnvelope, aad: REFRESH_AAD });
+  assert.equal(back, "REFRESH-INITIAL");
+
+  // No audit event contains any raw token (refresh/access/id) string.
+  const hay = JSON.stringify(audit.events);
+  for (const needle of ["REFRESH-INITIAL", "ACCESS-INITIAL", "ACCESS-REFRESH", "id_token", "refresh_token", "access_token", "user-789"]) {
+    assert.ok(!hay.includes(needle), `audit must not leak "${needle}"`);
+  }
+  // The audit allowlist still holds for the refresh event.
+  const allowed = new Set(["type", "provider", "timestamp", "subjectHash", "issuerHash", "sessionIdHash", "reasonCode"]);
+  for (const e of audit.events) {
+    for (const k of Object.keys(e)) assert.ok(allowed.has(k), `unexpected audit field ${k} in ${e.type}`);
+  }
+});
+
+// (h) config validation for enableRefresh / refreshMaxLifetimeSeconds; unknown
+// key rejection intact; enableRefresh requires encrypt/decrypt.
+test("PR-3 (h) config validation — enableRefresh + refreshMaxLifetimeSeconds fail-closed; unknown-key rejection intact", async () => {
+  const crypto = await makeCrypto();
+  const base = baseOptions(crypto, {});
+  delete base.lookupImpl;
+  delete base.now;
+
+  // enableRefresh must be a boolean.
+  assert.throws(() => normalizeOidcConfig({ ...base, enableRefresh: "yes" }), /enableRefresh.*boolean/);
+  assert.throws(() => normalizeOidcConfig({ ...base, enableRefresh: 1 }), /enableRefresh.*boolean/);
+
+  // refreshMaxLifetimeSeconds bounds (positive int within [1, MAX_TTL_SECONDS]).
+  assert.throws(() => normalizeOidcConfig({ ...base, refreshMaxLifetimeSeconds: 0 }), /refreshMaxLifetimeSeconds/);
+  assert.throws(() => normalizeOidcConfig({ ...base, refreshMaxLifetimeSeconds: -1 }), /refreshMaxLifetimeSeconds/);
+  assert.throws(() => normalizeOidcConfig({ ...base, refreshMaxLifetimeSeconds: 1.5 }), /refreshMaxLifetimeSeconds/);
+  assert.throws(() => normalizeOidcConfig({ ...base, refreshMaxLifetimeSeconds: 31 * 24 * 60 * 60 }), /refreshMaxLifetimeSeconds/);
+
+  // Unknown key still rejected (strict KNOWN_KEYS).
+  assert.throws(() => normalizeOidcConfig({ ...base, refreshBogus: 1 }), /Unknown oidc config option/);
+
+  // Defaults: enableRefresh false, a 7-day ceiling exposed on the config.
+  const dflt = normalizeOidcConfig({ ...base });
+  assert.equal(dflt.enableRefresh, false);
+  assert.equal(dflt.refreshMaxLifetimeSeconds, 7 * 24 * 60 * 60);
+
+  // Valid opt-in: exposed on the normalized config.
+  const cfg = normalizeOidcConfig({ ...base, enableRefresh: true, refreshMaxLifetimeSeconds: 3600 });
+  assert.equal(cfg.enableRefresh, true);
+  assert.equal(cfg.refreshMaxLifetimeSeconds, 3600);
+
+  // enableRefresh requires a cryptoProvider with encrypt/decrypt (an hmac-only
+  // provider is rejected — refresh tokens must be stored as ciphertext).
+  const hmacOnly = { hmac: async () => "deadbeef".repeat(8) };
+  assert.throws(
+    () => normalizeOidcConfig({ ...base, cryptoProvider: hmacOnly, enableRefresh: true }),
+    /encrypt.*decrypt|enableRefresh.*encrypt/
+  );
+  // hmac-only is fine when refresh is disabled.
+  assert.doesNotThrow(() => normalizeOidcConfig({ ...base, cryptoProvider: hmacOnly, enableRefresh: false }));
+
+  // enableRefresh:true forces offline_access into the authorize scope.
+  const withRefresh = normalizeOidcConfig({ ...base, enableRefresh: true, scopes: ["openid", "profile"] });
+  assert.ok(withRefresh.scopes.includes("offline_access"), "offline_access must be force-included when enableRefresh is true");
+});
+
+// LOGOUT drops the stored refresh token (deleting the session entry suffices).
+test("PR-3 logout drops the stored refresh token (session record + its ciphertext gone)", async () => {
+  const ctx = await refreshLogin();
+  const { broker, sessionId, sessionStore } = ctx;
+  assert.ok(sessionStore.get(sessionId)?.refreshTokenEnvelope, "a refresh envelope was stored");
+  const res = makeRes();
+  await broker.handlers["/auth/logout"](
+    makeReq({ method: "POST", url: "/auth/logout", cookies: { [SESSION_COOKIE_NAME]: sessionId }, headers: { "x-haechi-csrf": "1" } }),
+    res
+  );
+  assert.ok(res.statusCode === 200 || res.statusCode === 302);
+  assert.equal(sessionStore.get(sessionId), null, "the session record (and its stored refresh ciphertext) is gone after logout");
+  assert.equal(await broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })), null);
+});
+
+// SINGLE-FLIGHT — concurrent in-window authenticate() calls share ONE refresh.
+test("PR-3 single-flight — concurrent in-window authenticate() calls fire exactly ONE refresh grant", async () => {
+  const ctx = await refreshLogin();
+  const { broker, sessionId, calls } = ctx;
+  ctx.setClock(NOW_MS + 800 * 1000);
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => broker.authenticate(makeReq({ cookies: { [SESSION_COOKIE_NAME]: sessionId } })))
+  );
+  assert.ok(results.every((r) => r && r.identity), "every concurrent caller gets the renewed session");
+  assert.equal(calls.refresh, 1, "single-flight collapses concurrent refreshes into one token-endpoint POST");
 });
