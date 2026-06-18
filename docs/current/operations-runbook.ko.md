@@ -171,7 +171,37 @@ HAECHI_OLLAMA_URL=http://OLLAMA_HOST:11434  HAECHI_OLLAMA_MODEL=<pulled-model> \
 게이트가 필요하면, 해당 네트워크에 self-hosted 러너를 등록하고 그곳에서 스위트를
 트리거하십시오. GitHub 호스팅 러너는 사설 LAN에 도달할 수 없습니다.
 
-## 9. 빠른 참조
+## 9. 키 회전 & AES-256-GCM nonce 예산
+
+로컬 AES-256-GCM crypto provider(`keys.provider: local`)는 모든 `encrypt`
+세그먼트를 랜덤 96-bit IV로 암호화합니다. 랜덤 IV는 키당 암호화 횟수가
+한정될 때만 안전하며 — birthday bound에 따라 NIST SP 800-38D §8.3은 랜덤-IV
+호출을 **키당 2^32회**로 제한합니다. provider가 이를 자동 강제합니다:
+
+- 키(`kid`)별 암호화 횟수를 세어 미리 예약한 윈도우 단위로 키 파일
+  (`keys.keyFile`)에 영속화 → 재시작을 넘겨도 예산 유지.
+- **50%** 지점에서 1회 프로세스 경고(`code: HAECHI_NONCE_BUDGET`) — 회전 예약 신호.
+- 한도 도달 시 **fail-closed**: `encrypt`가 throw하고 프록시는 (GCM에 치명적인)
+  IV 충돌을 무릅쓰는 대신 에러를 반환합니다.
+
+**한도 전에**(그리고 평소 키 회전 주기에) 회전하세요:
+
+```bash
+haechi init --force        # 새 active 키 발급; 기존 키는 삭제가 아니라 RETIRED
+```
+
+`--force`는 현재 키를 retire하고(기존 봉투·token-vault 레코드 복호화를 위해
+`kid`로 계속 주소 지정 가능) 새 active 키를 새 예산으로 시작합니다. 봉투가
+고아가 되지 않습니다.
+
+**읽기 전용 키 파일:** `keys.keyFile`이 읽기 전용으로 마운트되면 예산을 영속화할
+수 없어, provider가 1회 경고(`code: HAECHI_NONCE_BUDGET_NOPERSIST`) 후
+**프로세스 단위** 한도로 fallback합니다(재시작 간 보호 없음). 키 파일을 프록시가
+쓸 수 있게 두거나, 정해진 주기로 키를 회전하세요. **운영 custody:** 외부
+`cryptoProvider`(`haechi-crypto-kms` 위성)를 사용하세요 — KMS/HSM이 자체 nonce
+규율을 가지므로 이 소프트웨어 예산은 적용되지 않습니다.
+
+## 10. 빠른 참조
 
 | 작업 | 커맨드 |
 |---|---|
