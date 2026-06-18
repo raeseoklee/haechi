@@ -28,7 +28,7 @@
 | `haechi` / `haechi/core` — `createHaechi().protectJson`, `createHaechi().createStreamProtector`, `collectStringEntries`, `pathToString`, `safePathToString`, `shapeOnly`, `summarize` | **FROZEN** (breaking change = major) |
 | `haechi/runtime` — `createRuntime`, `normalizeConfig` (config shape), `defaultConfig`, `loadConfig`, `writeDefaultConfig`, `isValidPort`, `DEFAULT_CONFIG_PATH` | **FROZEN** |
 | `haechi/auth` — `authProvider` 계약, `buildIdentity`, `buildExternalIdentity`, `validateLabels`, `createBearerAuthProvider`, token store (`readAuthStore`, `addToken`, `listTokens`, `revokeToken`), `DEFAULT_ALLOWED_LABEL_KEYS` | **FROZEN** |
-| `haechi/crypto` — `cryptoProvider` 계약, `assertCryptoProviderConformance`, `canonicalize`, `createLocalCryptoProvider`, `initLocalKeyFile` | **FROZEN** |
+| `haechi/crypto` — `cryptoProvider` 계약, `assertCryptoProviderConformance`, `canonicalize`, `createLocalCryptoProvider`, `initLocalKeyFile`, `readNonceBudget` | **FROZEN** |
 | `haechi/audit` — audit **event schema** (§2.3), `verifyAuditChain`, `sanitizeAudit`, `createJsonlAuditSink`, `readAuditSummary`, `FORBIDDEN_KEYS`, 그리고 1.5.0 주입 가능한 store 시임 `createAuditSink`, `createFileAuditStore`, `buildIntegrityRecord` | **FROZEN** |
 | `haechi/policy` — `buildPolicy`, `createPolicyEngine`, `createPolicyProfiles`, `validatePolicy`, `ACTION_STRENGTH` (action ordering) | **FROZEN** |
 | `haechi/filter` — `createDefaultFilterEngine`, `detectEntry`, 그리고 **rule/detection shape** | **FROZEN** |

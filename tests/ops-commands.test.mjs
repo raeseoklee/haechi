@@ -63,6 +63,12 @@ test("status reports non-enforcing defaults with explicit warnings", async () =>
   assert.equal(body.protection.responseProtection.enabled, false);
   assert.equal(body.keys.exists, true);
   assert.equal(body.keys.permissions, "0600");
+  // A freshly initialized local key surfaces an unused nonce budget (no warning).
+  assert.equal(body.keys.nonceBudget.used, 0);
+  assert.equal(body.keys.nonceBudget.exhausted, false);
+  assert.equal(body.keys.nonceBudget.usedPercent, 0);
+  assert.ok(body.keys.nonceBudget.limit > 0 && body.keys.nonceBudget.remaining === body.keys.nonceBudget.limit);
+  assert.ok(!body.warnings.some((line) => line.includes("safe encryption budget")));
   assert.equal(body.tokenVault.detokenizeResponses, false);
   assert.ok(body.warnings.some((line) => line.includes("dry-run")));
   assert.ok(body.warnings.some((line) => line.includes("responseProtection")));

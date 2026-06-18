@@ -365,6 +365,28 @@ export async function assertCryptoProviderConformance(provider, { requireHmac = 
   return { ok: true };
 }
 
+// Read the active key's nonce-budget status for operator visibility (e.g.
+// `haechi status`). `used` reflects the PERSISTED reservation (advanced a window
+// at a time), so it is a slight SAFE over-estimate of actual encryptions — never
+// an under-estimate. Throws if the file has no usable active key.
+export async function readNonceBudget(keyFile) {
+  const raw = JSON.parse(await readFile(keyFile, "utf8"));
+  const activeEntry = raw.keys?.find((key) => key.status === "active") ?? raw.keys?.[0];
+  if (!activeEntry) {
+    throw new Error("No active key found while reading nonce budget");
+  }
+  const used = activeEntry.usage ?? 0;
+  return {
+    kid: activeEntry.kid,
+    used,
+    limit: MAX_ENCRYPTIONS_PER_KEY,
+    remaining: Math.max(0, MAX_ENCRYPTIONS_PER_KEY - used),
+    usedFraction: used / MAX_ENCRYPTIONS_PER_KEY,
+    warnThreshold: NONCE_WARN_THRESHOLD,
+    exhausted: used >= MAX_ENCRYPTIONS_PER_KEY
+  };
+}
+
 export function canonicalize(value) {
   if (Array.isArray(value)) {
     return `[${value.map((item) => canonicalize(item)).join(",")}]`;

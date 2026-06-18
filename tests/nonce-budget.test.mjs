@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createLocalCryptoProvider, initLocalKeyFile } from "../packages/crypto/index.mjs";
+import { createLocalCryptoProvider, initLocalKeyFile, readNonceBudget } from "../packages/crypto/index.mjs";
 
 // The NIST SP 800-38D random-IV invocation ceiling the local provider enforces.
 const NIST_LIMIT = 2 ** 32;
@@ -81,6 +81,30 @@ test("key rotation (init --force) resets the nonce budget for a fresh provider",
   const rotated = createLocalCryptoProvider({ keyFile });
   const envelope = await rotated.encrypt({ plaintext: "fresh@example.com", aad: AAD });
   assert.equal(await rotated.decrypt({ envelope, aad: AAD }), "fresh@example.com");
+});
+
+test("readNonceBudget reports the active key's usage (safe over-estimate)", async () => {
+  const keyFile = await freshKeyFile();
+  const fresh = await readNonceBudget(keyFile);
+  assert.equal(fresh.used, 0);
+  assert.equal(fresh.limit, NIST_LIMIT);
+  assert.equal(fresh.remaining, NIST_LIMIT);
+  assert.equal(fresh.exhausted, false);
+  assert.equal(fresh.usedFraction, 0);
+
+  // One encrypt reserves a window; the budget reflects the reservation (>0, <limit).
+  await createLocalCryptoProvider({ keyFile }).encrypt({ plaintext: "a@example.com", aad: AAD });
+  const used = await readNonceBudget(keyFile);
+  assert.ok(used.used > 0 && used.used < NIST_LIMIT);
+  assert.ok(used.usedFraction > 0 && used.usedFraction < 1);
+  assert.equal(used.exhausted, false);
+
+  // At the limit it reports exhausted with zero remaining.
+  await setActiveUsage(keyFile, NIST_LIMIT);
+  const done = await readNonceBudget(keyFile);
+  assert.equal(done.exhausted, true);
+  assert.equal(done.remaining, 0);
+  assert.equal(done.usedFraction, 1);
 });
 
 test("a read-only key file degrades to per-process counting instead of breaking encryption", async (t) => {

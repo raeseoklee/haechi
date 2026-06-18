@@ -1,8 +1,8 @@
 # Haechi 리스크 레지스터 및 릴리스 게이트
 
-- 문서 상태: Living document(core 1.5.x 추적)
-- 작성일: 2026-06-16
-- 기준 버전: 1.5.x
+- 문서 상태: Living document(core 1.6.x 추적)
+- 작성일: 2026-06-18
+- 기준 버전: 1.6.x
 - 기준 브랜치: `main`
 
 ## 1. 현재 판단
@@ -14,9 +14,9 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | 구분 | 판단 | 이유 |
 |---|---|---|
 | GitHub public | 허용 | 보안 한계, threat model, shared responsibility가 문서화됨 |
-| GitHub release/tag | 허용 (`v1.5.0` 릴리스됨) | `v1.5.0`이 현재 릴리스(additive minor — 수평 확장을 위한 주입 가능한 audit/token-vault 저장소 시임); §5.7 / §5.8 항목은 모두 Resolved 유지, G9–G12는 Pass |
-| npm stable | `haechi@1.5.0` publish됨 | `1.5.0`은 `1.4.x` 기준 위에 `createAuditSink`/`createTokenVault` 저장소 시임(파일 기본값 바이트 동일)을 더한 attested OIDC publish; config/API 파괴 없음(`configVersion`은 `1` 유지) |
-| production use | 운영자 게이트; `1.5.0`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 여러 replica를 운영하는 운영자는 공유 저장소(`haechi-store-redis` 위성)를 주입해 audit 해시 체인과 token vault가 플릿 전체에서 유지되도록 해야 함 |
+| GitHub release/tag | `v1.6.0` 컷 준비됨 (태그 → attested publish) | `v1.6.0`은 additive minor — AES-GCM nonce-budget fail-closed(G13), `haechi/crypto` `readNonceBudget` export + `haechi status` 노출, 명명된 `gate:security` CI 잡; §5.7 / §5.8 항목은 모두 Resolved 유지, G9–G13는 Pass. `v1.5.0`이 직전 릴리스 |
+| npm stable | `haechi@1.6.0` (`v1.6.0` 태그에서 publish) | `1.6.0`은 `1.5.x` 기준 위에 키별 nonce-budget 가드 + 운영자 가시성을 더함; additive export만, config/API 파괴 없음(`configVersion`은 `1` 유지) |
+| production use | 운영자 게이트; `1.6.0`로 업그레이드 | 운영자 네트워크 통제, 인가/인증, key custody가 있을 때만 지원; 여러 replica를 운영하는 운영자는 공유 저장소(`haechi-store-redis` 위성)를 주입해 audit 해시 체인과 token vault가 플릿 전체에서 유지되도록 해야 함 |
 
 ## 2. 릴리스 게이트
 
@@ -35,6 +35,7 @@ Haechi는 `1.x` stable 라인을 출시했습니다. developer preview 게이트
 | G10 | 2026-06-16 코드리뷰 round 2 (CR2) 보완 게이트 | CR2 등록부(`code-review-risk-register-2026-06-16-round2.md`, §5.8)는 **P0/P1을 발견하지 못했습니다**; 세 개의 P2(`CR2-001` 프록시 upstream-cancel, `CR2-002` token-vault audit hygiene, `CR2-003` plugin IPC reply 경계)와 P3 묶음(`CR2-004..008`)이 모두 **Resolved이며 `haechi@1.3.2`로 발행되었고**(`CR2-009` won't-fix, `CR2-010` accepted) 연결된 등록부가 갱신되었습니다. | Pass (`haechi@1.3.2`, 2026-06-16) |
 | G11 | 1.4.0 signed-plugin 저작 CLI | 1.0 Ed25519 trust gate를 위한 1차 저작 CLI — `plugin-keygen`(개인키 `0600`, 공개키 = trust anchor), `plugin-sign`(정확한 entry 바이트 바인딩), `plugin-verify`(런타임 동등 검증, fail-closed, `--allow-capability`); 개인키가 stdout/audit로 유출되지 않음; 적대적 검증 완료; `plugin-signing-and-trust.md` 큐레이션 런북이 P1-SEC-025 "운영자가 앵커를 큐레이션해야 함" 잔여를 해소. additive CLI 표면(config/API 파괴 없음, `configVersion`은 `1` 유지); `tests/api-contract.test.mjs` green; 코어는 zero runtime dependency 유지; 코어 1.3.3 → 1.4.0(additive minor)로 bump. | Pass (`haechi@1.4.0`, 2026-06-17) |
 | G12 | 1.5.0 수평 확장 저장소 시임 | audit sink와 token vault가 주입 가능한 **store**를 갖게 되어, 공유 저장소가 sha256 해시 체인 + token vault를 replica 전반에서 뒷받침할 수 있음(프로세스별 / 단일 writer 플릿 한계를 해소). `createAuditSink({store})` / `createTokenVault({store})` + 기본 `createFileAuditStore`/`createFileTokenStore`; 보안에 결정적인 chaining / `sanitizeAudit` / reveal governance / retention은 코어에 남고, store는 배타적 read-previous+persist(audit) / mutate+read(vault) 프리미티브만 추상화. 적대적 검증 완료: 파일 기본값 바이트 동일, chain 연산은 이전과 diff 동일, 비파일 store에서도 시임 동작, 동시 append/tokenize가 비분기·무손실 유지, CR2-002 audit-no-plaintext 유지. 새 export는 `api-stability.md` + `tests/api-contract.test.mjs`에 frozen; `createJsonlAuditSink`/`createLocalTokenVault`는 하위호환 래퍼; 코어는 zero runtime dependency 유지; 코어 1.4.0 → 1.5.0(additive minor)로 bump. `haechi-store-redis` 위성이 운영 소비자. | Pass (`haechi@1.5.0`, 2026-06-17) |
+| G13 | 1.6.0 crypto 봉투 무결성 — nonce budget + 보안 CI 게이트 | 스코핑 결과 gap review의 "AAD canonicalization"(GAP-P0-001)은 이미 닫혀 있었음(`canonicalize`가 키 정렬; 호출마다 신규 랜덤 IV; 복호화가 AAD/변조에 fail-closed, conformance로 외부 provider에도 강제). nonce 절반(GAP-P0-002)을 닫음: 로컬 AES-256-GCM provider가 `kid`별 암호화 횟수를 세어 미리 예약한 윈도우 단위로 키 파일에 영속화(소비 전 기록 → 재시작은 과대집계, 재사용으로의 과소집계 불가)하고, 50%에서 1회 경고, **2^32에서 fail-closed**(NIST SP 800-38D §8.3)하며 `init --force` 회전을 안내. 읽기 전용 키 파일은 프로세스 단위 한도로 degrade(경고 `HAECHI_NONCE_BUDGET_NOPERSIST`); 다중 프로세스 공유는 범위 밖 잔여(단일 writer 레퍼런스 provider; 운영 custody = KMS). 운영자 가시성은 새 frozen `haechi/crypto` `readNonceBudget` export + `haechi status`(`keys.nonceBudget` 사용%). 또한 GAP-P0-012 추가: 나열된 보안 테스트가 사라지면 요란하게 실패하는, 브랜치 보호 가능한 명명된 `gate:security` CI 잡(`scripts/security-gate.mjs`)이 횡단 보안 invariant를 검사. 결합 mutation 검증(두 가드 동시 무력화 → 스위트 + 게이트 실패). 테스트: `tests/nonce-budget.test.mjs` + `ops-commands` status 단언; api-contract가 `readNonceBudget` 동결. 문서 EN+KO(threat-model §3, operations-runbook §9). core 1.5.0 → 1.6.0(additive minor); zero runtime dependency; `configVersion`은 `1` 유지. 남은 에픽 잔여 deferred: NFKC-on-AAD(v2 봉투 필요), 스트리밍 시퀀스 AAD/replay, 봉투 freshness. | Pass (컷 준비됨; `v1.6.0` 태그에서 publish) |
 
 ## 3. P0 배포 차단 리스크 상태
 

@@ -59,7 +59,7 @@ const FROZEN_EXPORTS = {
   ".": { module: coreRoot, names: ["createHaechi", "collectStringEntries", "pathToString", "safePathToString", "shapeOnly", "summarize"] },
   "./core": { module: core, names: ["createHaechi", "collectStringEntries", "pathToString", "safePathToString", "shapeOnly", "summarize"] },
   "./audit": { module: audit, names: ["createJsonlAuditSink", "createAuditSink", "createFileAuditStore", "buildIntegrityRecord", "readAuditSummary", "sanitizeAudit", "verifyAuditChain"] },
-  "./crypto": { module: crypto, names: ["createLocalCryptoProvider", "initLocalKeyFile", "assertCryptoProviderConformance", "canonicalize"] },
+  "./crypto": { module: crypto, names: ["createLocalCryptoProvider", "initLocalKeyFile", "assertCryptoProviderConformance", "canonicalize", "readNonceBudget"] },
   "./filter": { module: filter, names: ["createDefaultFilterEngine", "detectEntry"] },
   "./mcp-stdio": { module: mcpStdio, names: ["protectMcpJsonRpcMessage", "runMcpStdioFilter", "wrapMcpChild"] },
   "./plugin": { module: plugin, names: ["validatePluginManifest", "validatePluginManifestFile"] },
