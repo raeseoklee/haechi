@@ -28,7 +28,7 @@ Every `package.json` `exports` subpath and the CLI is classed. There is no silen
 | `haechi` / `haechi/core` — `createHaechi().protectJson`, `createHaechi().createStreamProtector`, `collectStringEntries`, `pathToString`, `safePathToString`, `shapeOnly`, `summarize` | **FROZEN** (breaking change = major) |
 | `haechi/runtime` — `createRuntime`, `normalizeConfig` (config shape), `defaultConfig`, `loadConfig`, `writeDefaultConfig`, `isValidPort`, `DEFAULT_CONFIG_PATH` | **FROZEN** |
 | `haechi/auth` — the `authProvider` contract, `buildIdentity`, `buildExternalIdentity`, `validateLabels`, `createBearerAuthProvider`, the token store (`readAuthStore`, `addToken`, `listTokens`, `revokeToken`), `DEFAULT_ALLOWED_LABEL_KEYS` | **FROZEN** |
-| `haechi/crypto` — the `cryptoProvider` contract, `assertCryptoProviderConformance`, `canonicalize`, `createLocalCryptoProvider`, `initLocalKeyFile` | **FROZEN** |
+| `haechi/crypto` — the `cryptoProvider` contract, `assertCryptoProviderConformance`, `canonicalize`, `createLocalCryptoProvider`, `initLocalKeyFile`, `readNonceBudget` | **FROZEN** |
 | `haechi/audit` — the audit **event schema** (§2.3), `verifyAuditChain`, `sanitizeAudit`, `createJsonlAuditSink`, `readAuditSummary`, `FORBIDDEN_KEYS`, plus the 1.5.0 injectable store seam `createAuditSink`, `createFileAuditStore`, `buildIntegrityRecord` | **FROZEN** |
 | `haechi/policy` — `buildPolicy`, `createPolicyEngine`, `createPolicyProfiles`, `validatePolicy`, `ACTION_STRENGTH` (action ordering) | **FROZEN** |
 | `haechi/filter` — `createDefaultFilterEngine`, `detectEntry`, and the **rule/detection shape** | **FROZEN** |

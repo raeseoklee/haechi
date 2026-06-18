@@ -8,7 +8,7 @@ import { signPolicyBundleFile, verifyPolicyBundleFile } from "../../policy-bundl
 import { PluginLoadError, signPluginManifest, validatePluginManifestFile, verifySignedPlugin } from "../../plugin/index.mjs";
 import { runMcpStdioFilter, wrapMcpChild } from "../../mcp-stdio/index.mjs";
 import { addToken, listTokens, revokeToken } from "../../auth/index.mjs";
-import { createLocalCryptoProvider } from "../../crypto/index.mjs";
+import { createLocalCryptoProvider, readNonceBudget } from "../../crypto/index.mjs";
 import { spawn } from "node:child_process";
 import { DEFAULT_CONFIG_PATH, createRuntime, isValidPort, loadConfig, writeDefaultConfig } from "../runtime.mjs";
 
@@ -225,6 +225,34 @@ async function statusCommand(argv) {
     }
   } catch {
     warnings.push(`key file ${config.keys.keyFile} does not exist; run haechi init`);
+  }
+
+  // Surface the local AES-GCM nonce budget so an operator can rotate BEFORE the
+  // fail-closed limit (the in-band signal; the runtime also warns at 50% on
+  // stderr). Only the local provider has a software budget — an external
+  // cryptoProvider (KMS) owns its own nonce discipline.
+  keys.nonceBudget = null;
+  if (keys.exists && config.keys.provider === "local") {
+    try {
+      const budget = await readNonceBudget(config.keys.keyFile);
+      const usedPercent = Math.round(budget.usedFraction * 1000) / 10;
+      keys.nonceBudget = {
+        kid: budget.kid,
+        used: budget.used,
+        limit: budget.limit,
+        remaining: budget.remaining,
+        usedPercent,
+        exhausted: budget.exhausted
+      };
+      if (budget.exhausted) {
+        warnings.push(`crypto key ${budget.kid} has EXHAUSTED its safe encryption budget (${budget.limit}); encryption is failing closed — rotate now with 'haechi init --force'`);
+      } else if (budget.used >= budget.warnThreshold) {
+        warnings.push(`crypto key ${budget.kid} has used ${usedPercent}% of its safe encryption budget; plan a rotation ('haechi init --force')`);
+      }
+    } catch {
+      // A malformed/active-key-less file is already surfaced by init/encrypt;
+      // do not double-warn from the status read.
+    }
   }
 
   const anchorEnabled = config.audit.anchor.mode === "file";
@@ -983,7 +1011,7 @@ const COMMAND_HELP = {
   status: {
     usage: "haechi status [--config haechi.config.json]",
     summary: "Show what is and is not protected under the current config.",
-    detail: "Prints effective policy mode, response/streaming protection, target, token vault governance, key file permissions, audit chain status, and a consolidated warnings list."
+    detail: "Prints effective policy mode, response/streaming protection, target, token vault governance, key file permissions, the local key's AES-GCM nonce budget (used %), audit chain status, and a consolidated warnings list."
   },
   proxy: {
     usage: `haechi proxy [--config haechi.config.json] [--host 127.0.0.1] [--port ${DEFAULT_PROXY_PORT}] [--allow-remote-bind]`,
