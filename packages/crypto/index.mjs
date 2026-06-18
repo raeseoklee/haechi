@@ -4,6 +4,22 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const ALG = "AES-256-GCM";
 
+// Random 96-bit GCM IVs are only safe up to a bounded number of invocations per
+// key: by the birthday bound the IV-collision probability stays negligible only
+// below ~2^32 encryptions under ONE key (NIST SP 800-38D §8.3 caps random-IV
+// invocations at 2^32). A nonce collision under AES-GCM is catastrophic (it
+// leaks the XOR of the two plaintexts and enables forgery), so the local
+// provider FAILS CLOSED at the limit rather than risk reuse — the operator must
+// rotate (`haechi init --force`). The count is persisted per-kid in the key file
+// (see reserveNonceWindow) so it survives restarts; rotation resets it.
+const MAX_ENCRYPTIONS_PER_KEY = 2 ** 32;
+const NONCE_WARN_THRESHOLD = 2 ** 31; // warn once at 50% of the budget
+// Invocations are reserved a window at a time and the window is persisted BEFORE
+// it is consumed, so a crash/restart can only OVER-count (skip an unused tail of
+// a window) — never under-count into reuse. A large window keeps the per-encrypt
+// overhead at ~one key-file write per million encryptions.
+const NONCE_RESERVE_WINDOW = 2 ** 20;
+
 // Single source of truth for parsing + validating an on-disk local key file.
 // Both the provider's loadKeys() and initLocalKeyFile() (existing-file path)
 // go through here so the 32-byte key invariant is enforced once. Throws a
@@ -50,6 +66,84 @@ export function createLocalCryptoProvider({ keyFile }) {
     return cachedKeys;
   }
 
+  // Per-process view of the active key's reserved nonce window:
+  // { kid, base, granted, used } where base is the key file's `usage` at the
+  // window start and (base + used) is the next invocation index. null until the
+  // first encrypt reserves a window.
+  let reservation = null;
+  let nonceWarned = false;
+  // Set if the key file cannot be written (e.g. read-only mount): the budget
+  // then degrades to PER-PROCESS enforcement and counts forward in memory.
+  let persistDisabled = false;
+
+  // Reserve the next window of invocations for `activeKid` by advancing the
+  // persisted `usage` BEFORE consuming it (fail-closed at the per-key limit).
+  // Read-modify-write the key file in place, preserving every other field. The
+  // local provider is the single-writer reference provider; concurrent writers
+  // sharing one key file are out of scope (production custody uses a KMS
+  // satellite) — a documented residual, not silent reuse, since reuse needs an
+  // actual IV collision and over-counting only wastes budget. If the key file is
+  // not writable, fall back to per-process counting (warned once) rather than
+  // breaking encryption on a hardened read-only mount.
+  async function reserveNonceWindow(activeKid) {
+    let current;
+    let raw = null;
+    let entry = null;
+    if (persistDisabled && reservation && reservation.kid === activeKid) {
+      // No persistence: continue counting forward from the last window in memory.
+      current = reservation.base + reservation.granted;
+    } else {
+      raw = JSON.parse(await readFile(keyFile, "utf8"));
+      entry = raw.keys?.find((k) => k.kid === activeKid);
+      if (!entry) {
+        throw new Error(`Active key ${activeKid} not found while reserving nonce budget`);
+      }
+      current = entry.usage ?? 0;
+    }
+    if (current >= MAX_ENCRYPTIONS_PER_KEY) {
+      throw new Error(
+        `local AES-256-GCM key ${activeKid} reached its safe encryption limit (${MAX_ENCRYPTIONS_PER_KEY}); rotate the key with 'haechi init --force' before encrypting more`
+      );
+    }
+    const granted = Math.min(NONCE_RESERVE_WINDOW, MAX_ENCRYPTIONS_PER_KEY - current);
+    if (!persistDisabled && entry) {
+      try {
+        entry.usage = current + granted;
+        await writeFile(keyFile, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
+      } catch (error) {
+        persistDisabled = true;
+        process.emitWarning(
+          `local AES-256-GCM nonce budget for key ${activeKid} cannot be persisted (${error?.code ?? error?.message}); enforcing the PER-PROCESS limit only — cross-restart protection is OFF, so rotate keys on a schedule`,
+          { code: "HAECHI_NONCE_BUDGET_NOPERSIST" }
+        );
+      }
+    }
+    reservation = { kid: activeKid, base: current, granted, used: 0 };
+  }
+
+  // Account one GCM encryption against the active key's nonce budget, reserving
+  // a fresh window when the current one is exhausted. Returns nothing; throws
+  // fail-closed at the limit. MUST be called before generating the IV.
+  async function consumeNonceBudget(activeKid) {
+    if (!reservation || reservation.kid !== activeKid || reservation.used >= reservation.granted) {
+      await reserveNonceWindow(activeKid);
+    }
+    const index = reservation.base + reservation.used; // 0-based invocation count
+    if (index >= MAX_ENCRYPTIONS_PER_KEY) {
+      throw new Error(
+        `local AES-256-GCM key ${activeKid} reached its safe encryption limit (${MAX_ENCRYPTIONS_PER_KEY}); rotate the key with 'haechi init --force' before encrypting more`
+      );
+    }
+    reservation.used += 1;
+    if (!nonceWarned && index >= NONCE_WARN_THRESHOLD) {
+      nonceWarned = true;
+      process.emitWarning(
+        `local AES-256-GCM key ${activeKid} has used ${index} of ${MAX_ENCRYPTIONS_PER_KEY} safe encryptions; plan a key rotation ('haechi init --force')`,
+        { code: "HAECHI_NONCE_BUDGET" }
+      );
+    }
+  }
+
   return {
     id: "haechi.crypto.local-aes-gcm",
     version: "0.1.0",
@@ -59,6 +153,9 @@ export function createLocalCryptoProvider({ keyFile }) {
     },
     async encrypt({ plaintext, aad }) {
       const { active: { kid, key } } = await loadKeys();
+      // Fail closed at the per-key random-IV invocation limit BEFORE choosing an
+      // IV, so we never generate a nonce past the safe budget (NIST SP 800-38D).
+      await consumeNonceBudget(kid);
       const iv = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", key, iv);
       const aadBytes = Buffer.from(canonicalize(aad), "utf8");

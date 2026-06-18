@@ -54,6 +54,7 @@ Haechi가 보호하려는 주요 자산은 다음과 같습니다.
 | 인증 없는 멀티 클라이언트 접근 | 로컬 프로세스가 upstream / token round-trip 경로를 무단 사용 | 선택적 bearer auth (`auth.provider: bearer`); 없거나 잘못된 경우 → 바디 읽기 전 401; identity별 rate limit 및 model allowlist |
 | Audit tail truncation | 꼬리 audit 레코드의 무음 삭제 | 추가 전용/별도 미디어의 `audit.anchor` head-hash anchoring으로 마지막 anchor까지의 절단 탐지 (0.7) |
 | Local dev key in production | 소프트웨어 키의 운영 custody 오용 | `assertCryptoProviderConformance`를 통한 외부 `cryptoProvider` 주입; reference KMS adapter (envelope 암호화) |
+| 단일 키의 GCM nonce 고갈 | 로컬 AES-256-GCM provider는 랜덤 96-bit IV를 쓰며, 한 키로 ~2^32회 암호화를 넘기면 birthday bound로 IV 충돌(GCM에 치명적 — 평문 XOR 누출 + 위조 가능) 확률이 무시할 수 없게 됨 | 로컬 provider는 **키당 2^32회 암호화에서 fail-closed**(NIST SP 800-38D §8.3) — 암호화를 거부하고 `haechi init --force` 회전을 안내. 호출 수는 kid별로 카운트되어 미리 예약한 윈도우 단위로 키 파일에 영속화되므로 재시작을 넘겨도 유지됨(과대집계는 가능, 재사용으로의 과소집계는 불가). 50%에서 1회 경고. **수용된 잔여 위험:** 읽기 전용 키 파일은 **프로세스 단위** 한도로 degrade(경고 `HAECHI_NONCE_BUDGET_NOPERSIST`)되고, 하나의 키 파일을 여러 프로세스가 공유하는 경우는 범위 밖(로컬 provider는 단일 writer 레퍼런스이며, 운영 custody는 자체 nonce 규율을 갖는 KMS 위성 사용) |
 | Tampered release artifact | 변조된 tarball 설치 | npm provenance + GitHub release tarball의 sigstore attestation + `SHA256SUMS` (0.7) |
 | audit에 원시 credentials/identity 노출 | audit 로그를 통한 token 또는 subject 유출 | Token은 keyed-HMAC 해시로만 저장; identity subject/issuer는 keyed HMAC 처리; `auth_denied` 레코드에 token 미포함 |
 | token round-trip의 타 토큰 복원 | 클라이언트/요청 간 평문 복구 | detokenization은 opt-in(`detokenizeResponses`)이며 요청 스코프: 같은 요청을 보호하며 발급된 토큰만 복원 |

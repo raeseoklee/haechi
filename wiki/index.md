@@ -14,7 +14,7 @@ Every page must be listed here with a one-line summary. Update this index on eve
 - [[fail-closed]] — the project's central design philosophy and every place it is enforced
 - [[token-vault]] — tokenization storage, reveal governance, retention, and audit trail
 - [[audit-integrity]] — JSONL hash chain, sanitization, locking, and the tail-truncation limitation
-- [[key-management]] — key file format, kid-based rotation, and domain-separated key derivation
+- [[key-management]] — key file format, kid-based rotation, domain-separated key derivation, AEAD/AAD canonicalization, and the GCM nonce-budget fail-closed
 - [[streaming-protection-gap]] — streaming inspection (0.5), the Ollama implicit-streaming trap, and non-JSON CONTENT-frame text inspection (P1-CR-005)
 - [[dashboard-audit-viewer]] — the zero-dep read-only audit viewer satellite and its security model (loopback/Host-allowlist/CSP/sessionGuard seam)
 - [[oidc-session-broker]] — the interactive OIDC session broker satellite (authorization-code + PKCE, state-first callback, shared JWS verifier, PII-safe audit, opt-in silent refresh, multi-origin IdPs, synchronous sessionStore contract)

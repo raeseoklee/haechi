@@ -263,7 +263,40 @@ your own host/IP (do not commit it). For a continuously-exercised real-backend
 gate, register a self-hosted runner on that network and trigger the suite there;
 GitHub-hosted runners cannot reach a private LAN.
 
-## 9. Quick reference
+## 9. Key rotation & the AES-256-GCM nonce budget
+
+The local AES-256-GCM crypto provider (`keys.provider: local`) encrypts every
+`encrypt`-action segment under a random 96-bit IV. Random IVs stay safe only up
+to a bounded number of encryptions per key — by the birthday bound, NIST
+SP 800-38D §8.3 caps random-IV invocations at **2^32 per key**. The provider
+enforces this automatically:
+
+- It **counts encryptions per key** (`kid`) and persists the count to the key
+  file (`keys.keyFile`) in pre-reserved windows, so the budget survives restarts.
+- At **50%** of the budget it emits a one-time process warning
+  (`code: HAECHI_NONCE_BUDGET`) — your cue to schedule a rotation.
+- At the limit it **fails closed**: `encrypt` throws and the proxy returns an
+  error rather than risk an IV collision (which would be catastrophic for GCM).
+
+**Rotate before you hit the limit** (and on your normal key-rotation cadence):
+
+```bash
+haechi init --force        # mint a fresh active key; prior keys are RETIRED, not deleted
+```
+
+`--force` retires the current key (it stays `kid`-addressable so existing
+envelopes and token-vault records still decrypt) and starts a new active key
+with a fresh budget. No envelopes are orphaned.
+
+**Read-only key file:** if `keys.keyFile` is mounted read-only, the budget cannot
+be persisted; the provider warns once (`code: HAECHI_NONCE_BUDGET_NOPERSIST`) and
+falls back to a **per-process** limit (cross-restart protection is off). Either
+leave the key file writable by the proxy, or rotate keys on a fixed schedule.
+**Production custody:** use an external `cryptoProvider` (the `haechi-crypto-kms`
+satellite) — a KMS/HSM owns its own nonce discipline and this software budget
+does not apply.
+
+## 10. Quick reference
 
 | Task | Command |
 |---|---|
