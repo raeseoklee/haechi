@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const ALG = "AES-256-GCM";
+export const CRYPTO_AAD_ENCODING_V2 = "nfkc-json-v2";
 
 // Random 96-bit GCM IVs are only safe up to a bounded number of invocations per
 // key: by the birthday bound the IV-collision probability stays negligible only
@@ -151,26 +152,32 @@ export function createLocalCryptoProvider({ keyFile }) {
       readsPlaintext: true,
       networkEgress: false
     },
-    async encrypt({ plaintext, aad }) {
+    async encrypt({ plaintext, aad, expiresAt = null }) {
       const { active: { kid, key } } = await loadKeys();
       // Fail closed at the per-key random-IV invocation limit BEFORE choosing an
       // IV, so we never generate a nonce past the safe budget (NIST SP 800-38D).
       await consumeNonceBudget(kid);
       const iv = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", key, iv);
-      const aadBytes = Buffer.from(canonicalize(aad), "utf8");
+      const aadBytes = Buffer.from(canonicalizeCryptoAad(aad), "utf8");
       cipher.setAAD(aadBytes);
       const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
       const tag = cipher.getAuthTag();
-      return {
-        v: 1,
+      const envelope = {
+        v: 2,
         alg: ALG,
         kid,
         iv: iv.toString("base64url"),
         ct: ciphertext.toString("base64url"),
         tag: tag.toString("base64url"),
-        aadHash: sha256(aadBytes)
+        aadHash: sha256(aadBytes),
+        aadEncoding: CRYPTO_AAD_ENCODING_V2,
+        createdAt: new Date().toISOString()
       };
+      if (expiresAt !== null && expiresAt !== undefined) {
+        envelope.expiresAt = normalizeEnvelopeExpiry(expiresAt);
+      }
+      return envelope;
     },
     // Keyed hash over a domain-separated derived key. The raw stored key is an
     // AES-256-GCM key and must never be used for HMAC directly; every use case
@@ -189,12 +196,13 @@ export function createLocalCryptoProvider({ keyFile }) {
       if (envelope.alg && envelope.alg !== ALG) {
         throw new Error(`Unsupported local crypto algorithm: ${envelope.alg}`);
       }
+      assertEnvelopeFresh(envelope);
       const selected = envelope.kid ? byKid.get(envelope.kid) : active;
       if (!selected) {
         throw new Error(`Unknown key id in envelope: ${envelope.kid}`);
       }
       const { key } = selected;
-      const aadBytes = Buffer.from(canonicalize(aad), "utf8");
+      const aadBytes = Buffer.from(canonicalizeAadForEnvelope(envelope, aad), "utf8");
       if (envelope.aadHash && envelope.aadHash !== sha256(aadBytes)) {
         throw new Error("AAD hash mismatch");
       }
@@ -395,6 +403,61 @@ export function canonicalize(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+export function canonicalizeCryptoAad(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalizeCryptoAad(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const seen = new Set();
+    const entries = [];
+    for (const key of Object.keys(value)) {
+      const normalizedKey = key.normalize("NFKC");
+      if (seen.has(normalizedKey)) {
+        throw new Error(`crypto AAD NFKC key collision: ${JSON.stringify(normalizedKey)}`);
+      }
+      seen.add(normalizedKey);
+      entries.push(`${JSON.stringify(normalizedKey)}:${canonicalizeCryptoAad(value[key])}`);
+    }
+    return `{${entries.sort().join(",")}}`;
+  }
+  if (typeof value === "string") {
+    return JSON.stringify(value.normalize("NFKC"));
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalizeAadForEnvelope(envelope, aad) {
+  if (envelope.aadEncoding && envelope.aadEncoding !== CRYPTO_AAD_ENCODING_V2) {
+    throw new Error(`Unsupported crypto AAD encoding: ${envelope.aadEncoding}`);
+  }
+  if (envelope.aadEncoding === CRYPTO_AAD_ENCODING_V2 || envelope.v === 2) {
+    return canonicalizeCryptoAad(aad);
+  }
+  return canonicalize(aad);
+}
+
+function normalizeEnvelopeExpiry(expiresAt) {
+  const iso = expiresAt instanceof Date ? expiresAt.toISOString() : String(expiresAt);
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) {
+    throw new Error("crypto envelope expiresAt must be a valid timestamp");
+  }
+  return new Date(ts).toISOString();
+}
+
+function assertEnvelopeFresh(envelope) {
+  if (!envelope.expiresAt) {
+    return;
+  }
+  const expiresAt = Date.parse(envelope.expiresAt);
+  if (!Number.isFinite(expiresAt)) {
+    throw new Error("crypto envelope expiresAt is invalid");
+  }
+  if (Date.now() >= expiresAt) {
+    throw new Error("Crypto envelope expired");
+  }
 }
 
 function sha256(value) {

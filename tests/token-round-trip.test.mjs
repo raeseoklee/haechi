@@ -66,6 +66,19 @@ test("random tokenization stays the default", async () => {
   assert.notEqual(tokenOf(first), tokenOf(second));
 });
 
+test("token-vault ciphertext envelope is freshness-bound to the token retention window", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "haechi-token-freshness-"));
+  const runtime = await makeRuntime(dir, { retentionDays: 1 });
+
+  const result = await runtime.haechi.protectJson({ message: "minji.kim@example.com" });
+  const token = tokenOf(result);
+  const vault = JSON.parse(await readFile(join(dir, ".haechi", "token-vault.json"), "utf8"));
+  const record = vault.tokens[token];
+
+  assert.ok(record.expiresAt, "token record must carry an expiry");
+  assert.equal(record.envelope.expiresAt, record.expiresAt);
+});
+
 test("a different derived key produces different deterministic tokens", async () => {
   const dirA = await mkdtemp(join(tmpdir(), "haechi-det-key-a-"));
   const dirB = await mkdtemp(join(tmpdir(), "haechi-det-key-b-"));

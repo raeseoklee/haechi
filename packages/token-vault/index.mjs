@@ -229,6 +229,7 @@ export function createTokenVault({
         }
 
         const createdAt = new Date();
+        const expiresAt = addDays(createdAt, retentionDays).toISOString();
         const aad = {
           purpose: "token-vault",
           token,
@@ -238,9 +239,9 @@ export function createTokenVault({
         view.set(token, {
           type,
           createdAt: createdAt.toISOString(),
-          expiresAt: addDays(createdAt, retentionDays).toISOString(),
+          expiresAt,
           metadata: sanitizeMetadata(metadata),
-          envelope: await cryptoProvider.encrypt({ plaintext, aad }),
+          envelope: await cryptoProvider.encrypt({ plaintext, aad, expiresAt }),
           aad
         });
         return { token, type };

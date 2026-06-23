@@ -1,6 +1,6 @@
 # Haechi Shared Responsibility
 
-- 문서 상태: Living document (core 1.5.x 추적)
+- 문서 상태: Living document (core 1.7.x 추적)
 - 작성일: 2026-06-10
 
 ## 1. 책임 매트릭스

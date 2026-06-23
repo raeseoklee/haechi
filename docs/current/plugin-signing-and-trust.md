@@ -1,6 +1,6 @@
 # Plugin Signing & Trust-Anchor Curation
 
-- Status: Living document (tracks core 1.5.x)
+- Status: Living document (tracks core 1.7.x)
 - Date: 2026-06-17
 
 Haechi's default is **dependency injection** — you pass an `authProvider` to

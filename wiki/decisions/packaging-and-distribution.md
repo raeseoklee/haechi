@@ -24,12 +24,12 @@ Single npm package `haechi` (unscoped), zero runtime dependencies, subpath expor
 
 | Satellite | Version | Core peer range | Runtime deps | Concept | Tag glob |
 |---|---|---|---|---|---|
-| `haechi-crypto-kms` | `0.2.1` | `>=0.8.0 <2.0.0` | zero (optional peers for AWS/GCP/Azure SDKs) | [[key-management]] | `crypto-kms-v<semver>` |
-| `haechi-auth-jwt` | `0.2.1` | `>=0.8.0 <2.0.0` | zero | [[identity-and-auth]] | `auth-jwt-v<semver>` |
-| `haechi-auth-oidc` | `0.1.2` | `>=0.8.0 <2.0.0` (+ `haechi-auth-jwt >=0.2.0 <2.0.0`) | zero | [[oidc-session-broker]] | `auth-oidc-v<semver>` |
-| `haechi-dashboard` | `0.1.2` | `>=0.8.0 <2.0.0` | zero | [[dashboard-audit-viewer]] | `dashboard-v<semver>` |
+| `haechi-crypto-kms` | `0.3.0` | `>=1.7.0 <2.0.0` | zero (optional peers for AWS/GCP/Azure SDKs) | [[key-management]] | `crypto-kms-v<semver>` |
+| `haechi-auth-jwt` | `0.3.0` | `>=0.8.0 <2.0.0` | zero | [[identity-and-auth]] | `auth-jwt-v<semver>` |
+| `haechi-auth-oidc` | `0.2.0` | `>=0.8.0 <2.0.0` (+ `haechi-auth-jwt >=0.3.0 <2.0.0`) | zero | [[oidc-session-broker]] | `auth-oidc-v<semver>` |
+| `haechi-dashboard` | `0.2.0` | `>=0.8.0 <2.0.0` | zero | [[dashboard-audit-viewer]] | `dashboard-v<semver>` |
 
-All four peer ranges widened to `<2.0.0` in PR0 (#46) so core `1.0.0` keeps installing against them; the `check-satellite-peer-ranges.mjs` preflight gate enforces it going forward. Each satellite has its own per-package publish workflow (`.github/workflows/<name>-publish.yml`), guarded `if: startsWith(tag, '<prefix>-v')` + a strict `^<prefix>-v[0-9]+\.[0-9]+\.[0-9]+$` regex + tag-version-must-equal-package-version, so the four workflows (and core's `v*`) never cross-fire.
+All four peer upper bounds widened to `<2.0.0` in PR0 (#46) so core `1.0.0` keeps installing against them; later satellites may raise their lower bound when they import a newer frozen core export (for example `haechi-crypto-kms@0.3.0` requires core 1.7.0 for `canonicalizeCryptoAad`). The `check-satellite-peer-ranges.mjs` preflight gate enforces that the in-repo core version satisfies every satellite range. Each satellite has its own per-package publish workflow (`.github/workflows/<name>-publish.yml`), guarded `if: startsWith(tag, '<prefix>-v')` + a strict `^<prefix>-v[0-9]+\.[0-9]+\.[0-9]+$` regex + tag-version-must-equal-package-version, so the four workflows (and core's `v*`) never cross-fire.
 
 ### 0.9 satellite additions
 
