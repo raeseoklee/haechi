@@ -1,6 +1,6 @@
 # Haechi Threat Model
 
-- 문서 상태: Living document(core 1.5.x 추적)
+- 문서 상태: Living document(core 1.7.x 추적)
 - 작성일: 2026-06-10
 
 ## 1. 보호 대상
@@ -13,7 +13,7 @@ Haechi가 보호하려는 주요 자산은 다음과 같습니다.
 | Tool/resource result | MCP result, local inference response | 응답 내 PII/secret 재유출 차단 |
 | TokenVault record | tokenized PII mapping | 저장 시 암호화, reveal 기본 차단 |
 | Audit event | detection metadata, decision summary | 평문 비포함, hash chain 무결성 |
-| Crypto envelope | encrypted segments | canonical AAD binding, key provider 교체성 |
+| Crypto envelope | encrypted segments | versioned NFKC AAD binding, 제공된 경우 freshness, key provider 교체성 |
 | Plugin manifest | custom provider/filter declaration | capability disclosure, dynamic runtime 차단 |
 
 ## 2. 신뢰 경계
@@ -55,6 +55,7 @@ Haechi가 보호하려는 주요 자산은 다음과 같습니다.
 | Audit tail truncation | 꼬리 audit 레코드의 무음 삭제 | 추가 전용/별도 미디어의 `audit.anchor` head-hash anchoring으로 마지막 anchor까지의 절단 탐지 (0.7) |
 | Local dev key in production | 소프트웨어 키의 운영 custody 오용 | `assertCryptoProviderConformance`를 통한 외부 `cryptoProvider` 주입; reference KMS adapter (envelope 암호화) |
 | 단일 키의 GCM nonce 고갈 | 로컬 AES-256-GCM provider는 랜덤 96-bit IV를 쓰며, 한 키로 ~2^32회 암호화를 넘기면 birthday bound로 IV 충돌(GCM에 치명적 — 평문 XOR 누출 + 위조 가능) 확률이 무시할 수 없게 됨 | 로컬 provider는 **키당 2^32회 암호화에서 fail-closed**(NIST SP 800-38D §8.3) — 암호화를 거부하고 `haechi init --force` 회전을 안내. 호출 수는 kid별로 카운트되어 미리 예약한 윈도우 단위로 키 파일에 영속화되므로 재시작을 넘겨도 유지됨(과대집계는 가능, 재사용으로의 과소집계는 불가). 50%에서 1회 경고. **수용된 잔여 위험:** 읽기 전용 키 파일은 **프로세스 단위** 한도로 degrade(경고 `HAECHI_NONCE_BUDGET_NOPERSIST`)되고, 하나의 키 파일을 여러 프로세스가 공유하는 경우는 범위 밖(로컬 provider는 단일 writer 레퍼런스이며, 운영 custody는 자체 nonce 규율을 갖는 KMS 위성 사용) |
+| Unicode AAD spoofing 또는 stale ciphertext replay | full-width key/value, compatibility 문자 등 시각적으로 동등한 Unicode AAD로 복호화 context를 흔들거나, retention 이후에도 stale token-vault ciphertext가 복호화될 수 있음 | 새 crypto envelope는 `v:2`, `aadEncoding:"nfkc-json-v2"`를 사용합니다. `canonicalizeCryptoAad()`가 string value와 object key를 NFKC 정규화한 뒤 정렬 canonical JSON으로 해시하며, legacy v1 envelope는 하위호환을 위해 기존 canonicalization으로 계속 복호화됩니다. 같은 object level의 NFKC key collision은 조용히 합치지 않고 fail-closed합니다. Envelope는 `expiresAt`를 가질 수 있고 local/KMS provider가 만료 envelope를 거부합니다. Token-vault ciphertext는 token `expiresAt`를 envelope에 묶어 vault retention check에 더한 방어층을 둡니다. **잔여:** streaming transform은 아직 독립 복호화 가능한 stream envelope를 만들지 않으므로 stream sequence AAD / replay cache는 후속입니다 |
 | Tampered release artifact | 변조된 tarball 설치 | npm provenance + GitHub release tarball의 sigstore attestation + `SHA256SUMS` (0.7) |
 | audit에 원시 credentials/identity 노출 | audit 로그를 통한 token 또는 subject 유출 | Token은 keyed-HMAC 해시로만 저장; identity subject/issuer는 keyed HMAC 처리; `auth_denied` 레코드에 token 미포함 |
 | token round-trip의 타 토큰 복원 | 클라이언트/요청 간 평문 복구 | detokenization은 opt-in(`detokenizeResponses`)이며 요청 스코프: 같은 요청을 보호하며 발급된 토큰만 복원 |

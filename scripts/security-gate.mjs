@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SUITE = [
-  ["tests/crypto.test.mjs", "AAD binding + AEAD tamper rejection + key rotation/kid selection"],
+  ["tests/crypto.test.mjs", "AAD binding + v2 NFKC AAD + AEAD tamper rejection + key rotation/kid selection + freshness"],
   ["tests/nonce-budget.test.mjs", "per-key random-IV invocation limit fails closed (no GCM nonce reuse)"],
   ["tests/audit-plugin-forbidden-keys.test.mjs", "no plaintext/secret/PII in audit (FORBIDDEN_KEYS), plugin path"],
   ["tests/audit-sanitize.test.mjs", "audit event sanitization (no raw payload/prompt values)"],

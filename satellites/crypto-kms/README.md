@@ -6,12 +6,12 @@ A KMS-backed `cryptoProvider` for Haechi's `keys.provider: external` path. It li
 
 Envelope encryption: each `encrypt` generates a fresh AES-256-GCM **data key**, encrypts the plaintext locally, and **wraps the data key with the KMS**. The KMS master key never leaves the KMS. `decrypt` unwraps the data key via the KMS and decrypts locally. `hmac` derives a per-domain key from the KMS, preserving Haechi's domain-separation discipline (tokens, identity, policy bundles).
 
-The envelope matches Haechi's contract (`v, alg, kid, iv, ct, tag, aadHash`) plus a `wrappedKey`. AAD is canonicalized with `canonicalize` imported directly from `haechi/crypto` (no local copy), so it is byte-for-byte identical to the core provider's AAD and passes `assertCryptoProviderConformance`.
+The envelope matches Haechi's contract (`v, alg, kid, iv, ct, tag, aadHash`) plus a `wrappedKey`. New envelopes use `v:2` and `aadEncoding:"nfkc-json-v2"`; AAD is canonicalized with `canonicalizeCryptoAad` imported directly from `haechi/crypto` (no local copy), so it is byte-for-byte identical to the core provider's NFKC AAD and passes `assertCryptoProviderConformance`. Legacy v1 envelopes remain decryptable through the old canonical AAD path.
 
 ## Install
 
 ```sh
-npm install haechi haechi-crypto-kms        # peer: haechi >=0.8.0 <2.0.0
+npm install haechi haechi-crypto-kms        # peer: haechi >=1.7.0 <2.0.0
 ```
 
 **`haechi` (the core) must be installed** — it is a peer dependency, not bundled. The satellite reuses your installed `haechi` instance (declared as a peer dependency), so there is a single crypto/identity surface.

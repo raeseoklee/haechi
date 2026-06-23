@@ -229,7 +229,7 @@ JWT/JWKS 인증과 KMS 기반 key custody(및 기타 선택 기능)는 **`haechi
 
 ## 위성 패키지
 
-선택 기능은 **npm에 독립 발행되는 `haechi-*` 패키지**로 제공됩니다 — 각각 core와 별도로 버저닝되고, 기본적으로 `node:` 전용이며(KMS나 Redis 클라이언트 같은 무거운 SDK는 optional peer), `haechi` peer 범위를 `>=0.8.0 <2.0.0`으로 선언합니다(상한이 core major를 따라가므로 core minor가 위성 설치를 깨뜨리지 않습니다).
+선택 기능은 **npm에 독립 발행되는 `haechi-*` 패키지**로 제공됩니다 — 각각 core와 별도로 버저닝되고, 기본적으로 `node:` 전용이며(KMS나 Redis 클라이언트 같은 무거운 SDK는 optional peer), core major를 추적하는 `haechi` peer 범위를 선언합니다. 대부분의 위성은 `>=0.8.0 <2.0.0`를 유지하고, `haechi-crypto-kms@0.3.0`은 core v2 crypto-AAD helper를 공유하므로 `>=1.7.0 <2.0.0`을 요구합니다.
 
 **위성과 함께 core를 반드시 설치하세요** — `haechi`는 **번들되지 않은 peer dependency**이므로, 위성만으로는 동작하지 않습니다:
 
@@ -383,3 +383,5 @@ Haechi는 의도적으로 범위를 좁혔습니다. 아래는 숨기지 않고 
 1.5.0은 **fleet-readiness** 트랙을 시작합니다. audit sink와 token vault가 주입 가능한 **store 시임**(`createAuditSink({ store })` / `createTokenVault({ store })` + 기본 `createFileAuditStore`/`createFileTokenStore`)을 갖게 되어, 공유 저장소가 sha256 audit 해시 체인과 token vault를 **여러 replica** 전반에서 뒷받침할 수 있습니다 — [Known limitations](#known-limitations)에서 짚은 프로세스별 / 단일 writer 한계를 해소합니다. 파일 기반 기본값은 바이트 동일하고 `createJsonlAuditSink`/`createLocalTokenVault`는 하위호환 래퍼로 유지됩니다. `haechi-store-redis` 위성(두 시임의 Redis 어댑터)이 운영 소비자입니다. additive(**마이너**); `configVersion`은 `1` 유지; core는 zero runtime dependency 유지.
 
 1.6.0은 **crypto 봉투**를 강화합니다. 로컬 AES-256-GCM provider가 이제 키별 nonce 예산을 강제합니다 — 랜덤 96-bit IV는 키당 한정된 횟수의 암호화까지만 안전하므로(NIST SP 800-38D §8.3), provider가 키별 암호화 횟수를 세어 키 파일에 영속화하고, 50%에서 경고하며, **한도에서 fail-closed**(`haechi init --force`로 회전)합니다. 읽기 전용 키 파일은 프로세스 단위 한도로 degrade합니다. `haechi status`가 예산을 노출하고(`keys.nonceBudget`, 사용 %), `haechi/crypto`는 `readNonceBudget`를 export합니다. 명명된 `gate:security` CI 잡이 횡단 보안 invariant(audit 평문 없음, hard-block 비억제, AAD/AEAD 바인딩, nonce 예산, privacy-profile strengthen-only)를 독립 required check로 실행합니다. additive(**마이너**); `configVersion`은 `1` 유지; core는 zero runtime dependency 유지.
+
+1.7.0은 다음 crypto-envelope hardening 단계를 닫습니다. 새 envelope는 `v:2`, `aadEncoding:"nfkc-json-v2"`를 사용하므로 crypto AAD가 NFKC-normalized string value/object key를 포함한 정렬 canonical JSON(`canonicalizeCryptoAad`)으로 고정됩니다. Legacy v1 envelope는 기존 AAD canonicalization으로 계속 복호화됩니다. NFKC 때문에 같은 object level에서 key collision이 생기면 fail-closed하고, token-vault ciphertext는 token `expiresAt`를 envelope에 담아 stale ciphertext를 crypto 계층에서도 거부합니다. `haechi-crypto-kms@0.3.0`도 같은 core helper를 사용하며 `haechi >=1.7.0`를 요구합니다. additive(**마이너**); `configVersion`은 `1` 유지; core는 zero runtime dependency 유지.

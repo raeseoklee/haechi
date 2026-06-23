@@ -10,7 +10,8 @@ import {
   createLocalCryptoProvider,
   initLocalKeyFile,
   assertCryptoProviderConformance,
-  canonicalize
+  CRYPTO_AAD_ENCODING_V2,
+  canonicalizeCryptoAad
 } from "haechi/crypto";
 import { createRuntime } from "haechi/runtime";
 import { createKmsCryptoProvider, createInMemoryKms } from "./index.mjs";
@@ -31,9 +32,10 @@ test("the reference KMS provider passes conformance", async () => {
 
 test("the satellite binds AAD identically to core's own local provider (cross-impl parity)", async () => {
   // NOT tautological: the KMS satellite and core's local provider are SEPARATE
-  // implementations. Both derive aadHash from core's canonicalize, so for the
-  // same AAD their aadHash must be equal — a re-inlined or divergent canonicalize
-  // in the satellite would break this. We also pin the exact expected value.
+  // implementations. Both derive aadHash from core's crypto-AAD canonicalizer, so
+  // for the same AAD their aadHash must be equal — a re-inlined or divergent
+  // canonicalizer in the satellite would break this. We also pin the exact
+  // expected value.
   const { createHash } = await import("node:crypto");
   const dir = await mkdtemp(join(tmpdir(), "haechi-parity-"));
   const keyFile = join(dir, ".haechi", "dev.keys.json");
@@ -41,15 +43,28 @@ test("the satellite binds AAD identically to core's own local provider (cross-im
   const local = createLocalCryptoProvider({ keyFile });
   const kms = createKmsCryptoProvider({ kms: createInMemoryKms() });
 
-  const aad = { purpose: "tokenize", path: "messages[1].content", type: "email", nested: { b: 2, a: [3, 1] } };
+  const aad = { purpose: "tokenize", "ｐａｔｈ": "messages[1].content", type: "ｅｍａｉｌ", nested: { b: 2, a: [3, 1] } };
   const localEnv = await local.encrypt({ plaintext: "drift@example.com", aad });
   const kmsEnv = await kms.encrypt({ plaintext: "drift@example.com", aad });
 
   // cross-implementation parity
   assert.equal(kmsEnv.aadHash, localEnv.aadHash);
+  assert.equal(kmsEnv.v, 2);
+  assert.equal(kmsEnv.aadEncoding, CRYPTO_AAD_ENCODING_V2);
   // and the exact canonical value
-  const expected = createHash("sha256").update(Buffer.from(canonicalize(aad), "utf8")).digest("base64url");
+  const expected = createHash("sha256").update(Buffer.from(canonicalizeCryptoAad(aad), "utf8")).digest("base64url");
   assert.equal(kmsEnv.aadHash, expected);
+  assert.equal(await kms.decrypt({
+    envelope: kmsEnv,
+    aad: { purpose: "tokenize", path: "messages[1].content", type: "email", nested: { b: 2, a: [3, 1] } }
+  }), "drift@example.com");
+  await assert.rejects(
+    () => kms.decrypt({
+      envelope: { ...kmsEnv, aadEncoding: "unknown-json-v99" },
+      aad: { purpose: "tokenize", path: "messages[1].content", type: "email", nested: { b: 2, a: [3, 1] } }
+    }),
+    /Unsupported crypto AAD encoding/
+  );
 });
 
 test("conformance flags a provider missing hmac (and passes with requireHmac:false)", async () => {

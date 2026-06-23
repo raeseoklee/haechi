@@ -1,6 +1,6 @@
 # Haechi Threat Model
 
-- Status: Living document (tracks core 1.5.x)
+- Status: Living document (tracks core 1.7.x)
 - Date: 2026-06-10
 
 ## 1. Assets Under Protection
@@ -13,7 +13,7 @@ The primary assets Haechi protects are:
 | Tool/resource result | MCP result, local inference response | Prevent re-leakage of PII/secrets in responses |
 | TokenVault record | tokenized PII mapping | Encrypted at rest, reveal blocked by default |
 | Audit event | detection metadata, decision summary | No plaintext content, hash chain integrity |
-| Crypto envelope | encrypted segments | Canonical AAD binding, swappable key provider |
+| Crypto envelope | encrypted segments | Versioned NFKC AAD binding, freshness where supplied, swappable key provider |
 | Plugin manifest | custom provider/filter declaration | Capability disclosure, dynamic runtime blocked |
 
 ## 2. Trust Boundaries
@@ -55,6 +55,7 @@ The primary assets Haechi protects are:
 | Audit tail truncation | Silent deletion of trailing audit records | `audit.anchor` head-hash anchoring on append-only/separate media detects truncation back to the last anchor (0.7) |
 | Local dev key in production | Software key misused as production custody | External `cryptoProvider` injection with `assertCryptoProviderConformance`; reference KMS adapter (envelope encryption) |
 | GCM nonce exhaustion under one key | The local AES-256-GCM provider uses random 96-bit IVs; past ~2^32 encryptions under one key the birthday bound makes an IV collision (catastrophic for GCM — leaks plaintext XOR + enables forgery) non-negligible | The local provider **fails closed at 2^32 encryptions per key** (NIST SP 800-38D §8.3) — it refuses to encrypt and instructs `haechi init --force` to rotate. Invocations are counted per-kid, persisted to the key file in pre-reserved windows so the count survives restarts (over-counts, never under-counts into reuse); a one-time warning fires at 50%. **Accepted residual:** a read-only key file degrades to a per-PROCESS limit (warned, `HAECHI_NONCE_BUDGET_NOPERSIST`) and multiple processes sharing one key file are out of scope (the local provider is the single-writer reference; production custody uses a KMS satellite that owns its own nonce discipline) |
+| Unicode AAD spoofing or stale ciphertext replay | A caller uses visually equivalent Unicode in AAD (full-width keys/values, compatibility characters) to destabilize decryption context, or a stale token-vault ciphertext remains decryptable after retention | New crypto envelopes are `v:2` with `aadEncoding:"nfkc-json-v2"`: `canonicalizeCryptoAad()` NFKC-normalizes string values and object keys before sorted canonical JSON hashing, while legacy v1 envelopes keep the old canonicalization for backward decrypt. NFKC key collisions at one object level fail closed. Envelopes may carry `expiresAt`; local and KMS providers reject expired envelopes. Token-vault ciphertext now binds its token `expiresAt` into the envelope as defense-in-depth. **Residual:** stream sequence AAD / replay cache is still deferred because streaming transforms do not create independently decryptable stream envelopes |
 | Tampered release artifact | Modified tarball installed | npm provenance + sigstore attestation of the GitHub release tarball + `SHA256SUMS` (0.7) |
 | Raw credentials/identity in audit | Token or subject leak through the audit log | Tokens stored only as keyed-HMAC hashes; identity subject/issuer are keyed HMAC; `auth_denied` records no token |
 | Token round-trip restoring foreign tokens | Cross-client/request plaintext recovery | Detokenization is opt-in (`detokenizeResponses`) and request-scoped: only tokens issued while protecting the same request are restored |

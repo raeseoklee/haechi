@@ -11,10 +11,10 @@
 // and set keys.provider: "external".
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes } from "node:crypto";
-// Import the canonical AAD form from core (resolved via the workspace symlink in
-// dev, the consumer's installed `haechi` in production) so this satellite's AAD
-// is byte-for-byte identical to the core provider's — no drift.
-import { canonicalize } from "haechi/crypto";
+// Import the crypto-envelope AAD form from core (resolved via the workspace
+// symlink in dev, the consumer's installed `haechi` in production) so this
+// satellite's AAD is byte-for-byte identical to the core provider's — no drift.
+import { CRYPTO_AAD_ENCODING_V2, canonicalizeCryptoAad, canonicalize } from "haechi/crypto";
 
 const ALG = "AES-256-GCM";
 const HMAC_KEY_DOMAIN = "haechi:crypto-kms:hmac-root:v1";
@@ -45,30 +45,37 @@ export function createKmsCryptoProvider({ kms }) {
       networkEgress: true,   // a real KMS adapter calls out to the KMS
       keyCustody: "external-kms"
     },
-    async encrypt({ plaintext, aad }) {
+    async encrypt({ plaintext, aad, expiresAt = null }) {
       const dataKey = randomBytes(32);
       const iv = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", dataKey, iv);
-      const aadBytes = Buffer.from(canonicalize(aad), "utf8");
+      const aadBytes = Buffer.from(canonicalizeCryptoAad(aad), "utf8");
       cipher.setAAD(aadBytes);
       const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
       const tag = cipher.getAuthTag();
-      return {
-        v: 1,
+      const envelope = {
+        v: 2,
         alg: ALG,
         kid: kms.keyId,
         iv: iv.toString("base64url"),
         ct: ciphertext.toString("base64url"),
         tag: tag.toString("base64url"),
         wrappedKey: await kms.wrap(dataKey),
-        aadHash: sha256(aadBytes)
+        aadHash: sha256(aadBytes),
+        aadEncoding: CRYPTO_AAD_ENCODING_V2,
+        createdAt: new Date().toISOString()
       };
+      if (expiresAt !== null && expiresAt !== undefined) {
+        envelope.expiresAt = normalizeEnvelopeExpiry(expiresAt);
+      }
+      return envelope;
     },
     async decrypt({ envelope, aad }) {
       if (envelope.alg && envelope.alg !== ALG) {
         throw new Error(`Unsupported algorithm: ${envelope.alg}`);
       }
-      const aadBytes = Buffer.from(canonicalize(aad), "utf8");
+      assertEnvelopeFresh(envelope);
+      const aadBytes = Buffer.from(canonicalizeAadForEnvelope(envelope, aad), "utf8");
       if (envelope.aadHash && envelope.aadHash !== sha256(aadBytes)) {
         throw new Error("AAD hash mismatch");
       }
@@ -90,6 +97,38 @@ export function createKmsCryptoProvider({ kms }) {
       return createHmac("sha256", derived).update(data).digest("hex");
     }
   };
+}
+
+function canonicalizeAadForEnvelope(envelope, aad) {
+  if (envelope.aadEncoding && envelope.aadEncoding !== CRYPTO_AAD_ENCODING_V2) {
+    throw new Error(`Unsupported crypto AAD encoding: ${envelope.aadEncoding}`);
+  }
+  if (envelope.aadEncoding === CRYPTO_AAD_ENCODING_V2 || envelope.v === 2) {
+    return canonicalizeCryptoAad(aad);
+  }
+  return canonicalize(aad);
+}
+
+function normalizeEnvelopeExpiry(expiresAt) {
+  const iso = expiresAt instanceof Date ? expiresAt.toISOString() : String(expiresAt);
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) {
+    throw new Error("crypto envelope expiresAt must be a valid timestamp");
+  }
+  return new Date(ts).toISOString();
+}
+
+function assertEnvelopeFresh(envelope) {
+  if (!envelope.expiresAt) {
+    return;
+  }
+  const expiresAt = Date.parse(envelope.expiresAt);
+  if (!Number.isFinite(expiresAt)) {
+    throw new Error("crypto envelope expiresAt is invalid");
+  }
+  if (Date.now() >= expiresAt) {
+    throw new Error("Crypto envelope expired");
+  }
 }
 
 // In-memory stand-in for AWS KMS / Vault — for examples and tests only. A real
